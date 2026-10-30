@@ -123,6 +123,48 @@ check('rename', r.status === 200);
 r = await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-dir' } });
 check('trash moves folder', r.status === 200 && /trash/.test(r.body.trashed));
 
+// 6b. credshare: the sequence is captured server-side and exposed per shell.
+const credOut = await new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws/shell/smoke?cols=100&rows=30`, { headers: { cookie, origin: BASE } });
+    let buf = '';
+    const t = setTimeout(() => { ws.close(); resolve(buf); }, 25000);
+    ws.on('message', (d, isBinary) => { if (!isBinary) { try { const m = JSON.parse(d.toString('utf8')); if (m.type === 'cred' && m.id) buf += `<<CRED-PUSH ${m.id}>>`; } catch { /* ignore */ } } });
+    ws.on('open', () => setTimeout(() => ws.send(JSON.stringify({ type: 'input', data: `credshare --title "Smoke login" --user alice --pass "$(echo ${Buffer.from(`p@ss-${marker}`).toString('base64')} | base64 -d)" --url https://example.com/login; echo END-$((40+2))-${marker}\r` })), 2500));
+    ws.on('message', (d, isBinary) => { if (isBinary) buf += d.toString('utf8'); if (buf.includes(`END-42-${marker}`)) { clearTimeout(t); ws.close(); resolve(buf); } });
+    ws.on('error', reject);
+});
+check('credshare announces the card (OSC or pushed frame) with a value-free confirmation', (credOut.includes('\x1b]777;porthole-cred;') || credOut.includes('<<CRED-PUSH ')) && credOut.includes('shared to the phone') && !credOut.includes('not registered') && !credOut.replace(/\x1b\]777;porthole-cred;[A-Za-z0-9+/=]+(?:\x07|\x1b\\)/g, '').includes(`p@ss-${marker}`), credOut.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').slice(-200));
+// Registration does not need an attached terminal: share from a fully detached shell via tmux send-keys.
+await call('/api/shells/smoke-detached', { method: 'DELETE' }).catch(() => {});
+await call('/api/shells', { method: 'POST', body: { name: 'smoke-detached', kind: 'shell', cwd: '.' } });
+await sleep(1500);
+{ const { execFileSync } = await import('node:child_process'); execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-detached:', '-l', `credshare --title "Detached ${marker}" --secret key=abc-${marker} --port 8099\n`]); }
+let detachedFound = false;
+for (let i = 0; i < 20 && !detachedFound; i++) { await sleep(1000); detachedFound = (await call('/api/creds')).body.some(c => c.title === `Detached ${marker}` && c.port === 8099); }
+check('credshare registers without any terminal attached', detachedFound);
+await call('/api/shells/smoke-detached', { method: 'DELETE' });
+for (const c of (await call('/api/creds')).body.filter(c => c.title === `Detached ${marker}`)) await call(`/api/creds/${c.id}`, { method: 'DELETE' });
+r = await call('/api/shells/smoke/creds');
+check('shared credentials available per shell', r.status === 200 && r.body.length >= 1 && r.body[0].title === 'Smoke login' && r.body[0].fields.some(f => f.label === 'Password' && f.secret && f.value === `p@ss-${marker}`), JSON.stringify(r.body[0] || null).slice(0, 160));
+r = await call('/api/creds');
+check('shared credentials listed globally without values', r.status === 200 && r.body.some(c => c.title === 'Smoke login' && c.fields.every(f => f.value === undefined)));
+const scId = r.body.find(c => c.title === 'Smoke login')?.id;
+r = await call(`/api/creds/${scId}/values`, { method: 'POST' });
+check('shared credential values on explicit request', r.status === 200 && r.body.fields.some(f => f.value === `p@ss-${marker}`));
+r = await call(`/api/creds/${scId}`, { method: 'DELETE' });
+check('shared credential can be forgotten', r.status === 200);
+
+// 6c. Scratch shells: folder created under ~/scratch, deleted when the shell ends.
+await call('/api/shells/smoke-scratch', { method: 'DELETE' }).catch(() => {});
+r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-scratch', kind: 'shell', scratch: true } });
+check('scratch shell created in ~/scratch', r.status === 201 && /\/scratch\//.test(r.body.cwd), JSON.stringify(r.body));
+const scratchDir = r.body.cwd;
+r = await call(`/api/files?path=${encodeURIComponent(scratchDir.replace(/^\//, ''))}`);
+check('scratch folder exists', r.status === 200);
+r = await call('/api/shells/smoke-scratch', { method: 'DELETE' });
+r = await call(`/api/files?path=${encodeURIComponent(scratchDir.replace(/^\//, ''))}`);
+check('scratch folder deleted with the shell', r.status === 404, `status ${r.status}`);
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

@@ -269,6 +269,7 @@ $$('#tab-home .tile').forEach(t => t.addEventListener('click', async () => {
     if (act === 'shell') return newShellDialog(state.filesPath || homeRel, 'shell');
     if (act === 'upload') { go('files'); return setTimeout(() => $('#files-input').click(), 150); }
     if (act === 'stirling') return launchApp('stirling-pdf', 'Stirling PDF');
+    if (act === 'scratch') { const n = `scratch-${Math.random().toString(36).slice(2, 6)}`; try { await api('/api/shells', { method: 'POST', body: { name: n, kind: 'agent', agent: localStorage.getItem('porthole.agent') || 'claude', scratch: true } }); openTerminal(n, 'Home'); } catch (ex) { toast(ex.message, true); } return; }
 }));
 
 function newProjectDialog() {
@@ -326,7 +327,7 @@ async function loadShells() {
 }
 function shellRow(s) {
     return `<button class="shell-row" data-name="${esc(s.name)}">
-        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>`}</div>
+        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}</div>
         ${s.preview?.length ? `<pre class="shell-preview">${esc(s.preview.join('\n'))}</pre>` : ''}
       </button>`;
 }
@@ -352,17 +353,19 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
           <div class="field" data-profile-field hidden><label for="ns-profile">Claude profile</label><select id="ns-profile"></select></div>
           <div class="field"><label>Options</label><div class="choices" data-opts>
             <button type="button" data-o="resume">${icon('history')}Resume last session here</button>
-            <button type="button" data-o="yolo">${icon('zap')}Auto-approve everything</button></div>
+            <button type="button" data-o="yolo">${icon('zap')}Auto-approve everything</button>
+            <button type="button" data-o="scratch">${icon('trash')}Scratch: temp folder, deleted when the shell ends</button></div>
             <p class="sub" data-yolo-warn hidden style="margin:6px 2px 0;color:var(--flare)">Auto-approve lets the agent run any command without asking. Use it only in folders you can afford to lose.</p></div>
         </div>
         <div class="field"><label for="ns-name">Name</label><input id="ns-name" type="text" value="${esc(suggested)}" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
         <div class="buttons"><button class="primary" data-ok>Start</button><button data-close>Cancel</button></div>`);
-    let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default';
+    let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false;
     $$('[data-kind] button', panel).forEach(b => b.onclick = () => { kind = b.dataset.k; $$('[data-kind] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('[data-agent-opts]', panel).hidden = kind !== 'agent'; });
     $$('[data-opts] button', panel).forEach(b => b.onclick = () => {
-        if (b.dataset.o === 'resume') resume = !resume; else yolo = !yolo;
-        b.classList.toggle('selected', b.dataset.o === 'resume' ? resume : yolo);
+        if (b.dataset.o === 'resume') resume = !resume; else if (b.dataset.o === 'yolo') yolo = !yolo; else scratch = !scratch;
+        b.classList.toggle('selected', b.dataset.o === 'resume' ? resume : b.dataset.o === 'yolo' ? yolo : scratch);
         $('[data-yolo-warn]', panel).hidden = !yolo;
+        $('[data-pick]', panel).style.opacity = scratch ? '.4' : '1';
     });
     getAgents().then(list => {
         const box = $('[data-agent]', panel);
@@ -388,7 +391,8 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
     };
     const go_ = async () => {
         const name = $('#ns-name', panel).value.trim();
-        try { await api('/api/shells', { method: 'POST', body: { name, kind, cwd: folder || '.', agent, yolo, resume, profile } }); close(); openTerminal(name, 'Shells'); }
+        const finalName = scratch && name === suggested ? `scratch-${Math.random().toString(36).slice(2, 6)}` : name;
+        try { await api('/api/shells', { method: 'POST', body: { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch } }); close(); openTerminal(finalName, 'Shells'); }
         catch (ex) { toast(ex.message, true); }
     };
     $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
@@ -441,7 +445,8 @@ async function folderPicker(start = '', onPick, onCancel) {
 }
 
 async function killShell(name) {
-    if (!(await confirmDialog({ title: `End "${name}"?`, text: 'Anything running inside stops. Files are kept.', action: 'End shell' }))) return;
+    const sh = state.shells.find(x => x.name === name);
+    if (!(await confirmDialog({ title: `End "${name}"?`, text: sh?.scratch ? 'This is a scratch shell: its temporary folder is deleted too.' : 'Anything running inside stops. Files are kept.', action: sh?.scratch ? 'End and delete folder' : 'End shell' }))) return;
     try { await api(`/api/shells/${encodeURIComponent(name)}`, { method: 'DELETE' }); toast('Shell ended'); closeTerminal(); }
     catch (ex) { toast(ex.message, true); }
 }
@@ -451,6 +456,63 @@ async function killShell(name) {
 const termSheet = $('#term-sheet'), termHost = $('#term');
 let term, fit, ws, termName, termKind = 'shell', termBackTab = 'shells', ctrlArmed = false, altArmed = false, reconnectTimer;
 let fontSize = Number(localStorage.getItem('porthole.font')) || 13;
+let seenCreds = [];           // credentials shared via `credshare` in the current shell
+let credTail = '';
+const CRED_RE = /\x1b\]777;porthole-cred;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/g;
+// Returns the text with credential sequences removed; queues any complete ones for the card row.
+function extractCreds(text) {
+    let buf = credTail + text; credTail = '';
+    const start = buf.lastIndexOf('\x1b]777;porthole-cred;');
+    if (start >= 0 && !buf.slice(start).includes('\x07')) { credTail = buf.slice(start); buf = buf.slice(0, start); }
+    let changed = false;
+    buf = buf.replace(CRED_RE, (_, b64) => {
+        try {
+            const c = JSON.parse(atob(b64));
+            if (c.id && !Array.isArray(c.fields)) showSharedCred(c.id);
+            else if (Array.isArray(c.fields)) { seenCreds.unshift({ ...c, id: c.id || Math.random().toString(36).slice(2, 10), at: Date.now() }); changed = true; }
+        } catch { /* ignore */ }
+        return '';
+    });
+    if (changed) { seenCreds = seenCreds.slice(0, 5); renderCreds(); toast('Credentials shared to this phone'); }
+    return buf;
+}
+// A credential registered by `credshare` (pushed by the server or announced in the terminal): fetch values once.
+const shownCreds = new Set();
+function showSharedCred(id) {
+    if (shownCreds.has(id)) return; shownCreds.add(id);
+    api(`/api/creds/${id}/values`, { method: 'POST' }).then(full => { seenCreds = [full, ...seenCreds.filter(x => x.id !== full.id)].slice(0, 5); renderCreds(); toast('Credentials shared to this phone'); }).catch(() => shownCreds.delete(id));
+}
+function renderCreds() {
+    const row = $('#term-creds');
+    row.hidden = seenCreds.length === 0;
+    row.innerHTML = seenCreds.map((c, i) => `<button data-cred="${i}">${icon('key')}<span>${esc(c.title || 'Credentials')}</span></button>`).join('');
+    $$('button', row).forEach(b => b.onclick = () => credCard(seenCreds[Number(b.dataset.cred)]));
+}
+function credCard(c, { persisted = false } = {}) {
+    if (!c) return;
+    const svc = c.service ? `<p class="sub" style="margin:0 2px 8px">${c.service.live ? '<span class="live">● service live</span>' : '<span style="color:var(--flare)">● service gone</span>'}${c.service.tunnel ? ` · <a href="${esc(c.service.tunnel)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(c.service.tunnel.replace(/^https:\/\//, ''))}</a>` : ''}${c.service.container ? ` · ${esc(c.service.container)}` : ''}</p>` : '';
+    const { panel, close } = openDialog(`<h2>${icon('key')}${esc(c.title || 'Credentials')}</h2>${svc}${c.note ? `<p class="muted">${esc(c.note)}</p>` : ''}
+        <div class="list" style="padding:4px 12px;margin-bottom:10px">
+          ${c.url ? `<div class="cred-field"><span class="lbl">URL</span><a class="val" href="${esc(c.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(c.url)}</a><button class="pill" data-copy="${esc(c.url)}">${icon('copy')}</button></div>` : ''}
+          ${c.fields.map((f, i) => `<div class="cred-field"><span class="lbl">${esc(f.label)}</span><span class="val" data-val="${i}">${f.secret ? '••••••••' : esc(f.value)}</span>${f.secret ? `<button class="pill" data-reveal="${i}">${icon('eye')}</button>` : ''}<button class="pill" data-copy="${esc(f.value)}">${icon('copy')}</button></div>`).join('')}
+        </div>
+        <div class="buttons"><button class="primary" data-env>Copy all as KEY=value lines</button><button data-vault>Save to Vault…</button><button class="danger" data-forget>Forget</button><button data-close>Close</button></div>`);
+    $$('[data-copy]', panel).forEach(b => b.onclick = () => copyText(b.dataset.copy, 'Copied'));
+    $$('[data-reveal]', panel).forEach(b => b.onclick = () => { const f = c.fields[Number(b.dataset.reveal)]; const el = $(`[data-val="${b.dataset.reveal}"]`, panel); el.textContent = el.textContent.startsWith('•') ? f.value : '••••••••'; });
+    $('[data-env]', panel).onclick = () => copyText(c.fields.map(f => `${f.label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}=${f.value}`).concat(c.url ? [`URL=${c.url}`] : []).join('\n'), 'Copied');
+    $('[data-vault]', panel).onclick = async () => {
+        close();
+        const cat = await getCatalog().catch(() => null); if (!cat) return;
+        const svc = cat.services.find(s => s.key === 'custom');
+        credentialForm(svc, cat, c.fields.some(f => /pass/i.test(f.label)) && c.fields.some(f => /user/i.test(f.label)) ? 'basic' : 'token');
+        setTimeout(() => {
+            const name = $('#cf-name'); if (name) name.value = c.title || 'Shared credential';
+            const u = c.fields.find(f => /user/i.test(f.label)), p = c.fields.find(f => /pass/i.test(f.label)), t = c.fields.find(f => f.secret) || c.fields[0];
+            if ($('#cf-username') && u) $('#cf-username').value = u.value; if ($('#cf-password') && p) $('#cf-password').value = p.value; if ($('#cf-token') && t) $('#cf-token').value = t.value;
+        }, 150);
+    };
+    $('[data-forget]', panel).onclick = async () => { seenCreds = seenCreds.filter(x => x.id !== c.id); renderCreds(); await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {}); close(); if (persisted) { loadSharedSection().catch(() => {}); if (state.tab === 'services') loadServices(); } };
+}
 let seenLinks = [];           // most recent URLs printed by the current shell
 let linkTail = '';            // carry-over so URLs split across chunks are still found
 const URL_RE = /https?:\/\/[^\s'"<>()\[\]{}|\^`]+/g;
@@ -487,6 +549,32 @@ async function setMouse(on) {
 }
 $('#key-mouse').addEventListener('click', () => setMouse(!$('#key-mouse').classList.contains('armed')));
 
+// Scroll mode: swap the live terminal for a natively scrollable, selectable view of the full tmux history.
+// Typing, sending or pressing a key returns to the live terminal (select mode).
+let scrollMode = false, scrollTimer = null;
+async function setScrollMode(on) {
+    scrollMode = on;
+    const pane = $('#term-history');
+    $('#key-scroll').classList.toggle('armed', on);
+    pane.hidden = !on;
+    clearInterval(scrollTimer); scrollTimer = null;
+    if (!on) { term?.focus(); return; }
+    const pre = $('pre', pane);
+    const load = async first => {
+        try {
+            const res = await api(`/api/shells/${encodeURIComponent(termName)}/scrollback?lines=5000`, { raw: true });
+            const text = await res.text();
+            const atBottom = first || (pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40);
+            if (pre.textContent !== text) { pre.textContent = text; if (atBottom) pre.scrollTop = pre.scrollHeight; }
+        } catch (ex) { pre.textContent = ex.message; }
+    };
+    await load(true);
+    scrollTimer = setInterval(() => load(false), 2000);
+}
+$('#key-scroll').addEventListener('click', () => setScrollMode(!scrollMode));
+$('#history-close').addEventListener('click', () => setScrollMode(false));
+composerInput.addEventListener('focus', () => { if (scrollMode) setScrollMode(false); });
+
 const QUICK = {
     claude: ['yes', 'no', 'continue', 'show the diff', 'run the tests', 'run it and share a link', 'commit this', '/compact', '/clear'],
     codex: ['yes', 'no', 'continue', 'show the diff', 'run the tests', 'commit this', '/compact', '/new'],
@@ -509,6 +597,8 @@ async function openTerminal(name, backLabel = 'Shells') {
     $$('#quick-replies button').forEach(b => b.onclick = () => { sendInput(b.dataset.q + '\r'); term?.focus(); });
     $('#composer-input').placeholder = termKind !== 'shell' ? `Message ${agentTitle(termKind).split(' ')[0]}` : 'Run a command';
     seenLinks = []; linkTail = ''; renderLinks();
+    seenCreds = []; credTail = ''; renderCreds();
+    api(`/api/shells/${encodeURIComponent(name)}/creds`).then(list => { if (list.length) { seenCreds = list; renderCreds(); } }).catch(() => {});
     api(`/api/shells/${encodeURIComponent(name)}/mouse`).then(r => $('#key-mouse').classList.toggle('armed', !!r.mouse)).catch(() => {});
     termSheet.hidden = false;
 
@@ -561,8 +651,8 @@ function connect() {
     ws.binaryType = 'arraybuffer';
     const dec = new TextDecoder();
     ws.onmessage = ev => {
-        if (ev.data instanceof ArrayBuffer) { const text = dec.decode(ev.data, { stream: true }); term.write(text); noteLinks(text); }
-        else { let msg; try { msg = JSON.parse(ev.data); } catch { return; } if (msg.type === 'error') toast(msg.message, true); if (msg.type === 'exit') term.write('\r\n\x1b[90m[shell ended]\x1b[0m\r\n'); }
+        if (ev.data instanceof ArrayBuffer) { const text = extractCreds(dec.decode(ev.data, { stream: true })); term.write(text); noteLinks(text); }
+        else { let msg; try { msg = JSON.parse(ev.data); } catch { return; } if (msg.type === 'error') toast(msg.message, true); if (msg.type === 'exit') term.write('\r\n\x1b[90m[shell ended]\x1b[0m\r\n'); if (msg.type === 'cred' && msg.id) showSharedCred(msg.id); }
     };
     ws.onopen = () => { sendResize(); };
     ws.onclose = ev => { if (termSheet.hidden || ev.code === 1008 || ev.code === 1000) return; term.write('\r\n\x1b[90m[reconnecting…]\x1b[0m\r\n'); reconnectTimer = setTimeout(connect, 1500); };
@@ -570,6 +660,7 @@ function connect() {
 function sendInput(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data })); }
 function sendResize() { if (!term || !fit) return; fit.fit(); if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); }
 function closeTerminal() {
+    if (scrollMode) setScrollMode(false);
     termSheet.hidden = true; clearTimeout(reconnectTimer);
     if (ws) { ws.onclose = null; ws.close(); ws = null; }
     if (term) { term.dispose(); term = null; }
@@ -584,7 +675,7 @@ function setCtrl(on) { ctrlArmed = on; if (on) setAlt(false); $('#key-ctrl').cla
 function setAlt(on) { altArmed = on; if (on) setCtrl(false); $('#key-alt').classList.toggle('armed', on); }
 $('#key-ctrl').addEventListener('click', () => { setCtrl(!ctrlArmed); term?.focus(); });
 $('#key-alt').addEventListener('click', () => { setAlt(!altArmed); term?.focus(); });
-$$('.keys button[data-key]').forEach(b => b.addEventListener('click', () => { sendInput(JSON.parse(`"${b.dataset.key}"`)); term?.focus(); }));
+$$('.keys button[data-key]').forEach(b => b.addEventListener('click', () => { if (scrollMode) setScrollMode(false); sendInput(JSON.parse(`"${b.dataset.key}"`)); term?.focus(); }));
 $('#key-kbd').addEventListener('click', () => term?.focus());
 function setFont(d) { fontSize = Math.min(22, Math.max(9, fontSize + d)); localStorage.setItem('porthole.font', String(fontSize)); if (term) { term.options.fontSize = fontSize; sendResize(); } }
 $('#key-font-down').addEventListener('click', () => setFont(-1));
@@ -653,6 +744,7 @@ composerInput.addEventListener('input', () => { composerInput.style.height = 'au
 function sendComposer() {
     const text = composerInput.value;
     if (!text.trim()) return;
+    if (scrollMode) setScrollMode(false);
     if (ctrlArmed) { const c = text.trim().toUpperCase().charCodeAt(0); if (c >= 64 && c <= 95) sendInput(String.fromCharCode(c - 64)); setCtrl(false); }
     else if (text.includes('\n')) { sendInput(bracketed(text)); setTimeout(() => sendInput('\r'), 60); }
     else sendInput(text + '\r');
@@ -717,6 +809,8 @@ $('#services-new').addEventListener('click', startSomethingDialog);
 
 async function loadServices() {
     const s = await api('/api/services');
+    const shared = await api('/api/creds').catch(() => []);
+    const credChip = port => { const list = shared.filter(c => c.port === port); return list.length ? `<button class="pill" data-credport="${port}" title="Shared credentials">${icon('key')}${list.length > 1 ? list.length : ''}</button>` : ''; };
     const f = state.servicesFilter;
     const show = k => f === 'all' || f === k;
     let html = '';
@@ -727,7 +821,7 @@ async function loadServices() {
             <div class="row"><span class="ico kelp">${icon('link')}</span>
               <div class="main"><div class="title">${esc(t.name || t.target)}${t.owner ? `<span class="tag dim">${esc(t.owner)}</span>` : ''}</div><div class="sub mono">${t.url ? esc(t.url.replace(/^https:\/\//, '')) : 'publishing…'}</div>
                 ${t.expires ? `<div class="bar-mini kelp"><div style="width:${Math.max(2, Math.min(100, (t.expires - Date.now()) / (4 * 3600_000) * 100))}%"></div></div>` : ''}</div>
-              ${t.url ? `<a class="pill kelp" href="${esc(t.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+              ${credChip(t.port)}${t.url ? `<a class="pill kelp" href="${esc(t.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
               <button class="more" data-link-menu="${t.port}" aria-label="Link actions">${icon('more_h')}</button>
             </div>`).join('')}</div>` : `<p class="empty">Nothing shared. Share a dev server or container below.</p>`;
     }
@@ -736,7 +830,7 @@ async function loadServices() {
         html += s.devservers.length ? `<div class="list">${s.devservers.map(d => `
             <div class="row"><span class="ico brass">${icon('devserver')}</span>
               <div class="main"><div class="title">${esc(d.process)} · <span class="mono">:${d.port}</span></div><div class="sub">${d.tunnel ? '<span class="live">● shared</span>' : 'local only'}${d.shell ? ` · ${esc(d.shell)} shell` : ''}</div></div>
-              ${d.tunnel ? `<button class="pill" data-unshare="${d.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.process)}">${icon('share')}Share</button>`}
+              ${credChip(d.port)}${d.tunnel ? `<button class="pill" data-unshare="${d.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.process)}">${icon('share')}Share</button>`}
             </div>`).join('')}</div>` : `<p class="empty">Nothing listening yet. Start a dev server from a shell and it appears here.</p>`;
     }
     if (show('dev')) {
@@ -775,7 +869,7 @@ async function loadServices() {
                 <div class="row"><span class="ico ${c.state === 'running' ? 'dock' : 'dim'}">${icon(c.app === 'postgres' || c.image.startsWith('postgres') || c.image.startsWith('redis') ? 'database' : 'container')}</span>
                   <div class="main"><div class="title">${esc(c.title)}${c.app ? '<span class="tag">app</span>' : ''}${c.compose ? `<span class="tag dim">${esc(c.compose)}</span>` : ''}</div>
                     <div class="sub">${c.state === 'running' ? `<span class="live">● ${esc(c.status.replace(/^Up /, 'up '))}</span>` : esc(c.status.toLowerCase())}${c.ports.length ? ` · <span class="mono">:${c.ports.map(p => p.host).join(' :')}</span>` : ''}${c.tunnel?.url ? ' · shared' : c.ports.length && c.state === 'running' ? ' · local only' : ''}</div></div>
-                  ${c.state !== 'running' ? `<button class="pill" data-cact="start" data-c="${esc(c.name)}">${icon('play')}Start</button>`
+                  ${c.ports[0] ? credChip(c.ports[0].host) : ''}${c.state !== 'running' ? `<button class="pill" data-cact="start" data-c="${esc(c.name)}">${icon('play')}Start</button>`
                     : c.tunnel?.url ? `<a class="pill kelp" href="${esc(c.tunnel.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>`
                     : c.ports.length && !c.noTunnel ? `<button class="pill ghost" data-share="${c.ports[0].host}" data-label="${esc(c.title)}">${icon('share')}Share</button>`
                     : `<button class="pill" data-clogs="${esc(c.name)}">${icon('logs')}Logs</button>`}
@@ -794,6 +888,7 @@ async function loadServices() {
     }
     $('#services-body').innerHTML = html;
     const body = $('#services-body');
+    $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
     $$('[data-unshare]', body).forEach(b => b.onclick = async () => { try { await api(`/api/tunnels/${b.dataset.unshare}`, { method: 'DELETE' }); toast('Link closed'); loadServices(); } catch (ex) { toast(ex.message, true); } });
     $$('[data-link-menu]', body).forEach(b => b.onclick = () => linkMenu(s.links.find(t => t.port === Number(b.dataset.linkMenu))));
@@ -950,6 +1045,7 @@ function runImageDialog(prefill = '') {
         $('[data-initial]', panel).hidden = true;
         const cmd = [...(d.entrypoint || []), ...(d.cmd || [])].join(' ');
         $('[data-details]', panel).innerHTML = `
+            ${d.existing ? `<p class="muted" style="margin:10px 0 0">${icon('container')}<b>${esc(d.existing.name)}</b> already exists from this image (${esc(d.existing.state)}). Quick runs keep one container per image: ${d.existing.state === 'running' ? 'manage it in Services' : 'Run below starts the existing one'}.</p>` : ''}
             ${d.title || d.description ? `<p class="muted" style="margin:10px 0 0">${esc(d.title || '')}${d.title && d.description ? ' — ' : ''}${esc(d.description || '')}</p>` : ''}
             <p class="sub" style="margin:6px 2px 0">${esc(d.arch)} · ${fmtBytes(d.size)}${cmd ? ` · <span class="mono">${esc(cmd.slice(0, 80))}</span>` : ''}</p>
             <div class="field"><label for="dr-name">Name</label><input id="dr-name" type="text" class="mono" value="${esc(d.name)}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -960,10 +1056,11 @@ function runImageDialog(prefill = '') {
             <div class="field"><label for="dr-env">Environment (defaults from the image; edit or add KEY=value lines)</label><textarea id="dr-env" rows="${Math.min(8, Math.max(2, d.env.length + 1))}" autocapitalize="off" autocorrect="off" spellcheck="false">${esc(d.env.map(e => `${e.key}=${e.value}`).join('\n'))}</textarea></div>
             <div class="field"><label for="dr-vol">Volumes (folder on the box : path in container, one per line)</label><textarea id="dr-vol" rows="${Math.min(5, Math.max(2, d.volumes.length + 1))}" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${esc(join(homeRel, 'apps/' + d.name + '/data'))}:/data">${esc(d.volumes.map(v => `${join(homeRel, v.folder)}:${v.target}`).join('\n'))}</textarea></div>
             <div class="field"><label>Restart</label><div class="choices" data-restart><button type="button" data-r="unless-stopped" class="selected">Keep running</button><button type="button" data-r="no">Run once</button></div></div>
-            <div class="buttons"><button class="primary" data-ok>Run ${esc(d.name)}</button><button data-close>Cancel</button></div>`;
+            <div class="buttons">${d.existing?.state === 'running' ? `<button class="primary" data-services>Open Services</button>` : `<button class="primary" data-ok>${d.existing ? `Start ${esc(d.existing.name)}` : `Run ${esc(d.name)}`}</button>`}<button data-close>Cancel</button></div>`;
         let restart = 'unless-stopped';
         $$('[data-restart] button', panel).forEach(b => b.onclick = () => { restart = b.dataset.r; $$('[data-restart] button', panel).forEach(x => x.classList.toggle('selected', x === b)); });
         $$('[data-close]', panel).forEach(b => (b.onclick = close));
+        if ($('[data-services]', panel)) { $('[data-services]', panel).onclick = () => { close(); go('services'); }; return; }
         $('[data-ok]', panel).onclick = async () => {
             const btn = $('[data-ok]', panel);
             const ports = $$('[data-host]', panel).map((h, i) => ({ host: Number(h.value), container: Number($(`[data-cont="${i}"]`, panel).value) })).filter(p => p.host && p.container);
@@ -1497,7 +1594,33 @@ async function loadClaude() {
 let catalogCache = null;
 async function getCatalog() { if (!catalogCache) catalogCache = await api('/api/vault/catalog'); return catalogCache; }
 
+async function openSharedCred(id) {
+    try { const c = await api(`/api/creds/${id}/values`, { method: 'POST' }); credCard(c, { persisted: true }); } catch (ex) { toast(ex.message, true); }
+}
+function sharedCredsSheet(list) {
+    const { panel, close } = openDialog(`<h2>${icon('key')}Shared credentials</h2><div class="menu">${list.map(c => `<button data-id="${c.id}">${icon('key')}<span>${esc(c.title)}</span><span class="sub" style="margin-left:auto">${fmtAgo(c.at)}</span></button>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-id]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.id); });
+}
+async function loadSharedSection() {
+    const list = await api('/api/creds').catch(() => []);
+    let host = $('#vault-shared');
+    if (!host) { host = document.createElement('div'); host.id = 'vault-shared'; $('#vault-list').parentElement.insertBefore(host, $('#vault-list').previousElementSibling || $('#vault-list')); }
+    if (!list.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<h2 class="section">Shared by agents<span class="meta">${list.length} · kept 7 days</span>${list.some(c => c.service && c.service.live === false) ? `<button class="act" data-clear-stale>Delete stale</button>` : ''}</h2>
+        <div class="list">${list.map(c => `<button class="row" data-sc="${c.id}"><span class="ico ${c.service ? (c.service.live ? 'kelp' : 'flare') : 'brass'}">${icon('key')}</span>
+          <div class="main"><div class="title">${esc(c.title)}${c.port ? `<span class="tag ${c.service?.live ? '' : 'dim'}">:${c.port} · ${c.service?.live ? 'live' : 'gone'}</span>` : ''}</div>
+            <div class="sub">${esc(c.fields.map(f => f.label).join(' · '))} · ${fmtAgo(c.at)}${c.shell ? ` · from ${esc(c.shell)}` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>`;
+    $$('[data-sc]', host).forEach(b => b.onclick = () => openSharedCred(b.dataset.sc));
+    $('[data-clear-stale]', host)?.addEventListener('click', async () => {
+        const stale = list.filter(c => c.service && c.service.live === false);
+        if (!(await confirmDialog({ title: `Delete ${stale.length} stale credential${stale.length === 1 ? '' : 's'}?`, text: 'Their services are no longer running.', action: 'Delete' }))) return;
+        for (const c of stale) await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
+        loadSharedSection();
+    });
+}
+
 async function loadVault() {
+    loadSharedSection().catch(() => {});
     const items = await api('/api/vault');
     $('#vault-empty').hidden = items.length > 0;
     const groups = new Map();

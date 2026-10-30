@@ -66,6 +66,7 @@ export function tmuxConfPath() {
     const conf = [
         'set -g status off',
         'set -g mouse off',   // selection by default; per-shell toggle via the API
+        'set -g allow-passthrough on', // credshare announces cards with a wrapped OSC; tmux drops unknown OSCs otherwise
         'set -g history-limit 20000',
         'set -g default-terminal "tmux-256color"',
         'set -ga terminal-overrides ",xterm-256color:Tc"',

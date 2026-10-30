@@ -44,6 +44,8 @@ export async function newSession(name, cwd, command, env = {}) {
     for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
     if (command) args.push(command);
     await tmux(...args);
+    // tmux swallows OSC sequences it does not know (credshare's card announcement); allow DCS-wrapped passthrough.
+    try { await tmux('set-option', '-g', 'allow-passthrough', 'on'); } catch { /* older tmux: the WS push below still works */ }
 }
 
 export async function killSession(name) {

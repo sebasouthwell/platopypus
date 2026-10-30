@@ -75,9 +75,11 @@ export async function inspectImage(image) {
     const name = (image.split('/').pop() || 'app').split(':')[0].split('@')[0].replace(/[^a-zA-Z0-9_.-]/g, '-');
     const volumes = Object.keys(cfg.Volumes || {}).map(target => ({ target, folder: `apps/${name}/${target.replace(/^\/+/, '').replace(/[^a-zA-Z0-9_.-]+/g, '-') || 'data'}` }));
     log('docker', `inspected ${image}`);
+    const existing = await sameImageContainer(image, name);
     return {
         image,
         name,
+        existing,
         description: labels['org.opencontainers.image.description'] || labels['description'] || '',
         title: labels['org.opencontainers.image.title'] || '',
         url: labels['org.opencontainers.image.url'] || labels['org.opencontainers.image.source'] || '',
@@ -147,8 +149,22 @@ export async function logs(name, tail = 200) {
     }
 }
 
+// A container already created from this image (or using this name). Quick runs are limited to one per image so a
+// second tap on the same image reuses it instead of failing on a name clash or doubling up ports.
+async function sameImageContainer(image, name) {
+    const all = await containers().catch(() => []);
+    const strip = s => String(s).replace(/^docker\.io\/(library\/)?/, '');
+    const c = all.find(x => x.name === name) || all.find(x => strip(x.image) === strip(image));
+    return c ? { name: c.name, state: c.state, image: c.image, ports: c.ports } : null;
+}
+
 // Quick run: image + name + port maps + env + optional volume of a folder inside the files root.
 export async function quickRun(opts, resolveInRoot) {
+    const dup = await sameImageContainer(opts.image, opts.name);
+    if (dup) {
+        if (dup.state !== 'running') { await action(dup.name, 'start'); return { id: null, name: dup.name, reused: true }; }
+        throw httpError(409, `${dup.name} is already running from this image. Stop or remove it in Services first, or open it from there.`);
+    }
     const extra = [];
     const list = Array.isArray(opts.volumes) ? opts.volumes : opts.volume ? [opts.volume] : [];
     for (const v of list) {

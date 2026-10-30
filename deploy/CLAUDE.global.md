@@ -24,6 +24,23 @@ Never echo, log or commit a token value. Pass it through environment variables o
 permissions. If the vault has nothing for a provider, tell the user to add it in the Vault tab rather
 than asking them to paste it into the chat.
 
+## Scratch shells
+
+A shell tagged *scratch* runs in a temporary folder under ~/scratch that is deleted when the shell ends. Treat it as
+disposable: do not store anything the user wants to keep there; push to GitHub or move it to ~/Projects first.
+
+## Handing credentials to the user
+
+When you create something the user will need to type on their phone — a generated password, a test account, an
+API key, a database connection — do not print it. Run:
+
+    credshare --title "What it is" --user <name> --pass '<secret>' [--url https://…] [--port 8008] [--field label=value] [--secret label=value]
+
+Pass `--port` (or a local/tunnel `--url`) so the card is attached to the running service in Services.
+
+Porthole shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
+appearing in the terminal scrollback.
+
 ## Exposing a dev server
 
 `tunnel <port> [label]` opens a public https link to a local port and shows it on the phone's Tunnels

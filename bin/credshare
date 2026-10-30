@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+// Hand credentials to the phone as a copy-paste card instead of printing them in the terminal.
+//
+//   credshare --title "Spotify login" --user alice --pass 's3cret'
+//   credshare --title "Postgres" --field host=db.local --field port=5432 --user app --pass "$PGPASSWORD" --url postgres://…
+//   credshare --title "API key" --secret key=sk-… --note "rotate monthly" --port 8008
+//
+// Fields:  --user/-u, --pass/-p (secret), --url, --port (link to the service on that port), --note,
+//          --field label=value (shown), --secret label=value (masked).
+// The credential is registered with the Porthole server on this box (so it is kept even when no phone is
+// watching) and announced to an attached terminal through an invisible OSC sequence. Only a confirmation
+// line without values is printed.
+
+import fs from 'node:fs';
+
+const args = process.argv.slice(2);
+const cred = { title: 'Credentials', fields: [], url: null, note: null, port: null, at: Date.now() };
+
+function take(i) { if (i + 1 >= args.length) { console.error(`missing value for ${args[i]}`); process.exit(2); } return args[i + 1]; }
+for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const kv = (s, secret) => { const j = s.indexOf('='); if (j < 1) { console.error(`expected label=value, got "${s}"`); process.exit(2); } cred.fields.push({ label: s.slice(0, j), value: s.slice(j + 1), secret }); };
+    switch (a) {
+        case '--title': case '-t': cred.title = take(i); i++; break;
+        case '--user': case '-u': case '--username': cred.fields.push({ label: 'Username', value: take(i), secret: false }); i++; break;
+        case '--pass': case '-p': case '--password': cred.fields.push({ label: 'Password', value: take(i), secret: true }); i++; break;
+        case '--url': cred.url = take(i); i++; break;
+        case '--port': cred.port = Number(take(i)) || null; i++; break;
+        case '--note': cred.note = take(i); i++; break;
+        case '--field': case '-f': kv(take(i), false); i++; break;
+        case '--secret': case '-s': kv(take(i), true); i++; break;
+        case '-h': case '--help': console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 12).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0);
+        default: console.error(`unknown option ${a} (try --help)`); process.exit(2);
+    }
+}
+if (!cred.fields.length && !cred.url) { console.error('nothing to share: add --user/--pass/--field/--secret/--url'); process.exit(2); }
+if (process.env.PORTHOLE_SHELL_NAME) cred.shell = process.env.PORTHOLE_SHELL_NAME;
+
+// Register with the local Porthole server (loopback token sign-in, same mechanism as the tunnel CLI).
+const port = process.env.PORTHOLE_PORT || '7331';
+const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
+let token = process.env.PORTHOLE_TOKEN || '';
+try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token file */ }
+let registered = null;
+try {
+    const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+    const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    if (login.ok && cookie) {
+        const res = await fetch(`http://127.0.0.1:${port}/api/creds/share`, { method: 'POST', headers: { ...headers, cookie }, body: JSON.stringify(cred), signal: AbortSignal.timeout(5000) });
+        if (res.ok) registered = await res.json();
+    }
+} catch { /* server unreachable: terminal-only fallback below */ }
+
+// Announce to an attached terminal: id only when registered (the phone fetches the record), full data otherwise.
+const announce = registered ? { id: registered.id, title: cred.title, port: cred.port || registered.port || null } : cred;
+const osc = `\x1b]777;porthole-cred;${Buffer.from(JSON.stringify(announce), 'utf8').toString('base64')}\x07`;
+// Inside tmux the sequence must be wrapped as a passthrough (ESC doubled) or tmux drops it.
+process.stdout.write(process.env.TMUX ? `\x1bPtmux;${osc.replace(/\x1b/g, '\x1b\x1b')}\x1b\\` : osc);
+const summary = cred.fields.map(f => f.label.toLowerCase()).concat(cred.url ? ['url'] : []).join(', ');
+console.log(`🔑 ${cred.title} → shared to the phone (${summary}); values not printed.${registered ? '' : ' (not registered: Porthole API unreachable, visible only while a terminal is open)'}`);

@@ -15,7 +15,12 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   **profiles** (separate config folders for different accounts or usage limits), a chat-style composer with
   quick replies, a key strip for what the phone keyboard lacks, copy/paste that works on iOS, link chips for any
   URL the agent prints, history, and attachments (paste or drop an image and its path lands in your message).
-  Full TUI support over a real pty.
+  Full TUI support over a real pty. Agents hand you secrets with `credshare --user … --pass …`, which shows a card with
+  reveal, copy and Save-to-Vault buttons instead of printing values into the scrollback (the CLI registers the card
+  with the server, so it arrives even if no phone was watching). A **scroll** key swaps the live terminal for a
+  natively scrollable copy of the full tmux history; typing or sending brings the live view back. Shared credentials persist
+  (encrypted) for seven days, attach to the service on their port (key chip on the Services row, live/gone status),
+  and are listed under Vault → "Shared by agents" where stale ones can be deleted.
 - **Files** — browse the box like the iOS Files app with a permanent `..`, upload from the phone, download,
   preview, rename, trash, **new file** with an extension picker, and a built-in **text editor** with manual Save
   and a conflict check. Any folder that is a Git repo shows a card with branch, changes, ahead/behind, Commit,
@@ -32,6 +37,10 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   Every field is exported to shells as `<PREFIX>_<FIELD>` (`TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`,
   `SPOTIFY_ACCESS_TOKEN`…), general or per project, and the agents are told to use `vault ls` / `vault get`
   instead of asking you.
+- **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
+  container per image: a second tap restarts the existing one or points you at it in Services.
+- **Scratch shells** — "Quick task" on Home (or the Scratch toggle in New shell) starts an agent in a temporary folder
+  under `~/scratch` that is deleted when the shell ends: for one-off jobs you don't want to tidy up after.
 - **More** — box health, AI agents (install state, sign-in, Claude profiles, Remote Control), GitHub (connect,
   clone, SSH key), Security (passkeys, password, two-step codes, signed-in devices), sign out.
 
@@ -44,7 +53,7 @@ Porthole is root-level control of a box, so every layer assumes the one before i
 | First run | Setup screen, not a login: needs the one-time setup token printed by the installer **and** creates a passkey (WebAuthn via SimpleWebAuthn). Password optional (scrypt). Once a credential exists the token no longer opens the site. |
 | Login | Passkey **or** password, then a TOTP code when two-step is on (short-lived ticket bound to the client address). 5 failures → 15-minute lock per address; nginx throttles the sign-in and setup paths. Unauthenticated status returns booleans only. |
 | Reset | Only from the box itself: `porthole reset-auth` (forgets passkeys, password, two-step codes and sessions, prints a fresh setup token) or `porthole reset-totp` (lost authenticator only). Run it in a shell on the box or through your cloud's session manager. No remote recovery by design. |
-| Session | HttpOnly + Secure + SameSite=Strict cookie, 256-bit id, 7-day rolling, persisted; "Sign out others". |
+| Session | HttpOnly + Secure + SameSite=Strict cookie, 256-bit id, 7-day rolling **with a 30-day absolute cap**, persisted; "Sign out others". Any credential change (password, passkey added/removed, two-step on/off) signs out every other device. The client address comes from the socket; `X-Real-IP` is honoured only when the connection comes from the local reverse proxy. |
 | Requests | Same-host Origin and `X-Porthole: 1` header on every mutation; WebSocket upgrades need cookie + Origin. CSP, nosniff, no-referrer, frame-ancestors self. |
 | Files | Paths resolved with realpath against the configured root; names sanitised; upload cap; atomic editor writes; delete = move to trash. Inline previews serve html/svg/xml/js as plain text under a `sandbox` CSP. |
 | Tunnels | Public URLs → warning in UI, auto-expiry (4 h; 20 min for editors), Porthole's own port refused, and a watcher that closes a tunnel when the process behind it disappears. |

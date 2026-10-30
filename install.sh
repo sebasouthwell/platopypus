@@ -172,6 +172,8 @@ chown "$PORTHOLE_USER:$PORTHOLE_USER" "$APP_DIR/VERSION"
 ln -sf "$APP_DIR/bin/tunnel" /usr/local/bin/tunnel
 ln -sf "$APP_DIR/bin/vault" /usr/local/bin/vault
 ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
+ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
+ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 
 # Global Claude Code instructions: use the vault, the tunnel helper, keep output phone-sized.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0700 "$HOME_DIR/.claude"

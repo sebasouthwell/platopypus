@@ -14,7 +14,9 @@ function load() {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
 }
 function save(obj) {
-    fs.writeFileSync(file, JSON.stringify(obj, null, 2), { mode: 0o600 });
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, file);
 }
 
 export function base32Encode(buf) {

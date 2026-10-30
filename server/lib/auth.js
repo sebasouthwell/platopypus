@@ -25,7 +25,8 @@ function persist() {
     fs.renameSync(tmp, file);
 }
 
-const maxAgeMs = config.sessionDays * 86400_000;
+const maxAgeMs = config.sessionDays * 86400_000;          // rolling idle expiry
+const absoluteMaxMs = (parseInt(process.env.PORTHOLE_SESSION_ABSOLUTE_DAYS || '30', 10) || 30) * 86400_000; // hard cap regardless of use
 
 // ---------- lockout: 5 failures per client address → 15 minutes ----------
 
@@ -34,8 +35,11 @@ const MAX_FAILS = 5;
 const LOCK_MS = 15 * 60_000;
 
 export function clientAddr(req) {
-    // Behind nginx the socket address is always 127.0.0.1; nginx sets X-Real-IP. Direct connections have no header.
-    return (req.headers['x-real-ip'] || req.socket.remoteAddress || 'unknown').toString();
+    // X-Real-IP is only meaningful when set by our own reverse proxy on this machine; from anywhere else it is
+    // attacker-controlled and would let a client rotate addresses to dodge the lockout.
+    const sock = req.socket.remoteAddress || 'unknown';
+    const fromProxy = sock === '127.0.0.1' || sock === '::1' || sock === '::ffff:127.0.0.1';
+    return (fromProxy && req.headers['x-real-ip'] ? req.headers['x-real-ip'] : sock).toString();
 }
 
 export function lockedOut(req) {
@@ -127,7 +131,7 @@ export function authenticate(req) {
     if (!sid) return null;
     const s = sessions.get(sid);
     if (!s) return null;
-    if (Date.now() - s.lastSeen > maxAgeMs) { sessions.delete(sid); persist(); return null; }
+    if (Date.now() - s.lastSeen > maxAgeMs || Date.now() - s.created > absoluteMaxMs) { sessions.delete(sid); persist(); return null; }
     if (Date.now() - s.lastSeen > 60_000) { s.lastSeen = Date.now(); persist(); }
     return s;
 }

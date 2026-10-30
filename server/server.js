@@ -25,6 +25,7 @@ import * as agents from './lib/agents.js';
 import * as codeserver from './lib/codeserver.js';
 import * as catalog from './lib/catalog.js';
 import * as update from './lib/update.js';
+import * as shared from './lib/sharedcreds.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -203,6 +204,12 @@ const server = http.createServer(async (req, res) => {
             const b = method === 'POST' ? await readJson(req, 1024) : {};
             return send(res, 200, await shells.mouse(decodeURIComponent(m[1]), method === 'POST' ? !!b.on : undefined));
         }
+        if ((m = p.match(/^\/api\/shells\/([^/]+)\/creds$/)) && method === 'GET') return send(res, 200, await shared.list({ shell: decodeURIComponent(m[1]), values: true }));
+        if (p === '/api/creds' && method === 'GET') return send(res, 200, await shared.list({ port: url.searchParams.get('port'), values: url.searchParams.get('values') === '1' }));
+        if (p === '/api/creds/share' && method === 'POST') { const b = await readJson(req, 256 * 1024); if (!Array.isArray(b.fields)) return send(res, 400, { error: 'fields[] required' }); const id = await shared.add(b.shell || null, b); const one = (await shared.list({})).find(c => c.id === id); return send(res, 201, { id, port: one?.port || null }); }
+        if ((m = p.match(/^\/api\/creds\/([a-f0-9]+)$/)) && method === 'DELETE') { shared.remove(m[1]); return send(res, 200, { ok: true }); }
+        if ((m = p.match(/^\/api\/creds\/([a-f0-9]+)\/values$/)) && method === 'POST') { const one = (await shared.list({ values: true })).find(c => c.id === m[1]); if (!one) return send(res, 404, { error: 'No such shared credential.' }); log('credshare', `values of "${one.title}" revealed to ${auth.clientAddr(req)}`); return send(res, 200, one); }
+        if (p === '/api/creds/stale' && method === 'DELETE') return send(res, 200, { removed: shared.removeStale() });
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/scrollback$/)) && method === 'GET') {
             const text = await shells.scrollback(decodeURIComponent(m[1]), url.searchParams.get('lines') || 2000);
             return send(res, 200, text);
@@ -212,7 +219,7 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { commands, prompts });
         }
         if ((m = p.match(/^\/api\/shells\/([^/]+)$/)) && method === 'DELETE') {
-            await shells.kill(decodeURIComponent(m[1]));
+            await shells.kill(decodeURIComponent(m[1]), { deleteScratch: url.searchParams.get('keep') !== '1' });
             return send(res, 200, { ok: true });
         }
 
@@ -312,23 +319,23 @@ const server = http.createServer(async (req, res) => {
         // Security (two-step codes)
         if (p === '/api/security' && method === 'GET') return send(res, 200, { ...creds.summary(true), sessions: auth.sessionCount() });
         if (p === '/api/security/passkey/options' && method === 'POST') return send(res, 200, await creds.registrationOptions(req, (await readJson(req, 4096)).name));
-        if (p === '/api/security/passkey/verify' && method === 'POST') return send(res, 201, await creds.registrationVerify(req, (await readJson(req, 64 * 1024)).response));
-        if ((m = p.match(/^\/api\/security\/passkey\/([A-Za-z0-9_-]+)$/)) && method === 'DELETE') { creds.removePasskey(m[1]); return send(res, 200, { ok: true }); }
+        if (p === '/api/security/passkey/verify' && method === 'POST') { const pk = await creds.registrationVerify(req, (await readJson(req, 64 * 1024)).response); auth.revokeOtherSessions(req); return send(res, 201, pk); }
+        if ((m = p.match(/^\/api\/security\/passkey\/([A-Za-z0-9_-]+)$/)) && method === 'DELETE') { creds.removePasskey(m[1]); auth.revokeOtherSessions(req); return send(res, 200, { ok: true }); }
         if ((m = p.match(/^\/api\/security\/passkey\/([A-Za-z0-9_-]+)$/)) && method === 'PUT') { creds.renamePasskey(m[1], (await readJson(req, 4096)).name); return send(res, 200, { ok: true }); }
         if (p === '/api/security/password' && method === 'POST') {
             const b = await readJson(req, 4096);
             if (creds.summary().passwordSet && !creds.verifyPassword(b.current)) return send(res, 401, { error: 'Current password is not right.' });
-            creds.setPassword(b.password); return send(res, 200, { ok: true });
+            creds.setPassword(b.password); auth.revokeOtherSessions(req); return send(res, 200, { ok: true });
         }
         if (p === '/api/security/sessions/revoke-others' && method === 'POST') return send(res, 200, { revoked: auth.revokeOtherSessions(req) });
         if (p === '/api/security/password' && method === 'DELETE') {
             const b = await readJson(req, 4096);
             if (!creds.verifyPassword(b.current)) return send(res, 401, { error: 'Current password is not right.' });
-            creds.clearPassword(); return send(res, 200, { ok: true });
+            creds.clearPassword(); auth.revokeOtherSessions(req); return send(res, 200, { ok: true });
         }
         if (p === '/api/security/totp/setup' && method === 'POST') return send(res, 200, totp.setup(req.headers['x-forwarded-host'] || req.headers.host || 'Porthole'));
-        if (p === '/api/security/totp/enable' && method === 'POST') { totp.enable((await readJson(req, 1024)).code); return send(res, 200, { ok: true }); }
-        if (p === '/api/security/totp/disable' && method === 'POST') { totp.disable((await readJson(req, 1024)).code); return send(res, 200, { ok: true }); }
+        if (p === '/api/security/totp/enable' && method === 'POST') { totp.enable((await readJson(req, 1024)).code); auth.revokeOtherSessions(req); return send(res, 200, { ok: true }); }
+        if (p === '/api/security/totp/disable' && method === 'POST') { totp.disable((await readJson(req, 1024)).code); auth.revokeOtherSessions(req); return send(res, 200, { ok: true }); }
 
         // App catalog
         if (p === '/api/docker/apps' && method === 'GET') return send(res, 200, await apps.list());
@@ -426,7 +433,10 @@ wss.on('connection', async (ws, req, name, params) => {
     log('ws', `attached to "${name}" from ${auth.clientAddr(req)}`);
     let alive = true;
 
-    proc.onData(data => { if (ws.readyState === ws.OPEN) ws.send(Buffer.from(data, 'utf8'), { binary: true }); });
+    proc.onData(data => { shared.capture(name, data); if (ws.readyState === ws.OPEN) ws.send(Buffer.from(data, 'utf8'), { binary: true }); });
+    // Credentials registered by `credshare` from this shell are pushed as a text frame (tmux may eat the OSC).
+    const onCred = c => { if (c.shell === name && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'cred', id: c.id, title: c.title, port: c.port })); };
+    shared.events.on('added', onCred);
     proc.onExit(({ exitCode }) => {
         if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({ type: 'exit', code: exitCode }));
@@ -443,6 +453,7 @@ wss.on('connection', async (ws, req, name, params) => {
         else if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
     });
     ws.on('close', () => {
+        shared.events.off('added', onCred);
         if (!alive) return;
         alive = false;
         try { proc.kill(); } catch { /* already gone */ }

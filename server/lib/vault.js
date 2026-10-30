@@ -35,13 +35,13 @@ function loadKey() {
 }
 const key = loadKey();
 
-function encrypt(plain) {
+export function encrypt(plain) {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     const ct = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
     return `${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${ct.toString('base64')}`;
 }
-function decrypt(blob) {
+export function decrypt(blob) {
     const [iv, tag, ct] = String(blob).split('.').map(s => Buffer.from(s, 'base64'));
     const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
     d.setAuthTag(tag);

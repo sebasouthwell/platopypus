@@ -80,7 +80,7 @@
     <div class="tiles">
       <button class="tile" data-act="agent"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>AI agent</button>
       <button class="tile" data-act="upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
-      <button class="tile" data-act="stirling"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-stirling"/></svg></span>Stirling PDF</button>
+      <button class="tile" data-act="scratch"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-zap"/></svg></span>Quick task</button>
       <button class="tile" data-act="shell"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</button>
     </div>
   </section>
@@ -204,6 +204,7 @@
   <div class="term-wrap">
     <div id="term" class="term"></div>
     <div class="fontctl"><button id="key-font-down" aria-label="Smaller text">A−</button><button id="key-font-up" aria-label="Larger text">A+</button></div>
+    <div id="term-history" class="term-history" hidden><div class="term-history-bar"><span>Scroll mode · full history, live</span><button id="history-close" class="pill">Back to live</button></div><pre></pre></div>
     <button id="copy-chip" class="copy-chip" hidden><svg class="i"><use href="/sprite.svg#i-copy"/></svg>Copy selection</button>
   </div>
   <div class="keys" role="toolbar" aria-label="Terminal keys">
@@ -224,9 +225,11 @@
     <button id="key-copy" aria-label="Copy"><svg class="i"><use href="/sprite.svg#i-copy"/></svg></button>
     <button id="key-paste" aria-label="Paste"><svg class="i"><use href="/sprite.svg#i-paste"/></svg></button>
     <button id="key-history" aria-label="History"><svg class="i"><use href="/sprite.svg#i-history"/></svg></button>
+    <button id="key-scroll" aria-label="Scroll mode" title="Scroll through the full history"><svg class="i"><use href="/sprite.svg#i-history"/></svg>scroll</button>
     <button id="key-mouse" aria-label="Mouse to tmux" title="Mouse to tmux (wheel scrolls history)"><svg class="i"><use href="/sprite.svg#i-mouse"/></svg>mouse</button>
     <button id="key-kbd" aria-label="Keyboard"><svg class="i"><use href="/sprite.svg#i-keyboard"/></svg></button>
   </div>
+  <div class="quick creds" id="term-creds" hidden></div>
   <div class="quick links" id="term-links" hidden></div>
   <div class="quick" id="quick-replies"></div>
   <form id="composer" class="composer">

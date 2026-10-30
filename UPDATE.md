@@ -41,7 +41,8 @@ with mode 0600. Formats as of version 1.0:
 | `tmux.conf` | config.js | regenerated at every start; not user-editable |
 | `auth-sessions.json` | auth.js | `{ "<sid>": { created, lastSeen, ua, how } }` |
 | `security.json` | credentials.js, totp.js | `{ passkeys: [{ id, publicKey(base64url), counter, transports, deviceType, backedUp, name, created, lastUsed }], password: { salt, hash, set }, totp: { enabled, secret(base32), enabledAt, lastCounter }, pending: {...} }` — any key may be absent |
-| `shells.json` | shells.js | `{ "<name>": { kind: shell\|agent\|remote-control, cwd, created, agent?, yolo?, resume?, profile? } }` — legacy `kind: "claude"` is read as `agent` + `agent: "claude"` |
+| `shells.json` | shells.js | `{ "<name>": { kind: shell\|agent\|remote-control, cwd, created, agent?, yolo?, resume?, profile?, scratch? } }` — legacy `kind: "claude"` is read as `agent` + `agent: "claude"`; `scratch: true` (1.1.0) marks a shell whose `cwd` under `~/scratch/` is deleted when the shell is ended |
+| `shared-creds.json` | sharedcreds.js | `{ items: [ { id, title, fields: [{ label, value(enc), secret }], url, note, shell, port, at } ] }` — credentials handed over by `credshare`; values encrypted with `vault.key`; dropped after 7 days (1.0.4, documented 1.1.0) |
 | `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses } }`; logs are cloudflared output |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
@@ -55,7 +56,15 @@ never edits nginx config. Do not hand-edit the site file on a box; change the te
 
 Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profiles/claude/<name>` (Claude
 profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, `~/.config/gh`, `~/.ssh/id_ed25519`,
-`~/apps/<app>/` (volumes for catalogue apps), `<project>/.pasted/` (attachments), `/etc/porthole.env`.
+`~/apps/<app>/` (volumes for catalogue apps), `~/scratch/<date>-<shell>/` (scratch shells; deleted by the server when
+that shell is ended, never by an update), `<project>/.pasted/` (attachments), `/etc/porthole.env`.
+
+### Session rules (1.1.0)
+
+Sessions expire after 7 idle days (`PORTHOLE_SESSION_DAYS`) **and** 30 days after sign-in regardless of use
+(`PORTHOLE_SESSION_ABSOLUTE_DAYS`). Every credential change (password set/cleared, passkey added/removed, two-step
+enabled/disabled) revokes all other sessions. `X-Real-IP` is honoured only when the TCP peer is loopback (nginx).
+Older `auth-sessions.json` records already carry `created`, so no migration.
 
 ## Rules for compatible changes
 
@@ -86,6 +95,15 @@ profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, `~/.c
 - Run migrations at server start *before* any route is served; if a step fails, refuse to start and log how to
   roll back (`/opt/porthole.prev` + the `.bak` file).
 - Document the step here and in the release commit message, including the manual rollback.
+
+## Change log of state and API additions
+
+- **1.1.0** — `shells.json` gains optional `scratch`; `shared-creds.json` documented; new routes `POST /api/creds/share`
+  (box CLIs register a credential), `DELETE /api/shells/<name>?keep=1` (end a scratch shell but keep its folder);
+  `POST /api/docker/inspect` adds `existing`, `POST /api/docker/run` may answer **409** when a container from the same
+  image is already running (one quick-run container per image) or `{ reused: true }` when it restarted a stopped one;
+  shell WebSocket gains text frame `{ type: "cred", id, title, port }`; tmux option `allow-passthrough on` is in
+  the generated `tmux.conf` and also set live on the running tmux server (existing sessions are untouched).
 
 ## Release checklist
 

@@ -34,7 +34,7 @@ export async function list() {
             name: s.name,
             kind: m.kind === 'claude' ? 'agent' : (m.kind || 'shell'),
             agent: m.agent || (m.kind === 'claude' ? 'claude' : null),
-            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null,
+            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null, scratch: !!m.scratch,
             cwd: m.cwd || config.root,
             created: m.created || s.created,
             attached: s.attached,
@@ -52,15 +52,24 @@ export async function list() {
     return shells;
 }
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false }) {
+export const scratchRoot = path.join(config.home, 'scratch');
+
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false }) {
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
     if (name.startsWith(RESERVED_PREFIX)) throw httpError(400, 'Names starting with "tunnel-" are reserved.');
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
     if (kind === 'claude') { kind = 'agent'; agent = agent || 'claude'; }   // backwards compatible
     if (!['shell', 'agent', 'remote-control'].includes(kind)) throw httpError(400, 'Unknown shell kind.');
 
-    // No folder given → the home folder (not the files root, which may be "/").
-    const dir = !cwd || cwd === '.' ? config.home : resolveInRoot(cwd);
+    // Scratch: a throwaway folder that is deleted when the shell ends.
+    let dir;
+    if (scratch) {
+        dir = path.join(scratchRoot, `${new Date().toISOString().slice(0, 10)}-${name}`);
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } else {
+        // No folder given → the home folder (not the files root, which may be "/").
+        dir = !cwd || cwd === '.' ? config.home : resolveInRoot(cwd);
+    }
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw httpError(400, 'That folder does not exist.');
 
     let command, agentEnv = {}, agentInfo = null;
@@ -76,21 +85,27 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
 
     // General-scope vault tokens plus any scoped to this folder become environment variables.
     const secrets = await envFor(dir);
-    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', ...secrets, ...agentEnv });
+    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv });
     if (Object.keys(secrets).length) log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`);
-    meta[name] = { kind, cwd: dir, created: Date.now(), ...(agentInfo || {}) };
+    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, ...(agentInfo || {}) };
     persist();
     log('shell', `created ${kind}${agentInfo ? ` (${agentInfo.agent}${agentInfo.yolo ? ', auto-approve' : ''}${agentInfo.resume ? ', resume' : ''}${agentInfo.profile !== 'default' ? ', profile ' + agentInfo.profile : ''})` : ''} "${name}" in ${dir}`);
     return { name, kind, cwd: dir, created: meta[name].created, ...(agentInfo || {}) };
 }
 
-export async function kill(name) {
+export async function kill(name, { deleteScratch = true } = {}) {
     if (!validName(name)) throw httpError(400, 'Bad shell name.');
     if (!(await hasSession(name))) throw httpError(404, 'No such shell.');
     await killSession(name);
+    const m = meta[name];
     delete meta[name];
     persist();
     log('shell', `killed "${name}"`);
+    // Scratch shells take their folder with them (only ever under ~/scratch).
+    if (m?.scratch && deleteScratch && m.cwd && m.cwd.startsWith(scratchRoot + path.sep)) {
+        fs.rmSync(m.cwd, { recursive: true, force: true });
+        log('shell', `deleted scratch folder ${m.cwd}`);
+    }
 }
 
 // Attach a pty to a tmux session for a WebSocket client. Returns the pty process.
