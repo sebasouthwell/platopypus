@@ -45,11 +45,14 @@ const TOKEN = loadToken();
 
 // ---------- helpers ----------
 
+const RUNNING_VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '0'; } catch { return '0'; } })();
+
 function send(res, status, body, headers = {}) {
     const data = typeof body === 'string' ? body : JSON.stringify(body);
     res.writeHead(status, {
         'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
+        'X-Porthole-Version': RUNNING_VERSION,
         ...securityHeaders(),
         ...headers,
     });
@@ -194,7 +197,7 @@ const server = http.createServer(async (req, res) => {
             if (!auth.hasCsrfHeader(req)) return send(res, 403, { error: 'Missing request header.' });
         }
 
-        if (p === '/api/me' && method === 'GET') return send(res, 200, { ok: true, created: session.created });
+        if (p === '/api/me' && method === 'GET') return send(res, 200, { ok: true, created: session.created, version: RUNNING_VERSION });
 
         // Shells
         if (p === '/api/shells' && method === 'GET') return send(res, 200, await shells.list());

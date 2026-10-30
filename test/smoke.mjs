@@ -93,6 +93,12 @@ const badWs = await new Promise(resolve => {
 });
 check('websocket without cookie refused', badWs === 401);
 
+// 5c. tmux mouse toggle round-trips.
+r = await call('/api/shells/smoke/mouse', { method: 'POST', body: { on: true } });
+check('mouse on', r.status === 200 && r.body.mouse === true, JSON.stringify(r.body));
+r = await call('/api/shells/smoke/mouse', { method: 'POST', body: { on: false } });
+check('mouse off', r.status === 200 && r.body.mouse === false, JSON.stringify(r.body));
+
 // 6. Scrollback + history endpoints.
 r = await call('/api/shells/smoke/scrollback?lines=200');
 check('scrollback contains the echoed marker', r.status === 200 && String(r.body).includes(marker));

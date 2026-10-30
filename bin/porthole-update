@@ -17,7 +17,7 @@ LOCK="$STATE/update.lock"
 RESULT="$STATE/update-result.json"
 [ -f /etc/porthole.env ] && { set -a; . /etc/porthole.env; set +a; }
 
-say() { printf '%s [update] %s\n' "$(date -u +%FT%TZ)" "$*"; }
+say() { printf '%s [update] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$STATE/update.log"; }
 finish() { # status message
     printf '{"ok":%s,"message":%s,"at":%s,"from":"%s","to":"%s"}\n' "$1" "$(printf '%s' "$2" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$2")" "$(date +%s000)" "${FROM:-?}" "${TO:-?}" > "$RESULT"
     rm -f "$LOCK"
@@ -53,7 +53,7 @@ rm -rf "$APP.prev"
 cp -a "$APP" "$APP.prev" || finish false "snapshot failed"
 
 # 3. install (this restarts the porthole service on a box; in a container it only replaces files)
-if PORTHOLE_SRC="$SRC" bash "$SRC/install.sh" >> "$STATE/update.log" 2>&1; then
+if PORTHOLE_SRC="$SRC" bash "$SRC/install.sh" 2>&1 | sed -E 's/(login token: +)[A-Za-z0-9_-]+/\1********/' >> "$STATE/update.log"; test "${PIPESTATUS[0]}" -eq 0; then
     say "install.sh finished"
 else
     say "install.sh failed; rolling back"

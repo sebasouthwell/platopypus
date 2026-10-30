@@ -127,8 +127,9 @@ export async function attach(name, cols, rows) {
 export async function mouse(name, on) {
     if (!validName(name)) throw httpError(400, 'Bad shell name.');
     if (!(await hasSession(name))) throw httpError(404, 'No such shell.');
-    if (typeof on === 'boolean') await tmux('set-option', '-t', `=${name}`, 'mouse', on ? 'on' : 'off');
-    const out = await tmux('show-options', '-t', `=${name}`, '-v', 'mouse');
+    // Note: set-option/show-options do not accept the "=name" exact-match target (tmux 3.4: "no such session"); "name:" does.
+    if (typeof on === 'boolean') await tmux('set-option', '-t', `${name}:`, 'mouse', on ? 'on' : 'off');
+    const out = await tmux('show-options', '-t', `${name}:`, '-v', 'mouse');
     return { mouse: out.trim() === 'on' };
 }
 

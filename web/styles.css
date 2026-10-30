@@ -236,6 +236,7 @@ button.row:active { background: var(--hull-2); }
 .term { position: absolute; inset: 8px 4px 4px 8px; }
 .term .xterm { height: 100%; }
 .term .xterm-viewport { background: #070D18 !important; }
+.linkish { background: none; border: 0; padding: 0; margin: 0; color: var(--brass, #e8b86d); font: inherit; text-decoration: underline; cursor: pointer; }
 .term-history { position: absolute; inset: 0; z-index: 4; background: #070D18; display: flex; flex-direction: column; }
 .term-history-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: 12px; color: var(--mist); border-bottom: 1px solid var(--rail); background: var(--hull); }
 .term-history pre { flex: 1; margin: 0; padding: 10px 12px; overflow: auto; -webkit-overflow-scrolling: touch; font-family: var(--mono); font-size: 12.5px; line-height: 1.45; color: #DDE5EE; white-space: pre-wrap; word-break: break-word; user-select: text; -webkit-user-select: text; }

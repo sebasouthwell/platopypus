@@ -13,6 +13,7 @@ async function api(path, { method = 'GET', body, raw = false } = {}) {
     const headers = { 'X-Porthole': '1' };
     if (body !== undefined && !(body instanceof Blob)) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, { method, headers, body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body), credentials: 'same-origin' });
+    noteServerVersion(res.headers.get('x-porthole-version'));
     if (res.status === 401 && !path.startsWith('/api/login')) { showLogin(); throw new ApiError(401, 'Signed out.'); }
     if (raw) return res;
     const data = await res.json().catch(() => ({}));
@@ -21,6 +22,20 @@ async function api(path, { method = 'GET', body, raw = false } = {}) {
 }
 
 // ---------- helpers ----------
+
+// The server stamps every API response with its version. A page that was loaded before an update (for example one
+// started from the box CLI, which shows no overlay) keeps old code; offer a reload instead of failing quietly.
+let serverVersion = null, reloadOffered = false;
+function noteServerVersion(v) {
+    if (!v) return;
+    if (serverVersion === null) { serverVersion = v; return; }
+    if (v === serverVersion || reloadOffered) return;
+    reloadOffered = true;
+    const el = $('#toast');
+    el.innerHTML = `Porthole was updated to ${esc(v)} · <button class="linkish" id="toast-reload">Reload</button>`;
+    el.classList.remove('bad'); el.hidden = false; clearTimeout(toastTimer);
+    $('#toast-reload').onclick = () => location.reload();
+}
 
 let toastTimer;
 function toast(message, bad = false) {

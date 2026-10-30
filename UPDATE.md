@@ -105,6 +105,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   shell WebSocket gains text frame `{ type: "cred", id, title, port }`; tmux option `allow-passthrough on` is in
   the generated `tmux.conf` and also set live on the running tmux server (existing sessions are untouched).
 
+- **1.1.1** — every API response carries `X-Porthole-Version` and `/api/me` returns `version` (client offers a reload
+  when the page predates the running server); updater step lines are appended to `update.log` with the token masked;
+  tmux mouse option targets fixed (`name:` instead of `=name`). No state changes.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.
