@@ -7,7 +7,7 @@
 set -euo pipefail
 
 PORT_API="${PORTHOLE_PORT:-7331}"
-STATE="${PORTHOLE_STATE:-$HOME/.porthole}"
+STATE="${PORTHOLE_STATE:-${HOME:-/root}/.porthole}"
 BASE="http://127.0.0.1:${PORT_API}"
 JAR=$(mktemp); trap 'rm -f "$JAR"' EXIT
 

@@ -9,7 +9,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-process.env.PORTHOLE_STATE ||= path.join(process.env.HOME || '/home/ubuntu', '.porthole');
+process.env.PORTHOLE_STATE ||= path.join(process.env.HOME || '/root', '.porthole');
 const lib = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'server', 'lib');
 const vault = await import(pathToFileURL(path.join(lib, 'vault.js')).href);
 const { config } = await import(pathToFileURL(path.join(lib, 'config.js')).href);

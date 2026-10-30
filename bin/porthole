@@ -10,7 +10,7 @@
 #   porthole update        run the self-updater now (same as More → Update).
 set -euo pipefail
 
-STATE="${PORTHOLE_STATE:-$HOME/.porthole}"
+STATE="${PORTHOLE_STATE:-${HOME:-/root}/.porthole}"
 APP="${PORTHOLE_APP:-/opt/porthole}"
 SEC="$STATE/security.json"
 
