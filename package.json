@@ -1,0 +1,6 @@
+{
+  "name": "porthole-root",
+  "private": true,
+  "type": "module",
+  "description": "Marks bin/ scripts as ES modules. The server has its own package.json in server/."
+}

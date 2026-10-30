@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Porthole self-updater. Runs detached from the Porthole service (systemd-run or setsid).
+#   1. fetch the public repo into $PORTHOLE_SRC (clone on first use, otherwise fast-forward to origin/$BRANCH)
+#   2. snapshot the current app to $PORTHOLE_APP.prev
+#   3. run install.sh (idempotent: rsync app, npm install, restart the porthole service)
+#   4. health-check the API; roll back from the snapshot if it does not answer within 30 s
+# Never touches: ~/.porthole (state, vault, credentials), user files, tmux sessions, Docker, nginx, certificates.
+set -uo pipefail
+
+REPO="${PORTHOLE_UPDATE_REPO:-sebasouthwell/porthole}"
+BRANCH="${PORTHOLE_UPDATE_BRANCH:-master}"
+SRC="${PORTHOLE_SRC:-/opt/porthole-src}"
+APP="${PORTHOLE_APP:-/opt/porthole}"
+STATE="${PORTHOLE_STATE:-$HOME/.porthole}"
+PORT="${PORTHOLE_PORT:-7331}"
+LOCK="$STATE/update.lock"
+RESULT="$STATE/update-result.json"
+[ -f /etc/porthole.env ] && { set -a; . /etc/porthole.env; set +a; }
+
+say() { printf '%s [update] %s\n' "$(date -u +%FT%TZ)" "$*"; }
+finish() { # status message
+    printf '{"ok":%s,"message":%s,"at":%s,"from":"%s","to":"%s"}\n' "$1" "$(printf '%s' "$2" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$2")" "$(date +%s000)" "${FROM:-?}" "${TO:-?}" > "$RESULT"
+    rm -f "$LOCK"
+    say "$2"
+    exit $([ "$1" = true ] && echo 0 || echo 1)
+}
+
+mkdir -p "$STATE"
+if [ -f "$LOCK" ] && [ "$(( $(date +%s) - $(stat -c %Y "$LOCK") ))" -lt 1800 ]; then say "another update is running"; exit 1; fi
+echo $$ > "$LOCK"
+FROM="$(cat "$APP/VERSION" 2>/dev/null | cut -d' ' -f1)"
+
+# 1. source checkout
+if [ ! -d "$SRC/.git" ]; then
+    say "no git checkout at $SRC; cloning https://github.com/$REPO"
+    rm -rf "$SRC.new"
+    if git clone --quiet --depth 1 --branch "$BRANCH" "https://github.com/$REPO" "$SRC.new"; then
+        rm -rf "$SRC"; mv "$SRC.new" "$SRC"
+    else
+        finish false "clone failed"
+    fi
+else
+    say "fetching origin/$BRANCH into $SRC"
+    git -C "$SRC" remote set-url origin "https://github.com/$REPO" 2>/dev/null
+    git -C "$SRC" fetch --quiet --depth 1 origin "$BRANCH" || finish false "fetch failed"
+    git -C "$SRC" reset --quiet --hard FETCH_HEAD || finish false "reset failed"
+fi
+TO="$(git -C "$SRC" rev-parse --short HEAD)"
+say "source at $TO (installed: ${FROM:-unknown})"
+
+# 2. snapshot
+rm -rf "$APP.prev"
+cp -a "$APP" "$APP.prev" || finish false "snapshot failed"
+
+# 3. install (this restarts the porthole service on a box; in a container it only replaces files)
+if PORTHOLE_SRC="$SRC" bash "$SRC/install.sh" >> "$STATE/update.log" 2>&1; then
+    say "install.sh finished"
+else
+    say "install.sh failed; rolling back"
+    rm -rf "$APP"; mv "$APP.prev" "$APP"
+    systemctl restart porthole 2>/dev/null || true
+    finish false "install failed; rolled back to ${FROM:-previous}"
+fi
+if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet porthole 2>/dev/null; then
+    # Container / no systemd: the node process is PID 1 → ask it to exit so the runtime restarts it on the new code.
+    say "no systemd service; signalling the server to restart"
+    kill -TERM 1 2>/dev/null || pkill -TERM -f 'node server.js' 2>/dev/null || true
+fi
+
+# 4. health check with rollback
+for i in $(seq 1 30); do
+    sleep 1
+    if curl -fsS "http://127.0.0.1:$PORT/api/login" >/dev/null 2>&1; then
+        rm -rf "$APP.prev"
+        finish true "updated ${FROM:-?} → $TO"
+    fi
+done
+say "service did not come back; rolling back"
+rm -rf "$APP"; mv "$APP.prev" "$APP"
+systemctl restart porthole 2>/dev/null || kill -TERM 1 2>/dev/null || true
+finish false "health check failed; rolled back to ${FROM:-previous}"

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Porthole</title>
+<meta name="theme-color" content="#0A1120">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Porthole">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- Sign in / first-run setup -->
+<section id="login" class="screen login" hidden>
+  <div class="login-card">
+    <div class="ring" aria-hidden="true"><span></span></div>
+    <h1>Porthole</h1>
+
+    <!-- first run -->
+    <div id="setup-pane" hidden>
+      <p class="muted">This box has no owner yet. Enter the setup token from the box (<span class="mono">box.ps1 token</span>), name this device, and create a passkey.</p>
+      <form id="setup-form">
+        <input id="setup-token" type="password" autocomplete="off" placeholder="Setup token" required>
+        <input id="setup-name" type="text" autocomplete="off" placeholder="This device (e.g. Seb's iPhone)">
+        <input id="setup-password" type="password" autocomplete="new-password" placeholder="Password (optional, 12+ characters)">
+        <button type="submit" class="primary"><svg class="i"><use href="/sprite.svg#i-key"/></svg>Create passkey and continue</button>
+        <button type="button" id="setup-password-only" class="text-btn" hidden>Use password only (no passkey here)</button>
+        <p id="setup-error" class="error" role="alert"></p>
+      </form>
+    </div>
+
+    <!-- returning -->
+    <div id="login-pane" hidden>
+      <p class="muted" id="login-hint">Sign in to your dev box.</p>
+      <div class="login-buttons">
+        <button type="button" id="login-passkey" class="primary"><svg class="i"><use href="/sprite.svg#i-key"/></svg>Sign in with passkey</button>
+        <button type="button" id="login-use-password" class="text-btn">Use password instead</button>
+      </div>
+      <form id="login-form" hidden>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" required>
+        <button type="submit" class="primary">Sign in</button>
+      </form>
+      <form id="totp-form" hidden>
+        <p class="muted">Enter the 6-digit code from your authenticator.</p>
+        <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" placeholder="6-digit code" required>
+        <button type="submit" class="primary">Continue</button>
+      </form>
+      <p id="login-error" class="error" role="alert"></p>
+    </div>
+  </div>
+</section>
+
+<!-- App -->
+<main id="app" class="screen" hidden>
+
+  <!-- HOME -->
+  <section id="tab-home" class="tab" data-tab="home">
+    <header class="topbar">
+      <div class="brand"><span class="ring small"><span></span></span><div><div class="brand-name">porthole</div><div class="sub" id="home-sub">…</div></div></div>
+      <div class="bar-actions">
+        <button class="icon-btn" id="home-search" aria-label="Search"><svg class="i"><use href="/sprite.svg#i-search"/></svg></button>
+        <button class="icon-btn accent" id="home-new" aria-label="New"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button>
+      </div>
+    </header>
+    <h1>Home</h1>
+    <div class="stats" id="home-stats"></div>
+    <div id="home-pickup"></div>
+    <h2 class="section">Projects<button class="act" id="home-all-folders">All folders</button></h2>
+    <div id="home-projects" class="list"></div>
+    <h2 class="section">Quick actions</h2>
+    <div class="tiles">
+      <button class="tile" data-act="agent"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>AI agent</button>
+      <button class="tile" data-act="upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
+      <button class="tile" data-act="stirling"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-stirling"/></svg></span>Stirling PDF</button>
+      <button class="tile" data-act="shell"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</button>
+    </div>
+  </section>
+
+  <!-- SHELLS -->
+  <section id="tab-shells" class="tab" data-tab="shells" hidden>
+    <header class="topbar"><h1>Shells</h1><button class="icon-btn accent" id="shell-new" aria-label="New shell"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button></header>
+    <div id="shell-groups"></div>
+    <p id="shell-empty" class="empty" hidden>No shells running. Tap <b>+</b> to start Claude in a project, or open a plain shell.</p>
+  </section>
+
+  <!-- SERVICES -->
+  <section id="tab-services" class="tab" data-tab="services" hidden>
+    <header class="topbar"><h1>Services</h1><button class="icon-btn accent" id="services-new" aria-label="Start something"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button></header>
+    <div class="seg" id="services-seg">
+      <button data-f="all" class="on"><svg class="i"><use href="/sprite.svg#i-services"/></svg>All</button>
+      <button data-f="links"><svg class="i"><use href="/sprite.svg#i-link"/></svg>Links</button>
+      <button data-f="dev"><svg class="i"><use href="/sprite.svg#i-devserver"/></svg>Dev</button>
+      <button data-f="docker"><svg class="i"><use href="/sprite.svg#i-container"/></svg>Docker</button>
+    </div>
+    <div id="services-body"></div>
+  </section>
+
+  <!-- FILES -->
+  <section id="tab-files" class="tab" data-tab="files" hidden>
+    <header class="topbar"><h1 id="files-title">Files</h1></header>
+    <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+    <div class="actions4">
+      <button class="tile" id="files-upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
+      <button class="tile" id="files-mkdir"><span class="ico"><svg class="i"><use href="/sprite.svg#i-folder-plus"/></svg></span>New folder</button>
+      <button class="tile" id="files-newfile"><span class="ico"><svg class="i"><use href="/sprite.svg#i-file-plus"/></svg></span>New file</button>
+      <button class="tile on" id="files-claude"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>Agent here</button>
+      <input id="files-input" type="file" multiple hidden>
+    </div>
+    <div id="repo-card"></div>
+    <div id="upload-progress" class="uprow" hidden><svg class="i"><use href="/sprite.svg#i-upload"/></svg><div class="main"><div class="uphead"><span class="upname"></span><span class="upstate">uploading</span></div><div class="upbar"><div></div></div></div></div>
+    <div id="file-list" class="list"></div>
+    <p id="files-empty" class="empty" hidden>Empty folder. Upload something, or create a file or folder.</p>
+    <h2 class="section" id="files-shells-title">Shells here</h2>
+    <div id="files-shells" class="list"></div>
+  </section>
+
+  <!-- MORE -->
+  <section id="tab-more" class="tab" data-tab="more" hidden>
+    <header class="topbar"><h1>More</h1></header>
+    <p class="sub mono" id="more-sub"></p>
+    <div class="card" id="box-card"></div>
+    <div class="list gap" id="update-card"></div>
+    <div class="list gap" id="more-list">
+      <button class="row" data-page="vault"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Vault</div><div class="sub" id="more-vault-sub">Tokens for Claude and your projects</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="security"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Security</div><div class="sub" id="more-security-sub">Two-step codes, signed-in devices</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">Remote Control</div><div class="sub" id="more-remote-sub">Drive this box from the Claude app</div></div><button class="switch" id="remote-switch" role="switch" aria-checked="false" aria-label="Remote Control"><span></span></button></div>
+      <button class="row" data-page="agents"><span class="ico"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">AI agents</div><div class="sub" id="more-claude-sub">Claude Code, Codex, Gemini · profiles</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="github"><span class="ico"><svg class="i"><use href="/sprite.svg#i-branch"/></svg></span><div class="main"><div class="title">GitHub</div><div class="sub" id="more-github-sub">Repos, cloning, publishing</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+    </div>
+    <h2 class="section">Connections</h2>
+    <div id="box-conn" class="list"></div>
+    <button class="bigbtn danger gap" id="logout"><svg class="i"><use href="/sprite.svg#i-logout"/></svg>Sign out on this phone</button>
+  </section>
+
+  <!-- Pushed pages -->
+  <section id="page-vault" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>Vault</h1>
+      <button class="icon-btn accent" id="vault-new" aria-label="Add token"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button>
+    </header>
+    <p class="note">Tokens are encrypted on the box. General tokens reach every shell; project tokens only reach shells started inside that folder. Claude is told to use them from here instead of asking you.</p>
+    <div id="vault-list" class="list"></div>
+    <p id="vault-empty" class="empty" hidden>No tokens yet. Add an API key or OAuth token and label what it is for.</p>
+  </section>
+
+  <section id="page-security" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>Security</h1><span class="spacer"></span>
+    </header>
+    <div id="security-body" class="list"></div>
+    <p class="note gap">This app is root-level control of the box. Keep two-step codes on and sign out of devices you no longer use. Lost your authenticator? Run <span class="mono">box.ps1 reset-totp</span> from the laptop.</p>
+  </section>
+
+  <section id="page-agents" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>AI agents</h1><span class="spacer"></span>
+    </header>
+    <div id="agents-body"></div>
+    <p class="note gap">Sign in opens a shell running the agent's login; follow the link it prints and paste the code back. Claude profiles are separate config folders, so each can be signed in to a different account.</p>
+  </section>
+
+  <section id="page-github" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>GitHub</h1>
+      <button class="icon-btn accent" id="github-clone" aria-label="Clone a repository"><svg class="i"><use href="/sprite.svg#i-cloud-down"/></svg></button>
+    </header>
+    <div id="github-account" class="list"></div>
+    <h2 class="section">Your repositories<span class="meta" id="github-count"></span></h2>
+    <div id="github-repos" class="list"></div>
+    <p id="github-empty" class="empty" hidden></p>
+    <p class="note gap">Everything you build here can live in GitHub, so the box is disposable: push your projects, export the vault, run <span class="mono">terraform destroy</span>.</p>
+  </section>
+
+  <nav class="tabs" aria-label="Sections">
+    <button data-go="home" class="active"><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</button>
+    <button data-go="shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</button>
+    <button data-go="services"><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</button>
+    <button data-go="files"><svg class="i"><use href="/sprite.svg#i-files"/></svg>Files</button>
+    <button data-go="more"><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</button>
+  </nav>
+</main>
+
+<!-- Terminal sheet -->
+<section id="term-sheet" class="sheet" hidden>
+  <header class="topbar compact">
+    <button class="text-btn back" id="term-back"><svg class="i"><use href="/sprite.svg#i-back"/></svg><span id="term-back-label">Shells</span></button>
+    <div class="term-head"><div id="term-title"></div><div id="term-subtitle" class="sub"></div></div>
+    <button class="pill danger" id="term-kill">End</button>
+  </header>
+  <div class="chips" id="term-chips"></div>
+  <div class="term-wrap">
+    <div id="term" class="term"></div>
+    <div class="fontctl"><button id="key-font-down" aria-label="Smaller text">A−</button><button id="key-font-up" aria-label="Larger text">A+</button></div>
+    <button id="copy-chip" class="copy-chip" hidden><svg class="i"><use href="/sprite.svg#i-copy"/></svg>Copy selection</button>
+  </div>
+  <div class="keys" role="toolbar" aria-label="Terminal keys">
+    <button data-key="\u001b">esc</button>
+    <button data-key="\t">tab</button>
+    <button id="key-ctrl">ctrl</button>
+    <button id="key-alt">alt</button>
+    <button data-key="\u001b[A">↑</button>
+    <button data-key="\u001b[B">↓</button>
+    <button data-key="\u001b[D">←</button>
+    <button data-key="\u001b[C">→</button>
+    <button data-key="\u0003">^C</button>
+    <button data-key="\u001b[H">home</button>
+    <button data-key="\u001b[F">end</button>
+    <button data-key="\u001b[5~">pgup</button>
+    <button data-key="\u001b[6~">pgdn</button>
+    <button data-key="\u001b[3~">del</button>
+    <button id="key-copy" aria-label="Copy"><svg class="i"><use href="/sprite.svg#i-copy"/></svg></button>
+    <button id="key-paste" aria-label="Paste"><svg class="i"><use href="/sprite.svg#i-paste"/></svg></button>
+    <button id="key-history" aria-label="History"><svg class="i"><use href="/sprite.svg#i-history"/></svg></button>
+    <button id="key-mouse" aria-label="Mouse to tmux" title="Mouse to tmux (wheel scrolls history)"><svg class="i"><use href="/sprite.svg#i-mouse"/></svg>mouse</button>
+    <button id="key-kbd" aria-label="Keyboard"><svg class="i"><use href="/sprite.svg#i-keyboard"/></svg></button>
+  </div>
+  <div class="quick links" id="term-links" hidden></div>
+  <div class="quick" id="quick-replies"></div>
+  <form id="composer" class="composer">
+    <button type="button" class="attach" id="composer-attach" aria-label="Attach a file or photo"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button>
+    <input id="composer-file" type="file" multiple hidden>
+    <textarea id="composer-input" rows="1" placeholder="Message Claude" enterkeyhint="send"></textarea>
+    <button type="submit" class="send" aria-label="Send"><svg class="i"><use href="/sprite.svg#i-send"/></svg></button>
+  </form>
+</section>
+
+<!-- Editor sheet -->
+<section id="editor-sheet" class="sheet" hidden>
+  <header class="topbar compact">
+    <button class="text-btn back" id="editor-back"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Files</button>
+    <div class="term-head"><div id="editor-title" class="mono"></div><div id="editor-subtitle" class="sub"></div></div>
+    <button class="pill accent" id="editor-save" disabled><svg class="i"><use href="/sprite.svg#i-check"/></svg>Save</button>
+  </header>
+  <textarea id="editor-text" class="editor" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" wrap="off"></textarea>
+  <div class="editor-bar">
+    <button data-ins="\t">tab</button>
+    <button data-ins="{}">{ }</button>
+    <button data-ins="[]">[ ]</button>
+    <button data-ins="()">( )</button>
+    <button data-ins='""'>" "</button>
+    <button data-ins="''">' '</button>
+    <button data-ins="`">`</button>
+    <button data-ins="#">#</button>
+    <button data-ins="-">-</button>
+    <button data-ins="_">_</button>
+    <button data-ins="=">=</button>
+    <button data-ins="|">|</button>
+    <button data-ins="\\">\</button>
+    <button data-ins="/">/</button>
+    <button data-ins="<">&lt;</button>
+    <button data-ins=">">&gt;</button>
+    <button data-ins="$">$</button>
+    <button id="editor-wrap">wrap</button>
+  </div>
+</section>
+
+<!-- Update in progress -->
+<section id="update-overlay" class="screen login" hidden>
+  <div class="login-card">
+    <div class="ring" aria-hidden="true"><span></span></div>
+    <h1>Updating Porthole</h1>
+    <p class="muted" id="update-overlay-text">Shutting down for approximately 5 minutes. The service restarts automatically after the update and this page will reload itself. Shells, tunnels, containers and files are untouched.</p>
+    <p class="mono" id="update-overlay-status" style="color:var(--mist);font-size:13px"></p>
+  </div>
+</section>
+
+<div id="dialog" class="dialog" hidden>
+  <div class="dialog-backdrop"></div>
+  <div class="dialog-panel" role="dialog" aria-modal="true"></div>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/vendor/addon-web-links.js"></script>
+<script src="/vendor/addon-unicode11.js"></script>
+<script src="/vendor/addon-webgl.js"></script>
+<script src="/vendor/addon-clipboard.js"></script>
+<script src="/vendor/webauthn.js"></script>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

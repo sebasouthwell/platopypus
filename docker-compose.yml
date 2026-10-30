@@ -1,0 +1,26 @@
+services:
+  porthole:
+    build: .
+    image: porthole:dev
+    container_name: porthole
+    ports:
+      - "0.0.0.0:7331:7331"     # LAN-reachable for phone testing (token-protected; switch back to 127.0.0.1 when done)
+    environment:
+      PORTHOLE_TOKEN: ${PORTHOLE_TOKEN:-porthole-test}   # setup token for the first run
+      # Passkeys need https/localhost; over the LAN http address only a password works, so allow password-only setup here.
+      PORTHOLE_ALLOW_PASSWORD_ONLY: "1"
+      # Containers started from here publish on the host, not in this container.
+      PORTHOLE_DOCKER_HOST: host.docker.internal
+    volumes:
+      - porthole-home:/root
+      # Lets the Docker section of the UI be tested locally against the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    group_add:
+      - "0"
+    init: true
+    restart: unless-stopped
+
+volumes:
+  porthole-home:

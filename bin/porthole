@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Porthole box CLI — recovery and housekeeping, run on the box as the service user (root by default).
+#
+#   porthole reset-auth    forget passkeys, password, two-step codes and all sessions; print a fresh setup token.
+#                          The web app shows the first-run setup screen again. Vault, files, shells, containers untouched.
+#   porthole reset-totp    turn two-step codes off only (lost authenticator); passkey/password still required.
+#   porthole token         print the current setup/CLI token (only useful before first setup or after reset-auth).
+#   porthole sessions      sign every device out (credentials stay).
+#   porthole status        service, version, credential summary.
+#   porthole update        run the self-updater now (same as More → Update).
+set -euo pipefail
+
+STATE="${PORTHOLE_STATE:-$HOME/.porthole}"
+APP="${PORTHOLE_APP:-/opt/porthole}"
+SEC="$STATE/security.json"
+
+restart_service() {
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet porthole 2>/dev/null; then
+        systemctl restart porthole && echo "porthole service restarted"
+    else
+        echo "restart the Porthole server to apply (it reads the token at start)"
+    fi
+}
+
+case "${1:-}" in
+    reset-auth)
+        rm -f "$SEC" "$STATE/auth-sessions.json"
+        tr -dc 'A-Za-z0-9_-' < /dev/urandom | head -c 32 > "$STATE/token"; echo >> "$STATE/token"; chmod 600 "$STATE/token"
+        echo "passkeys, password, two-step codes and sessions removed."
+        echo "new setup token: $(cat "$STATE/token")"
+        echo "open the site: it shows the setup screen; enter this token and create a passkey."
+        restart_service
+        ;;
+    reset-totp)
+        if [ -f "$SEC" ]; then
+            node -e 'const fs=require("fs");const f=process.argv[1];const s=JSON.parse(fs.readFileSync(f,"utf8"));delete s.totp;delete s.pending;fs.writeFileSync(f,JSON.stringify(s,null,2));' "$SEC"
+            echo "two-step codes removed; passkey or password still required."
+        else
+            echo "no security state yet (first run)."
+        fi
+        ;;
+    token)
+        cat "$STATE/token" 2>/dev/null || echo "no token file yet; start the server once (or run: porthole reset-auth)"
+        ;;
+    sessions)
+        rm -f "$STATE/auth-sessions.json"; echo "all devices signed out."; restart_service
+        ;;
+    status)
+        echo "version:  $(node -e 'console.log(require(process.argv[1]).version)' "$APP/server/package.json" 2>/dev/null || echo '?') ($(cat "$APP/VERSION" 2>/dev/null | cut -d' ' -f1))"
+        if command -v systemctl >/dev/null 2>&1; then echo "service:  $(systemctl is-active porthole 2>/dev/null || echo 'not installed')"; fi
+        if [ -f "$SEC" ]; then
+            node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(`passkeys: ${(s.passkeys||[]).length}  password: ${s.password?"set":"no"}  two-step: ${s.totp&&s.totp.enabled?"on":"off"}`)' "$SEC"
+        else
+            echo "credentials: none (setup screen will show)"
+        fi
+        echo "sessions: $(node -e 'try{console.log(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))).length)}catch{console.log(0)}' "$STATE/auth-sessions.json")"
+        echo "state:    $STATE"
+        ;;
+    update)
+        exec bash "$APP/bin/porthole-update"
+        ;;
+    *)
+        sed -n '2,10p' "$0"
+        ;;
+esac

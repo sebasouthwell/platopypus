@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Porthole — design proposal v2.1</title>
+<style>
+  :root { --sea:#0F1A26; --hull:#182637; --hull2:#1F3044; --rail:#2A3E55; --foam:#F2F5F7; --mist:#93A6BB; --dim:#5F7389; --brass:#D6AD52; --brassink:#2B2110; --kelp:#45C39A; --flare:#F26B57; --dock:#6FB1F0; }
+  body { margin:0; background:#05080c; color:var(--foam); font-family:-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif; }
+  .board { display:flex; gap:28px; padding:36px; align-items:flex-start; }
+  .col { width:390px; }
+  .label { color:var(--mist); font-size:13px; margin:0 0 10px 6px; line-height:1.45; min-height:58px; }
+  .label b { color:var(--foam); font-weight:600; display:block; font-size:14px; }
+  .phone { width:390px; height:844px; background:var(--sea); border-radius:44px; overflow:hidden; position:relative; box-shadow:0 0 0 1.5px #2a3340, 0 30px 70px rgba(0,0,0,.6); display:flex; flex-direction:column; }
+  .status { height:48px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 6px; font-size:14px; font-weight:600; }
+  .status .island { position:absolute; top:12px; left:50%; transform:translateX(-50%); width:118px; height:34px; border-radius:20px; background:#000; }
+  .screen { flex:1; overflow:hidden; padding:0 16px; display:flex; flex-direction:column; }
+  h1 { font-size:30px; font-weight:700; letter-spacing:-.02em; margin:8px 0 2px; }
+  .sub { color:var(--mist); font-size:14px; margin:0 0 14px; }
+  .bar { display:flex; align-items:center; justify-content:space-between; }
+  .ib { width:38px; height:38px; border-radius:50%; background:var(--hull); display:inline-flex; align-items:center; justify-content:center; color:var(--brass); }
+  .ib + .ib { margin-left:8px; }
+  svg.i { width:22px; height:22px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  h2 { font-size:13px; font-weight:500; color:var(--mist); margin:18px 4px 8px; display:flex; align-items:center; gap:6px; }
+  h2 svg.i { width:14px; height:14px; }
+  h2 .act { margin-left:auto; color:var(--brass); font-weight:500; }
+  .list { background:var(--hull); border-radius:14px; overflow:hidden; }
+  .row { display:flex; align-items:center; gap:12px; padding:12px 14px; min-height:54px; position:relative; }
+  .row + .row::before { content:""; position:absolute; left:60px; right:0; top:0; height:1px; background:var(--rail); }
+  .ico { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex:none; background:var(--sea); color:var(--mist); }
+  .ico svg.i { width:20px; height:20px; }
+  .ico.brass { color:var(--brass); background:rgba(214,173,82,.14); }
+  .ico.kelp { color:var(--kelp); background:rgba(69,195,154,.14); }
+  .ico.dock { color:var(--dock); background:rgba(111,177,240,.14); }
+  .main { flex:1; min-width:0; }
+  .t { font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .s { font-size:13px; color:var(--mist); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:6px; }
+  .s .live { color:var(--kelp); }
+  .s .mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:5px; background:rgba(111,177,240,.16); color:var(--dock); }
+  .tag.brass { background:rgba(214,173,82,.16); color:var(--brass); }
+  .chev { color:var(--dim); }
+  .pill { font-size:14px; padding:7px 13px; border-radius:999px; background:var(--hull2); color:var(--foam); white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+  .pill svg.i { width:15px; height:15px; }
+  .pill.accent { background:var(--brass); color:var(--brassink); font-weight:600; }
+  .pill.ghost { background:transparent; color:var(--brass); border:1px solid var(--rail); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--dim); flex:none; }
+  .dot.live { background:var(--kelp); box-shadow:0 0 0 3px rgba(69,195,154,.18); }
+  .chips { display:flex; gap:8px; overflow:hidden; }
+  .chip { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; background:var(--hull); font-size:14px; white-space:nowrap; }
+  .chip svg.i { width:18px; height:18px; color:var(--brass); }
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .tile { background:var(--hull); border-radius:14px; padding:12px 6px 10px; text-align:center; font-size:11.5px; color:var(--mist); line-height:1.2; }
+  .tile .ico { margin:0 auto 7px; width:40px; height:40px; }
+  .tabs { height:84px; border-top:1px solid var(--rail); display:grid; grid-template-columns:repeat(5,1fr); padding:8px 6px 0; background:rgba(15,26,38,.96); }
+  .tabs div { display:flex; flex-direction:column; align-items:center; gap:4px; font-size:10.5px; color:var(--mist); }
+  .tabs div.on { color:var(--brass); }
+  .tabs svg.i { width:24px; height:24px; }
+  .term { flex:1; background:#0B131D; border-radius:12px; margin:6px 0 0; padding:10px 12px; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:11.5px; line-height:1.45; color:#D5DEE8; white-space:pre; overflow:hidden; }
+  .term .p { color:var(--brass); } .term .g { color:var(--kelp); } .term .m { color:var(--mist); } .term .b { color:var(--dock); }
+  .keys { display:flex; gap:6px; padding:8px 0; overflow:hidden; }
+  .keys span { flex:none; min-width:42px; height:34px; display:inline-flex; align-items:center; justify-content:center; padding:0 10px; border-radius:9px; background:var(--hull); font-family:ui-monospace,Menlo,monospace; font-size:12.5px; gap:4px; }
+  .keys span svg.i { width:16px; height:16px; }
+  .keys span.on { background:var(--brass); color:var(--brassink); }
+  .compose { display:flex; gap:8px; align-items:center; padding:0 0 10px; }
+  .compose .in { flex:1; background:var(--hull); border-radius:20px; padding:11px 14px; color:var(--foam); font-size:15px; }
+  .compose .send { width:40px; height:40px; border-radius:50%; background:var(--brass); color:var(--brassink); display:inline-flex; align-items:center; justify-content:center; }
+  .crumbs { display:flex; gap:6px; font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--mist); margin:0 0 10px; align-items:center; }
+  .crumbs span { background:var(--hull); padding:4px 8px; border-radius:8px; } .crumbs span.cur { color:var(--foam); background:var(--hull2); }
+  .notes { margin:0 36px 40px; color:var(--mist); font-size:14px; line-height:1.55; display:grid; grid-template-columns:repeat(3,1fr); gap:28px; max-width:1660px; }
+  .notes h3 { color:var(--foam); font-size:15px; margin:0 0 6px; font-weight:600; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; }
+  .legend span { display:inline-flex; align-items:center; gap:8px; }
+</style>
+</head>
+<body>
+<div class="board">
+
+  <!-- HOME -->
+  <div class="col">
+    <p class="label"><b>1 · Home</b>What's live, then your projects. A project = folder + shells + services. One tap resumes where you left off.</p>
+    <div class="phone">
+      <div class="status"><span class="island"></span><span>9:41</span><span>●●● ⌁</span></div>
+      <div class="screen">
+        <div class="bar"><h1>Home</h1><span class="ib"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></span></div>
+        <p class="sub">porthole · up 2 days · 1.2 GB free</p>
+        <div class="chips">
+          <span class="chip"><svg class="i"><use href="/sprite.svg#i-shells"/></svg>2 shells</span>
+          <span class="chip"><svg class="i"><use href="/sprite.svg#i-link"/></svg>1 link live</span>
+          <span class="chip"><svg class="i"><use href="/sprite.svg#i-container"/></svg>3 containers</span>
+        </div>
+        <h2>Projects</h2>
+        <div class="list">
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-folder"/></svg></span><div class="main"><div class="t">my-app</div><div class="s"><span class="live">● Claude working</span> · link live · 8 min ago</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-folder"/></svg></span><div class="main"><div class="t">second-app</div><div class="s">shell idle · yesterday</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-folder"/></svg></span><div class="main"><div class="t">old-site</div><div class="s">nothing running · 3 days ago</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-folder-plus"/></svg></span><div class="main"><div class="t" style="color:var(--brass)">New project</div></div></div>
+        </div>
+        <h2>Quick actions</h2>
+        <div class="tiles">
+          <div class="tile"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>Ask Claude</div>
+          <div class="tile"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload a file</div>
+          <div class="tile"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-stirling"/></svg></span>Stirling PDF</div>
+          <div class="tile"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</div>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="on"><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</div>
+        <div><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</div>
+        <div><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</div>
+        <div><svg class="i"><use href="/sprite.svg#i-files"/></svg>Files</div>
+        <div><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHELL -->
+  <div class="col">
+    <p class="label"><b>2 · Shell</b>Real pty, full TUI. Key strip for what the phone keyboard lacks; copy, paste, history and font size as icons. The composer is the chat box.</p>
+    <div class="phone">
+      <div class="status"><span class="island"></span><span>9:41</span><span>●●● ⌁</span></div>
+      <div class="screen">
+        <div class="bar" style="padding:6px 0 0">
+          <span style="display:flex;align-items:center;gap:2px;color:var(--brass)"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Shells</span>
+          <div style="text-align:center"><div style="font-size:16px;font-weight:600">my-app</div><div class="s" style="margin:0;justify-content:center">Claude · ~/Projects/my-app</div></div>
+          <span style="color:var(--flare)">End</span>
+        </div>
+        <div class="term"><span class="p">╭─ Claude Code</span> <span class="m">v2.1 · sonnet · my-app</span>
+<span class="m">│</span>
+<span class="m">│</span> <span class="b">›</span> add a dark mode toggle to the scanner page
+<span class="m">│</span>
+<span class="m">│</span> <span class="g">●</span> Read app/templates/scan.html
+<span class="m">│</span> <span class="g">●</span> Edit app/static/scan.css <span class="m">(+34 −2)</span>
+<span class="m">│</span> <span class="g">●</span> Edit app/templates/scan.html <span class="m">(+11)</span>
+<span class="m">│</span>
+<span class="m">│</span> Added a toggle in the header that persists
+<span class="m">│</span> to localStorage. The OCR overlay colours now
+<span class="m">│</span> come from CSS variables so both themes work.
+<span class="m">│</span>
+<span class="m">│</span> Want me to run it on :8008 and open a link?
+<span class="m">│</span>
+<span class="p">╰─</span> <span class="m">? for shortcuts</span>                      <span class="m">⏎ send</span>
+</div>
+        <div class="keys"><span>esc</span><span>tab</span><span class="on">ctrl</span><span>alt</span><span>↑</span><span>↓</span><span>←</span><span>→</span><span>^C</span><span><svg class="i"><use href="/sprite.svg#i-copy"/></svg></span><span><svg class="i"><use href="/sprite.svg#i-paste"/></svg></span><span><svg class="i"><use href="/sprite.svg#i-history"/></svg></span><span><svg class="i"><use href="/sprite.svg#i-font"/></svg></span></div>
+        <div class="compose"><div class="in">yes, run it and tunnel it</div><span class="send"><svg class="i"><use href="/sprite.svg#i-send"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SERVICES -->
+  <div class="col">
+    <p class="label"><b>3 · Services</b>Three clearly separated groups: shared links (green), dev servers from your shells (brass), Docker (blue, with its own header, actions and compose projects). Apps are Docker too, so they sit under it.</p>
+    <div class="phone">
+      <div class="status"><span class="island"></span><span>9:41</span><span>●●● ⌁</span></div>
+      <div class="screen">
+        <div class="bar"><h1>Services</h1></div>
+        <h2><svg class="i"><use href="/sprite.svg#i-link"/></svg>Shared links<span class="act">public · 4 h</span></h2>
+        <div class="list">
+          <div class="row"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-link"/></svg></span><div class="main"><div class="t">my-app dev server</div><div class="s"><span class="mono">sure-lamp-cat.trycloudflare.com</span> · 3 h left</div></div><span class="pill accent"><svg class="i"><use href="/sprite.svg#i-external"/></svg>Open</span></div>
+        </div>
+        <h2><svg class="i"><use href="/sprite.svg#i-devserver"/></svg>Dev servers<span class="act">from your shells</span></h2>
+        <div class="list">
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-devserver"/></svg></span><div class="main"><div class="t">python · :8008</div><div class="s"><span class="live">● shared</span> · my-app shell</div></div><span class="pill"><svg class="i"><use href="/sprite.svg#i-x"/></svg>Unshare</span></div>
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-devserver"/></svg></span><div class="main"><div class="t">node · :5173</div><div class="s">second-app shell</div></div><span class="pill ghost"><svg class="i"><use href="/sprite.svg#i-share"/></svg>Share</span></div>
+        </div>
+        <h2><svg class="i"><use href="/sprite.svg#i-container"/></svg>Docker<span class="act">Run image…</span></h2>
+        <div class="list">
+          <div class="row"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-container"/></svg></span><div class="main"><div class="t">Stirling PDF <span class="tag">app</span></div><div class="s"><span class="live">● up 2 h</span> · <span class="mono">:8081</span> · not shared</div></div><span class="pill ghost"><svg class="i"><use href="/sprite.svg#i-share"/></svg>Share</span></div>
+          <div class="row"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-database"/></svg></span><div class="main"><div class="t">postgres</div><div class="s"><span class="live">● up 2 d</span> · <span class="mono">:5432</span> · local only</div></div><span class="pill"><svg class="i"><use href="/sprite.svg#i-logs"/></svg>Logs</span></div>
+          <div class="row"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-compose"/></svg></span><div class="main"><div class="t">notes-stack <span class="tag">compose</span></div><div class="s">2 containers · running</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico" style="color:var(--dim)"><svg class="i"><use href="/sprite.svg#i-container"/></svg></span><div class="main"><div class="t" style="color:var(--mist)">app-n8n</div><div class="s">stopped · 2 h ago</div></div><span class="pill"><svg class="i"><use href="/sprite.svg#i-play"/></svg>Start</span></div>
+        </div>
+        <h2><svg class="i"><use href="/sprite.svg#i-zap"/></svg>Apps in one tap<span class="act">run in Docker</span></h2>
+        <div class="tiles">
+          <div class="tile"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-n8n"/></svg></span>n8n</div>
+          <div class="tile"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-excalidraw"/></svg></span>Excalidraw</div>
+          <div class="tile"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-ittools"/></svg></span>IT Tools</div>
+          <div class="tile"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-app-jupyter"/></svg></span>Jupyter</div>
+        </div>
+      </div>
+      <div class="tabs">
+        <div><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</div>
+        <div><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</div>
+        <div class="on"><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</div>
+        <div><svg class="i"><use href="/sprite.svg#i-files"/></svg>Files</div>
+        <div><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MORE -->
+  <div class="col">
+    <p class="label"><b>4 · More</b>The quiet stuff: vault, security, Claude account, box health. Each row leads to its own screen. Danger actions are red and at the bottom.</p>
+    <div class="phone">
+      <div class="status"><span class="island"></span><span>9:41</span><span>●●● ⌁</span></div>
+      <div class="screen">
+        <div class="bar"><h1>More</h1></div>
+        <p class="sub">porthole.example.com</p>
+        <div class="list">
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="t">Vault</div><div class="s">6 tokens · 4 general, 2 project</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="t">Security</div><div class="s"><span class="live">● two-step on</span> · 2 devices signed in</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+          <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="t">Claude Code</div><div class="s">v2.1 · signed in · Remote Control running</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></div>
+        </div>
+        <h2><svg class="i"><use href="/sprite.svg#i-server"/></svg>This box</h2>
+        <div class="list">
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-cpu"/></svg></span><div class="main"><div class="t">Load</div></div><span class="s">0.42 · 0.31 · 0.28</span></div>
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-activity"/></svg></span><div class="main"><div class="t">Memory</div></div><span class="s">1.9 of 3.8 GB</span></div>
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-disk"/></svg></span><div class="main"><div class="t">Disk</div></div><span class="s">14 of 40 GB</span></div>
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-network"/></svg></span><div class="main"><div class="t">Tailscale</div></div><span class="s mono">porthole.tail1234.ts.net</span></div>
+          <div class="row"><span class="ico"><svg class="i"><use href="/sprite.svg#i-cloud"/></svg></span><div class="main"><div class="t">cloudflared</div></div><span class="s">2026.10.6</span></div>
+          <div class="row"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-container"/></svg></span><div class="main"><div class="t">Docker</div></div><span class="s">28.3 · 4 containers</span></div>
+        </div>
+        <div class="list" style="margin-top:18px">
+          <div class="row" style="justify-content:center;color:var(--flare);gap:8px"><svg class="i"><use href="/sprite.svg#i-logout"/></svg>Sign out on this phone</div>
+        </div>
+      </div>
+      <div class="tabs">
+        <div><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</div>
+        <div><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</div>
+        <div><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</div>
+        <div><svg class="i"><use href="/sprite.svg#i-files"/></svg>Files</div>
+        <div class="on"><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div>
+    <h3>Colour means category</h3>
+    <div class="legend">
+      <span><span class="ico kelp" style="width:26px;height:26px;border-radius:7px"><svg class="i" style="width:14px;height:14px"><use href="/sprite.svg#i-link"/></svg></span>Shared link / live</span>
+      <span><span class="ico brass" style="width:26px;height:26px;border-radius:7px"><svg class="i" style="width:14px;height:14px"><use href="/sprite.svg#i-devserver"/></svg></span>Yours: folders, shells, dev servers</span>
+      <span><span class="ico dock" style="width:26px;height:26px;border-radius:7px"><svg class="i" style="width:14px;height:14px"><use href="/sprite.svg#i-container"/></svg></span>Docker: containers, compose, apps</span>
+      <span><span class="ico" style="width:26px;height:26px;border-radius:7px"><svg class="i" style="width:14px;height:14px"><use href="/sprite.svg#i-file-text"/></svg></span>Neutral: files, box stats</span>
+    </div>
+    <p style="margin-top:10px">Red is reserved for stop, delete, sign out.</p>
+  </div>
+  <div>
+    <h3>Icons</h3>
+    <p>Lucide (ISC), 2 px stroke, vendored as a 16 KB sprite. Every section header carries its icon, so Docker is visibly a different kind of thing from a dev server even before you read the label. Tab bar: home, square-terminal, layers, folder, circle-ellipsis.</p>
+  </div>
+  <div>
+    <h3>Tabs</h3>
+    <p><b>Home</b> live summary + projects · <b>Shells</b> all terminals grouped by project · <b>Services</b> links / dev servers / Docker / apps · <b>Files</b> folder tree with upload · <b>More</b> vault, security, Claude, box health, sign out.</p>
+  </div>
+</div>
+</body>
+</html>

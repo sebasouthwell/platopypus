@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Porthole — phone preview</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #06090d; display: flex; align-items: center; justify-content: center; font-family: -apple-system, "Segoe UI", sans-serif; color: #93A6BB; }
+  .wrap { display: flex; gap: 40px; align-items: center; }
+  .phone { width: 430px; height: 932px; border-radius: 54px; background: #0b0f14; padding: 12px; box-shadow: 0 0 0 2px #2a3340, 0 30px 80px rgba(0,0,0,.7); position: relative; }
+  .phone::before { content: ""; position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: 120px; height: 34px; border-radius: 20px; background: #000; z-index: 2; }
+  iframe { width: 100%; height: 100%; border: 0; border-radius: 44px; background: #0F1A26; }
+  .note { max-width: 260px; font-size: 14px; line-height: 1.5; }
+  .note b { color: #D6AD52; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="phone"><iframe src="/" title="Porthole"></iframe></div>
+  <div class="note"><b>Phone preview.</b> The app inside the frame is the live Porthole UI at iPhone 15 Pro Max size. On a real phone open <b>/</b> directly and add it to the Home Screen.</div>
+</div>
+</body>
+</html>
