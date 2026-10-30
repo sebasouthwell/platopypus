@@ -210,6 +210,7 @@ function go(tab) {
 function push(page) {
     $$('.tab.page').forEach(p => (p.hidden = p.id !== `page-${page}`));
     if (page === 'vault') loadVault().catch(e => toast(e.message, true));
+    if (page === 'creds') loadCredsPage().catch(e => toast(e.message, true));
     if (page === 'security') loadSecurity().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
@@ -560,7 +561,7 @@ function credPanel(list, { persisted = false, focus = null } = {}) {
             seenCreds = seenCreds.filter(x => x.id !== c.id); renderCreds();
             await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
             list.splice(Number(el.dataset.forget), 1);
-            if (persisted) { loadSharedSection().catch(() => {}); if (state.tab === 'services') loadServices(); }
+            if (persisted) { loadCredsPage().catch(() => {}); if (state.tab === 'services') loadServices(); }
             list.length ? render() : close();
         });
     };
@@ -1522,6 +1523,7 @@ async function loadMore() {
     const sec = await api('/api/security').catch(() => null);
     if (sec) $('#more-security-sub').innerHTML = `${sec.totp ? '<span class="live">● two-step on</span>' : 'two-step off'} · ${sec.sessions} device${sec.sessions === 1 ? '' : 's'} signed in`;
     api('/api/github/account').then(g => { $('#more-github-sub').textContent = g.connected ? `@${g.login} · connected` : 'Not connected'; }).catch(() => {});
+    api('/api/creds').then(cl => { $('#more-creds-sub').textContent = cl.length ? `${cl.length} shared · ${cl.filter(c => c.service?.live).length} live` : 'Logins agents handed to you'; }).catch(() => {});
     const v = await api('/api/vault').catch(() => []);
     $('#more-vault-sub').textContent = v.length ? `${v.length} token${v.length === 1 ? '' : 's'} · ${v.filter(t => t.scope === 'general').length} general, ${v.filter(t => t.scope !== 'general').length} project` : 'No tokens yet';
     const conn = (ico, title, val, cls = '') => `<div class="row"><span class="ico ${cls}">${icon(ico)}</span><div class="main"><div class="title">${title}</div></div><div class="kv">${val}</div></div>`;
@@ -1666,26 +1668,30 @@ function sharedCredsSheet(list) {
     const { panel, close } = openDialog(`<h2>${icon('key')}Shared credentials</h2><div class="menu">${list.map(c => `<button data-id="${c.id}">${icon('key')}<span>${esc(c.title)}</span><span class="sub" style="margin-left:auto">${fmtAgo(c.at)}</span></button>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);
     $$('[data-id]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.id); });
 }
-async function loadSharedSection() {
+// Shared credentials page (More → Shared credentials). Separate from the Vault: these are logins handed to the
+// user, the Vault holds tokens agents use.
+async function loadCredsPage() {
     const list = await api('/api/creds').catch(() => []);
-    let host = $('#vault-shared');
-    if (!host) { host = document.createElement('div'); host.id = 'vault-shared'; $('#vault-list').parentElement.insertBefore(host, $('#vault-list').previousElementSibling || $('#vault-list')); }
-    if (!list.length) { host.innerHTML = ''; return; }
-    host.innerHTML = `<h2 class="section">Shared by agents<span class="meta">${list.length} · kept 7 days</span>${list.some(c => c.service && c.service.live === false) ? `<button class="act" data-clear-stale>Delete stale</button>` : ''}</h2>
-        <div class="list">${list.map(c => `<button class="row" data-sc="${c.id}"><span class="ico ${c.service ? (c.service.live ? 'kelp' : 'flare') : 'brass'}">${icon('key')}</span>
-          <div class="main"><div class="title">${esc(c.title)}${c.port ? `<span class="tag ${c.service?.live ? '' : 'dim'}">:${c.port} · ${c.service?.live ? 'live' : 'gone'}</span>` : ''}</div>
-            <div class="sub">${esc(c.fields.map(f => f.label).join(' · '))} · ${fmtAgo(c.at)}${c.shell ? ` · from ${esc(c.shell)}` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>`;
+    const host = $('#creds-list'); if (!host) return;
+    $('#creds-empty').hidden = list.length > 0;
+    const stale = list.filter(c => c.service && c.service.live === false);
+    const staleBtn = $('#creds-stale'); staleBtn.hidden = stale.length === 0; staleBtn.textContent = `Delete ${stale.length} stale`;
+    const groups = new Map();
+    for (const c of list) { const k = c.project ? c.project.split('/').filter(Boolean).pop() : (c.shell || 'Other'); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
+    host.innerHTML = [...groups].map(([label, items]) => `<h2 class="section">${esc(label)}<span class="meta">${items.length}</span></h2><div class="list">${items.map(c => `
+        <button class="row" data-sc="${c.id}"><span class="ico ${c.service ? (c.service.live ? 'kelp' : 'flare') : 'brass'}">${icon('key')}</span>
+          <div class="main"><div class="title">${esc(c.title)}${c.port ? `<span class="tag ${c.service?.live ? '' : 'dim'}">:${c.port} · ${c.service?.live ? (c.openUrl ? 'public link' : 'live') : 'gone'}</span>` : ''}</div>
+            <div class="sub">${esc(c.fields.map(f => f.label).join(' · '))}${c.note ? ` · ${esc(c.note)}` : ''} · ${fmtAgo(c.at)}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>`).join('');
     $$('[data-sc]', host).forEach(b => b.onclick = () => openSharedCred(b.dataset.sc));
-    $('[data-clear-stale]', host)?.addEventListener('click', async () => {
-        const stale = list.filter(c => c.service && c.service.live === false);
+    staleBtn.onclick = async () => {
         if (!(await confirmDialog({ title: `Delete ${stale.length} stale credential${stale.length === 1 ? '' : 's'}?`, text: 'Their services are no longer running.', action: 'Delete' }))) return;
         for (const c of stale) await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
-        loadSharedSection();
-    });
+        loadCredsPage();
+    };
 }
+const loadSharedSection = loadCredsPage; // older call sites
 
 async function loadVault() {
-    loadSharedSection().catch(() => {});
     const items = await api('/api/vault');
     $('#vault-empty').hidden = items.length > 0;
     const groups = new Map();

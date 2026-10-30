@@ -114,6 +114,9 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   `/api/creds/:id/values` add `project`, `openUrl` (tunnel URL, with the path of a local URL, or the explicit public URL)
   and `localOnly`; `service.local` added. credshare accepts `--for` (alias of `--note`) and sends `cwd`.
 
+- **1.2.1** — shared credentials move out of the Vault page into their own More → Shared credentials page (grouped by
+  project). No API or state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

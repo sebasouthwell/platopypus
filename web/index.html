@@ -131,6 +131,7 @@
     <div class="list gap" id="update-card"></div>
     <div class="list gap" id="more-list">
       <button class="row" data-page="vault"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Vault</div><div class="sub" id="more-vault-sub">Tokens for Claude and your projects</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="creds"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Shared credentials</div><div class="sub" id="more-creds-sub">Logins agents handed to you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="security"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Security</div><div class="sub" id="more-security-sub">Two-step codes, signed-in devices</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">Remote Control</div><div class="sub" id="more-remote-sub">Drive this box from the Claude app</div></div><button class="switch" id="remote-switch" role="switch" aria-checked="false" aria-label="Remote Control"><span></span></button></div>
       <button class="row" data-page="agents"><span class="ico"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">AI agents</div><div class="sub" id="more-claude-sub">Claude Code, Codex, Gemini · profiles</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
@@ -151,6 +152,17 @@
     <p class="note">Tokens are encrypted on the box. General tokens reach every shell; project tokens only reach shells started inside that folder. Claude is told to use them from here instead of asking you.</p>
     <div id="vault-list" class="list"></div>
     <p id="vault-empty" class="empty" hidden>No tokens yet. Add an API key or OAuth token and label what it is for.</p>
+  </section>
+
+  <section id="page-creds" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>Shared credentials</h1>
+      <button class="text-btn" id="creds-stale" hidden>Delete stale</button>
+    </header>
+    <p class="note">Logins and keys an agent handed to you with <code>credshare</code>: generated passwords, test accounts, admin logins. Separate from the Vault, which holds the tokens agents use. Kept 7 days; tap a card to copy fields or open the service.</p>
+    <div id="creds-list" class="list"></div>
+    <p id="creds-empty" class="empty" hidden>Nothing shared yet. When an agent runs <code>credshare</code> the card lands here and on that shell.</p>
   </section>
 
   <section id="page-security" class="tab page" hidden>

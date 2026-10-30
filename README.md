@@ -40,6 +40,9 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   instead of asking you.
 - **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
   container per image: a second tap restarts the existing one or points you at it in Services.
+- **Shared credentials** — More → Shared credentials lists everything agents handed over, grouped by project, with
+  live/gone status and one-tap stale cleanup. Separate from the Vault on purpose: the Vault is what agents use, this is
+  what they gave you.
 - **Scratch shells** — "Quick task" on Home (or the Scratch toggle in New shell) starts an agent in a temporary folder
   under `~/scratch` that is deleted when the shell ends: for one-off jobs you don't want to tidy up after.
 - **More** — box health, AI agents (install state, sign-in, Claude profiles, Remote Control), GitHub (connect,
