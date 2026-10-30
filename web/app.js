@@ -37,6 +37,8 @@ function noteServerVersion(v) {
     $('#toast-reload').onclick = () => location.reload();
 }
 
+function timeAgo(t) { const d = Math.max(0, Date.now() - t); if (d < 60e3) return 'just now'; if (d < 3600e3) return `${Math.round(d / 60e3)} min ago`; if (d < 86400e3) return `${Math.round(d / 3600e3)} h ago`; return `${Math.round(d / 86400e3)} d ago`; }
+
 let toastTimer;
 function toast(message, bad = false) {
     const el = $('#toast');
@@ -488,36 +490,85 @@ function extractCreds(text) {
         } catch { /* ignore */ }
         return '';
     });
-    if (changed) { seenCreds = seenCreds.slice(0, 5); renderCreds(); toast('Credentials shared to this phone'); }
+    if (changed) { seenCreds = seenCreds.slice(0, 8); renderCreds(); announceCred(seenCreds[0]); }
     return buf;
 }
 // A credential registered by `credshare` (pushed by the server or announced in the terminal): fetch values once.
 const shownCreds = new Set();
 function showSharedCred(id) {
     if (shownCreds.has(id)) return; shownCreds.add(id);
-    api(`/api/creds/${id}/values`, { method: 'POST' }).then(full => { seenCreds = [full, ...seenCreds.filter(x => x.id !== full.id)].slice(0, 5); renderCreds(); toast('Credentials shared to this phone'); }).catch(() => shownCreds.delete(id));
+    api(`/api/creds/${id}/values`, { method: 'POST' }).then(full => { seenCreds = [full, ...seenCreds.filter(x => x.id !== full.id)].slice(0, 8); renderCreds(); announceCred(full); }).catch(() => shownCreds.delete(id));
 }
 function renderCreds() {
     const row = $('#term-creds');
     row.hidden = seenCreds.length === 0;
-    row.innerHTML = seenCreds.map((c, i) => `<button data-cred="${i}">${icon('key')}<span>${esc(c.title || 'Credentials')}</span></button>`).join('');
-    $$('button', row).forEach(b => b.onclick = () => credCard(seenCreds[Number(b.dataset.cred)]));
+    row.innerHTML = seenCreds.length ? `<button data-creds>${icon('key')}<span>${seenCreds.length === 1 ? esc(seenCreds[0].title || 'Credentials') : `${seenCreds.length} credentials`}</span>${icon('chevron')}</button>` : '';
+    const b = $('[data-creds]', row); if (b) b.onclick = () => credPanel(seenCreds);
 }
-function credCard(c, { persisted = false } = {}) {
-    if (!c) return;
-    const svc = c.service ? `<p class="sub" style="margin:0 2px 8px">${c.service.live ? '<span class="live">● service live</span>' : '<span style="color:var(--flare)">● service gone</span>'}${c.service.tunnel ? ` · <a href="${esc(c.service.tunnel)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(c.service.tunnel.replace(/^https:\/\//, ''))}</a>` : ''}${c.service.container ? ` · ${esc(c.service.container)}` : ''}</p>` : '';
-    const { panel, close } = openDialog(`<h2>${icon('key')}${esc(c.title || 'Credentials')}</h2>${svc}${c.note ? `<p class="muted">${esc(c.note)}</p>` : ''}
-        <div class="list" style="padding:4px 12px;margin-bottom:10px">
-          ${c.url ? `<div class="cred-field"><span class="lbl">URL</span><a class="val" href="${esc(c.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(c.url)}</a><button class="pill" data-copy="${esc(c.url)}">${icon('copy')}</button></div>` : ''}
-          ${c.fields.map((f, i) => `<div class="cred-field"><span class="lbl">${esc(f.label)}</span><span class="val" data-val="${i}">${f.secret ? '••••••••' : esc(f.value)}</span>${f.secret ? `<button class="pill" data-reveal="${i}">${icon('eye')}</button>` : ''}<button class="pill" data-copy="${esc(f.value)}">${icon('copy')}</button></div>`).join('')}
-        </div>
-        <div class="buttons"><button class="primary" data-env>Copy all as KEY=value lines</button><button data-vault>Save to Vault…</button><button class="danger" data-forget>Forget</button><button data-close>Close</button></div>`);
-    $$('[data-copy]', panel).forEach(b => b.onclick = () => copyText(b.dataset.copy, 'Copied'));
-    $$('[data-reveal]', panel).forEach(b => b.onclick = () => { const f = c.fields[Number(b.dataset.reveal)]; const el = $(`[data-val="${b.dataset.reveal}"]`, panel); el.textContent = el.textContent.startsWith('•') ? f.value : '••••••••'; });
-    $('[data-env]', panel).onclick = () => copyText(c.fields.map(f => `${f.label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}=${f.value}`).concat(c.url ? [`URL=${c.url}`] : []).join('\n'), 'Copied');
-    $('[data-vault]', panel).onclick = async () => {
-        close();
-        const cat = await getCatalog().catch(() => null); if (!cat) return;
+function announceCred(c) {
+    const el = $('#toast');
+    el.innerHTML = `${icon('key')} ${esc(c.title || 'Credentials')} shared · <button class="linkish" id="toast-cred">View</button>`;
+    el.classList.remove('bad'); el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+    $('#toast-cred').onclick = () => { el.hidden = true; credPanel(seenCreds, { focus: c.id }); };
+}
+function credFor(c) {
+    const bits = [];
+    if (c.project) bits.push(`for <b>${esc(c.project.split('/').filter(Boolean).pop() || c.project)}</b>`);
+    if (c.shell) bits.push(`shell ${esc(c.shell)}`);
+    if (c.at) bits.push(timeAgo(c.at));
+    return bits.join(' · ');
+}
+// Dropdown of shared credentials: every field is a tap-to-copy row; the open button goes to the tunnel, not localhost.
+function credPanel(list, { persisted = false, focus = null } = {}) {
+    if (!list?.length) return;
+    const revealed = new Set();
+    const { panel, close } = openDialog(`<h2>${icon('key')}Shared credentials</h2><div data-creds-body></div><div class="buttons"><button data-close>Close</button></div>`);
+    const render = () => {
+        $('[data-creds-body]', panel).innerHTML = list.map((c, ci) => `
+        <details class="cred" ${list.length === 1 || c.id === focus ? 'open' : ''} data-ci="${ci}">
+          <summary><span class="cred-title">${esc(c.title || 'Credentials')}</span><span class="sub">${credFor(c)}</span></summary>
+          ${c.note ? `<p class="muted cred-note">${esc(c.note)}</p>` : ''}
+          ${c.service ? `<p class="sub cred-svc">${c.service.live ? '<span class="live">● live</span>' : '<span style="color:var(--flare)">● not running</span>'}${c.service.container ? ` · ${esc(c.service.container)}` : ''} · port ${c.port}${c.service.tunnel ? ` · tunnel` : c.localOnly ? ' · no public link yet' : ''}</p>` : ''}
+          <div class="cred-rows">
+            ${c.openUrl ? `<a class="cred-row" href="${esc(c.openUrl)}" target="_blank" rel="noopener"><span class="lbl">Open</span><span class="val" style="color:var(--kelp)">${esc(c.openUrl)}</span>${icon('external')}</a>` : ''}
+            ${c.url && c.url !== c.openUrl ? `<button class="cred-row" data-copy="${ci}:url"><span class="lbl">URL</span><span class="val">${esc(c.url)}</span>${icon('copy')}</button>` : ''}
+            ${c.fields.map((f, fi) => `<button class="cred-row" data-copy="${ci}:${fi}"><span class="lbl">${esc(f.label)}</span><span class="val">${f.secret && !revealed.has(`${ci}:${fi}`) ? '••••••••' : esc(f.value)}</span>${f.secret ? `<span class="pill" data-reveal="${ci}:${fi}" role="button">${icon(revealed.has(`${ci}:${fi}`) ? 'x' : 'eye')}</span>` : ''}${icon('copy')}</button>`).join('')}
+          </div>
+          <div class="chips cred-actions">
+            ${c.localOnly && c.service?.live ? `<button class="pill" data-tunnel="${ci}">${icon('link')}Open a public link</button>` : ''}
+            <button class="pill" data-env="${ci}">${icon('copy')}Copy all</button>
+            <button class="pill" data-vault="${ci}">${icon('lock')}Save to Vault</button>
+            <button class="pill danger" data-forget="${ci}">${icon('trash')}Forget</button>
+          </div>
+        </details>`).join('');
+        $$('[data-copy]', panel).forEach(el => el.onclick = ev => {
+            if (ev.target.closest('[data-reveal]')) return;
+            const [ci, fi] = el.dataset.copy.split(':'); const c = list[Number(ci)];
+            const v = fi === 'url' ? c.url : c.fields[Number(fi)].value; const label = fi === 'url' ? 'URL' : c.fields[Number(fi)].label;
+            copyText(v, `${label} copied`);
+        });
+        $$('[data-reveal]', panel).forEach(el => el.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); const k = el.dataset.reveal; revealed.has(k) ? revealed.delete(k) : revealed.add(k); render(); });
+        $$('[data-env]', panel).forEach(el => el.onclick = () => { const c = list[Number(el.dataset.env)]; copyText(c.fields.map(f => `${f.label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}=${f.value}`).concat(c.openUrl || c.url ? [`URL=${c.openUrl || c.url}`] : []).join('\n'), 'Copied all'); });
+        $$('[data-vault]', panel).forEach(el => el.onclick = () => { close(); saveSharedToVault(list[Number(el.dataset.vault)]); });
+        $$('[data-tunnel]', panel).forEach(el => el.onclick = async () => {
+            const c = list[Number(el.dataset.tunnel)]; el.disabled = true; el.textContent = 'Opening…';
+            try { await api('/api/tunnels', { method: 'POST', body: { port: c.port, name: c.title } }); const fresh = await api(`/api/creds/${c.id}/values`, { method: 'POST' }); Object.assign(c, fresh); render(); toast('Public link opened'); }
+            catch (ex) { toast(ex.message, true); render(); }
+        });
+        $$('[data-forget]', panel).forEach(el => el.onclick = async () => {
+            const c = list[Number(el.dataset.forget)];
+            seenCreds = seenCreds.filter(x => x.id !== c.id); renderCreds();
+            await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
+            list.splice(Number(el.dataset.forget), 1);
+            if (persisted) { loadSharedSection().catch(() => {}); if (state.tab === 'services') loadServices(); }
+            list.length ? render() : close();
+        });
+    };
+    render();
+}
+function saveSharedToVault(c) {
+    getCatalog().then(cat => {
+        if (!cat) return;
         const svc = cat.services.find(s => s.key === 'custom');
         credentialForm(svc, cat, c.fields.some(f => /pass/i.test(f.label)) && c.fields.some(f => /user/i.test(f.label)) ? 'basic' : 'token');
         setTimeout(() => {
@@ -525,8 +576,7 @@ function credCard(c, { persisted = false } = {}) {
             const u = c.fields.find(f => /user/i.test(f.label)), p = c.fields.find(f => /pass/i.test(f.label)), t = c.fields.find(f => f.secret) || c.fields[0];
             if ($('#cf-username') && u) $('#cf-username').value = u.value; if ($('#cf-password') && p) $('#cf-password').value = p.value; if ($('#cf-token') && t) $('#cf-token').value = t.value;
         }, 150);
-    };
-    $('[data-forget]', panel).onclick = async () => { seenCreds = seenCreds.filter(x => x.id !== c.id); renderCreds(); await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {}); close(); if (persisted) { loadSharedSection().catch(() => {}); if (state.tab === 'services') loadServices(); } };
+    }).catch(() => {});
 }
 let seenLinks = [];           // most recent URLs printed by the current shell
 let linkTail = '';            // carry-over so URLs split across chunks are still found
@@ -588,7 +638,7 @@ async function setScrollMode(on) {
 }
 $('#key-scroll').addEventListener('click', () => setScrollMode(!scrollMode));
 $('#history-close').addEventListener('click', () => setScrollMode(false));
-composerInput.addEventListener('focus', () => { if (scrollMode) setScrollMode(false); });
+$('#composer-input').addEventListener('focus', () => { if (scrollMode) setScrollMode(false); });
 
 const QUICK = {
     claude: ['yes', 'no', 'continue', 'show the diff', 'run the tests', 'run it and share a link', 'commit this', '/compact', '/clear'],
@@ -1610,7 +1660,7 @@ let catalogCache = null;
 async function getCatalog() { if (!catalogCache) catalogCache = await api('/api/vault/catalog'); return catalogCache; }
 
 async function openSharedCred(id) {
-    try { const c = await api(`/api/creds/${id}/values`, { method: 'POST' }); credCard(c, { persisted: true }); } catch (ex) { toast(ex.message, true); }
+    try { const c = await api(`/api/creds/${id}/values`, { method: 'POST' }); credPanel([c], { persisted: true }); } catch (ex) { toast(ex.message, true); }
 }
 function sharedCredsSheet(list) {
     const { panel, close } = openDialog(`<h2>${icon('key')}Shared credentials</h2><div class="menu">${list.map(c => `<button data-id="${c.id}">${icon('key')}<span>${esc(c.title)}</span><span class="sub" style="margin-left:auto">${fmtAgo(c.at)}</span></button>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);

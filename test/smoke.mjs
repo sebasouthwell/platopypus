@@ -148,6 +148,7 @@ await sleep(1500);
 let detachedFound = false;
 for (let i = 0; i < 20 && !detachedFound; i++) { await sleep(1000); detachedFound = (await call('/api/creds')).body.some(c => c.title === `Detached ${marker}` && c.port === 8099); }
 check('credshare registers without any terminal attached', detachedFound);
+{ const c = (await call('/api/creds')).body.find(c => c.title === `Detached ${marker}`); check('shared credential records its project folder and flags a missing public link', !!c && typeof c.project === 'string' && c.localOnly === true && c.openUrl === null, JSON.stringify(c && { project: c.project, localOnly: c.localOnly, openUrl: c.openUrl })); }
 await call('/api/shells/smoke-detached', { method: 'DELETE' });
 for (const c of (await call('/api/creds')).body.filter(c => c.title === `Detached ${marker}`)) await call(`/api/creds/${c.id}`, { method: 'DELETE' });
 r = await call('/api/shells/smoke/creds');

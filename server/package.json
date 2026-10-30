@@ -1,13 +1,14 @@
 {
   "name": "porthole",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Phone-first web console for a personal dev box: tmux-backed Claude Code shells, file browser with uploads, one-tap Cloudflare tunnels.",
   "type": "module",
   "private": true,
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "icons": "node ../scripts/make-icons.mjs"
+    "icons": "node ../scripts/make-icons.mjs",
+    "lint": "cd .. && node server/node_modules/eslint/bin/eslint.js --no-config-lookup --rule \"no-use-before-define: [error, { functions: false, classes: true, variables: false }]\" --rule \"no-undef: off\" web/app.js server/server.js server/lib/*.js"
   },
   "engines": {
     "node": ">=20"
@@ -23,5 +24,8 @@
     "@xterm/addon-clipboard": "^0.1.0",
     "@simplewebauthn/server": "^14.0.0",
     "@simplewebauthn/browser": "^14.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.14.0"
   }
 }

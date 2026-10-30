@@ -16,8 +16,9 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   quick replies, a key strip for what the phone keyboard lacks, copy/paste that works on iOS, link chips for any
   URL the agent prints, history, and attachments (paste or drop an image and its path lands in your message).
   Full TUI support over a real pty. Agents hand you secrets with `credshare --user … --pass …`, which shows a card with
-  reveal, copy and Save-to-Vault buttons instead of printing values into the scrollback (the CLI registers the card
-  with the server, so it arrives even if no phone was watching). A **scroll** key swaps the live terminal for a
+  a dropdown of shared credentials: every field is a tap-to-copy row, the card says what it is for (project, shell,
+  note), and Open goes to the public tunnel rather than a localhost address (one tap opens a tunnel if there is none).
+  The CLI registers the card with the server, so it arrives even if no phone was watching. A **scroll** key swaps the live terminal for a
   natively scrollable copy of the full tmux history; typing or sending brings the live view back. Shared credentials persist
   (encrypted) for seven days, attach to the service on their port (key chip on the Services row, live/gone status),
   and are listed under Vault → "Shared by agents" where stale ones can be deleted.

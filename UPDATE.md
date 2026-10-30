@@ -42,7 +42,7 @@ with mode 0600. Formats as of version 1.0:
 | `auth-sessions.json` | auth.js | `{ "<sid>": { created, lastSeen, ua, how } }` |
 | `security.json` | credentials.js, totp.js | `{ passkeys: [{ id, publicKey(base64url), counter, transports, deviceType, backedUp, name, created, lastUsed }], password: { salt, hash, set }, totp: { enabled, secret(base32), enabledAt, lastCounter }, pending: {...} }` — any key may be absent |
 | `shells.json` | shells.js | `{ "<name>": { kind: shell\|agent\|remote-control, cwd, created, agent?, yolo?, resume?, profile?, scratch? } }` — legacy `kind: "claude"` is read as `agent` + `agent: "claude"`; `scratch: true` (1.1.0) marks a shell whose `cwd` under `~/scratch/` is deleted when the shell is ended |
-| `shared-creds.json` | sharedcreds.js | `{ items: [ { id, title, fields: [{ label, value(enc), secret }], url, note, shell, port, at } ] }` — credentials handed over by `credshare`; values encrypted with `vault.key`; dropped after 7 days (1.0.4, documented 1.1.0) |
+| `shared-creds.json` | sharedcreds.js | `{ items: [ { id, title, fields: [{ label, value(enc), secret }], url, note, shell, project?, port, at } ] }` — credentials handed over by `credshare`; values encrypted with `vault.key`; dropped after 7 days (1.0.4, documented 1.1.0) |
 | `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses } }`; logs are cloudflared output |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
@@ -109,9 +109,16 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   when the page predates the running server); updater step lines are appended to `update.log` with the token masked;
   tmux mouse option targets fixed (`name:` instead of `=name`). No state changes.
 
+- **1.2.0** — **fixes a blank page in 1.1.0/1.1.1** (`app.js` referenced the composer before it was declared, so the
+  module failed to load; boxes on those versions show nothing until updated). `shared-creds.json` items gain optional `project` (cwd of the sharing process); `GET /api/creds` and
+  `/api/creds/:id/values` add `project`, `openUrl` (tunnel URL, with the path of a local URL, or the explicit public URL)
+  and `localOnly`; `service.local` added. credshare accepts `--for` (alias of `--note`) and sends `cwd`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.
-2. `docker compose up -d --build` and run `test/smoke.mjs` in a throwaway container — all checks pass.
+2. `npm run lint` in `server/` (use-before-define over the browser module and the server), then `docker compose up -d --build`
+   and run `test/smoke.mjs` in a throwaway container — all checks pass. **Then load the app in a browser**: the smoke
+   suite is API-only and cannot see a front-end that fails to start.
 3. Release with `scripts/release.ps1 -Message "<version>: …" -Push` (public tree only: no infra, no personal data).
 4. On a box: More → Updates → Check → Update, confirm `update-result.json` says `ok: true`.

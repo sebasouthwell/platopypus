@@ -16,6 +16,7 @@ const file = path.join(config.state, 'shared-creds.json');
 const TTL = 7 * 86400_000;
 const CRED_RE = /\x1b\]777;porthole-cred;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/g;
 const tails = new Map(); // shell -> partial sequence carried between chunks
+const LOCAL_URL_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?/i;
 export const events = new EventEmitter(); // 'added' -> { id, title, port, shell }
 
 function load() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return { items: [] }; } }
@@ -61,6 +62,7 @@ export async function add(shell, cred) {
         url: cred.url ? String(cred.url).slice(0, 2048) : null,
         note: cred.note ? String(cred.note).slice(0, 300) : null,
         shell: shell || cred.shell || null,
+        project: cred.cwd ? String(cred.cwd).slice(0, 300) : null,
         port,
         at: Date.now(),
     };
@@ -87,9 +89,15 @@ export async function list({ shell = null, port = null, values = false } = {}) {
             const t = i.port ? tl.find(x => x.port === i.port) : null;
             const c = i.port ? containers.find(x => x.state === 'running' && x.ports.some(pp => pp.host === i.port)) : null;
             const live = i.port ? (ports.has(i.port) || !!c) : null;
+            // What the phone should open: the tunnel (with the path of a local URL) beats a localhost address, which
+            // means nothing on a phone. localOnly = there is a service but no public way to reach it yet.
+            const isLocal = i.url ? LOCAL_URL_RE.test(i.url) : false;
+            let openUrl = i.url && !isLocal ? i.url : null;
+            if (t?.url) openUrl = isLocal ? t.url + i.url.replace(LOCAL_URL_RE, '') : (openUrl || t.url);
             return {
                 id: i.id, title: i.title, url: i.url, note: i.note, shell: i.shell, port: i.port, at: i.at,
-                service: i.port ? { live, tunnel: t?.url || null, container: c?.name || null } : null,
+                project: i.project || null, openUrl, localOnly: !openUrl && !!i.port,
+                service: i.port ? { live, tunnel: t?.url || null, container: c?.name || null, local: `http://127.0.0.1:${i.port}` } : null,
                 fields: i.fields.map(f => ({ label: f.label, secret: f.secret, value: values ? safeDecrypt(f.value) : undefined, hint: f.secret ? '••••••••' : safeDecrypt(f.value) })),
             };
         });

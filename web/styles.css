@@ -254,6 +254,20 @@ button.row:active { background: var(--hull-2); }
 .quick button:active { color: var(--brass); border-color: rgba(240,184,64,.5); }
 .quick.creds button { color: var(--brass); border-color: rgba(240,184,64,.4); background: rgba(240,184,64,.1); display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .quick.creds button svg.i { width: 14px; height: 14px; }
+.cred { border: 1px solid var(--rail); border-radius: 12px; margin: 0 0 10px; background: var(--hull); }
+.cred summary { list-style: none; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; cursor: pointer; }
+.cred summary::-webkit-details-marker { display: none; }
+.cred .cred-title { font-weight: 600; }
+.cred .cred-note, .cred .cred-svc { margin: 0 12px 6px; }
+.cred-rows { border-top: 1px solid var(--rail); }
+.cred-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--rail); background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.cred-row:active { background: var(--rail); }
+.cred-row .lbl { font-size: 12px; color: var(--mist); min-width: 72px; }
+.cred-row .val { flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cred-row .pill { padding: 4px 8px; }
+.cred-row > svg.i { flex: none; opacity: .7; }
+.cred-actions { padding: 8px 12px 10px; }
+.cred .live { color: var(--kelp); }
 .cred-field { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--rail); }
 .cred-field:last-child { border-bottom: 0; }
 .cred-field .lbl { font-size: 12px; color: var(--mist); min-width: 72px; }

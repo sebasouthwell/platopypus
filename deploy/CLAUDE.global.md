@@ -34,9 +34,13 @@ disposable: do not store anything the user wants to keep there; push to GitHub o
 When you create something the user will need to type on their phone — a generated password, a test account, an
 API key, a database connection — do not print it. Run:
 
-    credshare --title "What it is" --user <name> --pass '<secret>' [--url https://…] [--port 8008] [--field label=value] [--secret label=value]
+    credshare --title "<service> <role> login" --user <name> --pass '<secret>' --url <address the user opens> --port <port> --note "<what it unlocks>" [--field label=value] [--secret label=value]
 
-Pass `--port` (or a local/tunnel `--url`) so the card is attached to the running service in Services.
+Say what it is for every time: the title names the service and the role ("Parle admin login", "Postgres app user"),
+`--url` is the address the user opens from the phone (the public tunnel URL if one exists — open one with
+`tunnel <port>` first; a localhost URL is mapped onto the tunnel automatically), `--port` ties it to the running
+service, and `--note` says what the account can do or where the value goes. Never print the values and never say
+"see above": the phone shows a dropdown of shared credentials with one-tap copy for each field.
 
 Porthole shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
 appearing in the terminal scrollback.
