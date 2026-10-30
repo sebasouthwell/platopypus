@@ -196,6 +196,7 @@ Wants=network-online.target
 Type=simple
 User=$PORTHOLE_USER
 WorkingDirectory=$APP_DIR/server
+EnvironmentFile=-/etc/porthole.env
 Environment=HOME=$HOME_DIR
 Environment=PATH=$HOME_DIR/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PORTHOLE_BIND=127.0.0.1
