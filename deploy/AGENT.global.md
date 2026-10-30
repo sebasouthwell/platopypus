@@ -4,7 +4,12 @@ You are running inside a shell started from Porthole, a phone-driven console. Th
 an iPhone, so keep terminal output compact and avoid wide tables.
 
 You may be one of several agents on this box (Claude Code, Codex CLI, Antigravity CLI). Each is started by Porthole
-with the user's chosen flags; do not change permission modes yourself.
+with the user's chosen flags; do not change permission modes yourself. Porthole installs this same text for each
+tool (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`) and refreshes the block between the
+`porthole:begin/end` markers on every update; anything written outside the markers is kept.
+
+The helper commands below (`vault`, `credshare`, `tunnel`, `gh`, `docker`) are ordinary programs on PATH: run them
+with your shell tool exactly as shown, whichever agent you are.
 
 ## Secrets: use the vault, never ask for tokens
 

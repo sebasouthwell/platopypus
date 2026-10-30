@@ -111,7 +111,7 @@ server/            Node server: server.js + lib/{auth,credentials,totp,shells,tm
                    docker,apps,codeserver,git,home,history,system}.js
 web/               Static UI (index.html, app.js, styles.css, sprite.svg, fonts/, manifest, preview.html, design/)
 bin/               tunnel, vault — CLIs used inside shells (symlinked to /usr/local/bin)
-deploy/            nginx config, CLAUDE.global.md (instructions every agent gets on the box)
+deploy/            nginx config, AGENT.global.md (instructions installed for Claude Code, Codex and Antigravity)
 install.sh         Idempotent Ubuntu 24.04 installer (box or docker mode)
 Dockerfile, docker-compose.yml   Local test image = same installer
 test/smoke.mjs     End-to-end suite run inside the container

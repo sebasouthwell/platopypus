@@ -175,13 +175,31 @@ ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 
-# Global Claude Code instructions: use the vault, the tunnel helper, keep output phone-sized.
-install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0700 "$HOME_DIR/.claude"
-GLOBAL_MD="$HOME_DIR/.claude/CLAUDE.md"
-if ! grep -q 'Porthole dev box' "$GLOBAL_MD" 2>/dev/null; then
-    { [ -s "$GLOBAL_MD" ] && printf '\n\n'; cat "$APP_DIR/deploy/CLAUDE.global.md"; } >> "$GLOBAL_MD"
-    chown "$PORTHOLE_USER:$PORTHOLE_USER" "$GLOBAL_MD"
-fi
+# Global agent instructions (vault, credshare, tunnels, git, phone-sized output). The same text goes into every
+# agent's own global file. The block between the porthole markers is replaced on every run; anything the user wrote
+# outside it is kept. Installs before 1.2.3 appended the block without markers, and it ran to the end of the file.
+install_agent_md() {
+    local dir="$1" file="$2" src="$APP_DIR/deploy/AGENT.global.md" tmp
+    install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0700 "$dir"
+    tmp="$(mktemp)"
+    {
+        if [ -f "$file" ]; then
+            if grep -q '<!-- porthole:begin -->' "$file"; then
+                awk '/<!-- porthole:begin -->/{skip=1} !skip{print} /<!-- porthole:end -->/{skip=0}' "$file"
+            elif grep -q '^# This machine is a Porthole dev box' "$file"; then
+                awk '/^# This machine is a Porthole dev box/{exit} {print}' "$file"
+            else
+                cat "$file"; printf '\n'
+            fi
+        fi
+        printf '<!-- porthole:begin -->\n'; cat "$src"; printf '\n<!-- porthole:end -->\n'
+    } > "$tmp"
+    install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0600 "$tmp" "$file"; rm -f "$tmp"
+}
+install_agent_md "$HOME_DIR/.claude" "$HOME_DIR/.claude/CLAUDE.md"   # Claude Code
+install_agent_md "$HOME_DIR/.codex"  "$HOME_DIR/.codex/AGENTS.md"    # Codex CLI
+install_agent_md "$HOME_DIR/.gemini" "$HOME_DIR/.gemini/GEMINI.md"   # Antigravity CLI (Gemini CLI lineage)
+for d in "$HOME_DIR"/.agent-profiles/claude/*/; do [ -d "$d" ] && install_agent_md "$d" "${d}CLAUDE.md"; done   # Claude profiles
 sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR/server && npm install --omit=dev --no-audit --no-fund --loglevel=error"
 sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR && node scripts/make-icons.mjs >/dev/null"
 

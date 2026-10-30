@@ -55,7 +55,9 @@ or `deploy/nginx-porthole-ssl.conf` (certificate present) on **every** run; cert
 never edits nginx config. Do not hand-edit the site file on a box; change the template and release.
 
 Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profiles/claude/<name>` (Claude
-profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, `~/.config/gh`, `~/.ssh/id_ed25519`,
+profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, the agent instruction files
+`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and each profile's `CLAUDE.md` (only the block
+between `<!-- porthole:begin -->` and `<!-- porthole:end -->` is Porthole's; it is rewritten by `install.sh` on every update), `~/.config/gh`, `~/.ssh/id_ed25519`,
 `~/apps/<app>/` (volumes for catalogue apps), `~/scratch/<date>-<shell>/` (scratch shells; deleted by the server when
 that shell is ended, never by an update), `<project>/.pasted/` (attachments), `/etc/porthole.env`.
 
@@ -120,6 +122,11 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.2.2** — index.html is served with version-stamped asset URLs (`/app.js?v=…`, `/styles.css?v=…`, `/sprite.svg?v=…#`)
   and a `porthole-version` meta tag. Reason: Cloudflare (and most proxies) cache `.js`/`.css` for hours regardless of the
   origin's `Cache-Control`, so after an update phones were getting a new page with the previous script. No state change.
+
+- **1.2.3** — the agent instructions (`deploy/AGENT.global.md`, formerly `CLAUDE.global.md`) are installed for all three
+  agents: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, plus every Claude profile. The block is
+  wrapped in `porthole:begin/end` markers and refreshed on each update (a legacy unmarked block is replaced from its
+  heading to the end of the file). No state change.
 
 ## Release checklist
 
