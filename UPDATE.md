@@ -49,6 +49,10 @@ with mode 0600. Formats as of version 1.0:
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
 
+nginx: `install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-porthole.conf` (no certificate yet)
+or `deploy/nginx-porthole-ssl.conf` (certificate present) on **every** run; certbot runs in `certonly` mode and
+never edits nginx config. Do not hand-edit the site file on a box; change the template and release.
+
 Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profiles/claude/<name>` (Claude
 profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, `~/.config/gh`, `~/.ssh/id_ed25519`,
 `~/apps/<app>/` (volumes for catalogue apps), `<project>/.pasted/` (attachments), `/etc/porthole.env`.

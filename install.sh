@@ -217,29 +217,40 @@ EOF
     systemctl restart porthole
 
     # ---------- nginx + let's encrypt ----------
+    # nginx config is rendered by Porthole on every run (safe for updates); certbot only obtains/renews the
+    # certificate (certonly), never edits config. With a certificate: redirect + 443 server; without: plain 80.
     if [ -n "$PORTHOLE_DOMAIN" ]; then
         [ -n "$LE_EMAIL" ] || { echo "LE_EMAIL is required with PORTHOLE_DOMAIN"; exit 1; }
         say "nginx for $PORTHOLE_DOMAIN"
         apt-get install -y -q nginx certbot python3-certbot-nginx
         rm -f /etc/nginx/sites-enabled/default
-        sed -e "s/__DOMAIN__/$PORTHOLE_DOMAIN/g" "$APP_DIR/deploy/nginx-porthole.conf" > /etc/nginx/sites-available/porthole
-        ln -sf /etc/nginx/sites-available/porthole /etc/nginx/sites-enabled/porthole
+        install -d -m 0755 /var/www/html
         cp "$APP_DIR/deploy/nginx-snippets.conf" /etc/nginx/conf.d/porthole-snippets.conf
         cp "$APP_DIR/deploy/porthole-proxy.inc" /etc/nginx/conf.d/porthole-proxy.inc
-        nginx -t && systemctl enable --now nginx && systemctl reload nginx
-
-        if [ ! -s "/etc/letsencrypt/live/$PORTHOLE_DOMAIN/fullchain.pem" ]; then
+        render_site() {
+            local tpl="$1"
+            sed -e "s/__DOMAIN__/$PORTHOLE_DOMAIN/g" "$APP_DIR/deploy/$tpl" > /etc/nginx/sites-available/porthole
+            ln -sf /etc/nginx/sites-available/porthole /etc/nginx/sites-enabled/porthole
+            nginx -t && systemctl enable --now nginx && systemctl reload nginx
+        }
+        CERT="/etc/letsencrypt/live/$PORTHOLE_DOMAIN/fullchain.pem"
+        if [ -s "$CERT" ] && [ -s /etc/letsencrypt/options-ssl-nginx.conf ]; then
+            render_site nginx-porthole-ssl.conf
+        else
+            render_site nginx-porthole.conf
             say "let's encrypt certificate (retries until DNS resolves here)"
             for i in $(seq 1 30); do
-                if certbot --nginx --non-interactive --agree-tos --no-eff-email -m "$LE_EMAIL" \
-                    -d "$PORTHOLE_DOMAIN" --redirect --hsts; then
+                if certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --no-eff-email -m "$LE_EMAIL"                     -d "$PORTHOLE_DOMAIN" --deploy-hook "systemctl reload nginx"; then
                     break
                 fi
                 echo "certbot attempt $i failed; waiting 30s"; sleep 30
             done
+            # certbot ships these two files with the nginx plugin; make sure they exist for the ssl template.
+            [ -s /etc/letsencrypt/options-ssl-nginx.conf ] || cp /usr/lib/python3/dist-packages/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf /etc/letsencrypt/options-ssl-nginx.conf 2>/dev/null || true
+            [ -s /etc/letsencrypt/ssl-dhparams.pem ] || cp /usr/lib/python3/dist-packages/certbot/ssl-dhparams.pem /etc/letsencrypt/ssl-dhparams.pem 2>/dev/null || true
+            [ -s "$CERT" ] && render_site nginx-porthole-ssl.conf
         fi
         systemctl enable --now certbot.timer >/dev/null 2>&1 || true
-        systemctl reload nginx
     fi
 
     TOKEN_FILE="$HOME_DIR/.porthole/token"
