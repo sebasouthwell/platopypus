@@ -85,6 +85,24 @@ async function readJson(req, limit = 1024 * 1024) {
     }
 }
 
+// index.html is served with every asset reference stamped with the running version (and a meta tag app.js reads for
+// the icon sprite), so a proxy cache can only ever hand out matching files.
+let indexCache = null;
+function serveIndex(res) {
+    try {
+        if (!indexCache) {
+            const v = encodeURIComponent(RUNNING_VERSION);
+            indexCache = Buffer.from(fs.readFileSync(path.join(webDir, 'index.html'), 'utf8')
+                .replace('<head>', `<head><meta name="porthole-version" content="${v}">`)
+                .replace('href="/styles.css"', `href="/styles.css?v=${v}"`)
+                .replace('src="/app.js"', `src="/app.js?v=${v}"`)
+                .replace(/\/sprite\.svg#/g, `/sprite.svg?v=${v}#`));
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': indexCache.length, 'Cache-Control': 'no-cache', ...securityHeaders() });
+        res.end(indexCache);
+    } catch { send(res, 404, 'Not found'); }
+}
+
 function serveFile(res, file, cacheable = false) {
     fs.stat(file, (err, st) => {
         if (err || !st.isFile()) return send(res, 404, 'Not found');
@@ -121,7 +139,7 @@ const server = http.createServer(async (req, res) => {
         }
         if (method === 'GET' && vendor[p]) return serveFile(res, vendor[p], true);
         if (method === 'GET' && !p.startsWith('/api/')) {
-            if (p === '/' || p === '/index.html') return serveFile(res, path.join(webDir, 'index.html'));
+            if (p === '/' || p === '/index.html') return serveIndex(res);
             const file = path.normalize(path.join(webDir, p));
             if (!file.startsWith(webDir)) return send(res, 404, 'Not found');
             return serveFile(res, file, p.startsWith('/icons/') || p.startsWith('/fonts/'));

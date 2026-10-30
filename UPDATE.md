@@ -117,6 +117,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.2.1** — shared credentials move out of the Vault page into their own More → Shared credentials page (grouped by
   project). No API or state change.
 
+- **1.2.2** — index.html is served with version-stamped asset URLs (`/app.js?v=…`, `/styles.css?v=…`, `/sprite.svg?v=…#`)
+  and a `porthole-version` meta tag. Reason: Cloudflare (and most proxies) cache `.js`/`.css` for hours regardless of the
+  origin's `Cache-Control`, so after an update phones were getting a new page with the previous script. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

@@ -3,7 +3,8 @@
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="/sprite.svg#i-${name}"/></svg>`;
+const ASSET_V = document.querySelector('meta[name="porthole-version"]')?.content || '0';
+const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="/sprite.svg?v=${ASSET_V}#i-${name}"/></svg>`;
 
 // ---------- API ----------
 
