@@ -225,6 +225,7 @@ EOF
         sed -e "s/__DOMAIN__/$PORTHOLE_DOMAIN/g" "$APP_DIR/deploy/nginx-porthole.conf" > /etc/nginx/sites-available/porthole
         ln -sf /etc/nginx/sites-available/porthole /etc/nginx/sites-enabled/porthole
         cp "$APP_DIR/deploy/nginx-snippets.conf" /etc/nginx/conf.d/porthole-snippets.conf
+        cp "$APP_DIR/deploy/porthole-proxy.inc" /etc/nginx/conf.d/porthole-proxy.inc
         nginx -t && systemctl enable --now nginx && systemctl reload nginx
 
         if [ ! -s "/etc/letsencrypt/live/$PORTHOLE_DOMAIN/fullchain.pem" ]; then
