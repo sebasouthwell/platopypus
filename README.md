@@ -40,6 +40,9 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   instead of asking you.
 - **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
   container per image: a second tap restarts the existing one or points you at it in Services.
+- **Share on your domain** — the red button in the Share dialog creates a named Cloudflare tunnel, a proxied DNS
+  record in your zone and an nginx block for the hostname (app.example.com), using a Cloudflare API token from the
+  Vault. Services then show that address instead of a trycloudflare one. Remove deletes all three again.
 - **Publishing flag** — every folder is local only until you mark it Private or Public (Files → folder → Repo). Until
   then nothing can be pushed from it: Publish refuses, and a global pre-push hook blocks agents too. Commits always
   work. Phone attachments in `.pasted/` are ignored by git everywhere.

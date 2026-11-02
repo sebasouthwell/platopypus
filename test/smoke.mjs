@@ -213,6 +213,12 @@ r = await call('/api/git/publish', { method: 'POST', body: { path: 'smoke-repo',
 }
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-repo' } }).catch(() => {});
 
+// 6f. Zoned share: prerequisites and validation (no Cloudflare token in the test vault).
+r = await call('/api/zoned/prereq'); check('zoned prereq reports a missing Cloudflare token', r.status === 200 && r.body.ready === false && /Vault/.test(r.body.reason), JSON.stringify(r.body));
+r = await call('/api/zoned', { method: 'POST', body: { port: 8123, hostname: 'not a host' } }); check('zoned rejects a bad hostname', r.status === 400, `${r.status} ${JSON.stringify(r.body)}`);
+r = await call('/api/zoned', { method: 'POST', body: { port: 8123, hostname: 'app.example.com' } }); check('zoned refuses without a token (412)', r.status === 412, `${r.status}`);
+r = await call('/api/zoned'); check('zoned list is empty', r.status === 200 && Array.isArray(r.body) && r.body.length === 0);
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

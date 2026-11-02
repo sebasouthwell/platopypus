@@ -64,9 +64,11 @@ cannot be managed from the phone and die with the shell.
 
 ## Exposing a dev server
 
-`tunnel <port> [label]` opens a public https link to a local port and shows it on the phone's Tunnels
-tab. `tunnel ls` and `tunnel rm <port>` manage them. Links are public to anyone who has them; close
-them when done.
+`tunnel <port> [label]` opens a temporary public https link (random trycloudflare address, closes after a few
+hours) and shows it on the phone. `tunnel ls` and `tunnel rm <port>` manage them. For a permanent address on the
+user's own domain (app.example.com) the user taps "Share on your domain" on the phone; do not try to create
+Cloudflare tunnels or DNS records yourself. When a service already has such a hostname, use that URL in anything
+you hand to the user (credshare --url), never localhost.
 
 ## Git and GitHub
 

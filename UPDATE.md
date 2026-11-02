@@ -55,13 +55,15 @@ with mode 0600. Formats as of version 1.0:
 | `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses, publicUrl? } }`; logs are cloudflared output; `publicUrl` (1.3.0) overrides the trycloudflare address for tunnels on the user's own domain |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
+| `zoned.json`, `zoned/<slug>.log` | zoned.js | `{ items: { "<slug>": { slug, hostname, port, name, zoneId, zoneName, accountId, tunnelId, dnsRecordId, via: nginx\|direct, origin, created, token(enc) } } }` — hostnames on the user's domain (1.5.0); `token` is the cloudflared run token encrypted with `vault.key` |
 | `projects.json` | projects.js | `{ repos: { "<abs folder>": { flag: private\|public, set } } }` — publishing flags (1.4.0); a folder absent from the map is local only |
 | `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline? } } }` — registered servers (1.3.0); logs in `services/<slug>.log` |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
 
-nginx: `install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-porthole.conf` (no certificate yet)
+nginx: zoned shares add `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` (owned and removed by Porthole);
+`install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-porthole.conf` (no certificate yet)
 or `deploy/nginx-porthole-ssl.conf` (certificate present) on **every** run; certbot runs in `certonly` mode and
 never edits nginx config. Do not hand-edit the site file on a box; change the template and release.
 
@@ -152,6 +154,12 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   `git/push` is gated the same way. install.sh sets the service user's `core.hooksPath` to `~/.porthole/githooks`
   (pre-push asks `project allow-push`) and `core.excludesFile` to `~/.porthole/gitignore_global` (`.pasted/`). New CLI
   `project`. No migration; existing folders become local only until flagged.
+
+- **1.5.0** — share on your own domain: `zoned.json` (new), routes `GET /api/zoned`, `GET /api/zoned/prereq`, `POST /api/zoned`,
+  `DELETE /api/zoned/<slug>`; `tunnels.list()` (and therefore `/api/tunnels`, `/api/services.links`, shared-credential
+  `openUrl`) includes zoned entries with `kind: zoned`, `hostname`, `slug`, `connected`; `DELETE /api/tunnels/<port>` on a
+  zoned port removes the hostname. Porthole writes `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` on boxes
+  with nginx and removes them again; nothing else under /etc/nginx is touched. tmux prefix `zoned-`. No migration.
 
 ## Release checklist
 

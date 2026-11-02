@@ -28,6 +28,7 @@ import * as update from './lib/update.js';
 import * as shared from './lib/sharedcreds.js';
 import * as services from './lib/services.js';
 import * as projectFlags from './lib/projects.js';
+import * as zoned from './lib/zoned.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -294,6 +295,11 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Tunnels
+        // Share on your own domain (named Cloudflare tunnel + DNS + nginx block)
+        if (p === '/api/zoned' && method === 'GET') return send(res, 200, await zoned.list());
+        if (p === '/api/zoned/prereq' && method === 'GET') return send(res, 200, await zoned.prereq());
+        if (p === '/api/zoned' && method === 'POST') { const b = await readJson(req); return send(res, 201, await zoned.create({ port: b.port, hostname: b.hostname, name: b.name })); }
+        if ((m = p.match(/^\/api\/zoned\/([a-z0-9-]{1,50})$/)) && method === 'DELETE') { await zoned.remove(m[1]); return send(res, 200, { ok: true }); }
         if (p === '/api/tunnels' && method === 'GET') {
             const [list, ports] = await Promise.all([tunnels.list(), tunnels.listeningPorts()]);
             const tunnelled = new Set(list.map(t => t.port));
@@ -509,6 +515,8 @@ wss.on('connection', ws => { ws.isAlive = true; ws.on('pong', () => { ws.isAlive
 
 // Tunnel watcher: expiry + "is the process behind this port still there?"
 setInterval(() => tunnels.sweep().catch(e => console.error(e)), 10_000);
+zoned.ensure().catch(e => console.error(e));
+setInterval(() => zoned.ensure().catch(e => console.error(e)), 60_000);
 
 // Daily update check against the public repo (first one a minute after boot).
 update.schedule();

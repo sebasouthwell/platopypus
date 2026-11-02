@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { config } from './config.js';
 import { listSessions, hasSession, newSession, killSession } from './tmux.js';
 import * as dockerMgr from './docker.js';
+import * as zoned from './zoned.js';
 import { log } from './log.js';
 
 const run = promisify(execFile);
@@ -68,6 +69,8 @@ export async function list() {
             origin: m.origin || '127.0.0.1',
         });
     }
+    // Hostnames on the user's own domain (zoned.js) are tunnels too, just permanent ones.
+    for (const z of await zoned.list().catch(() => [])) out.push(z);
     out.sort((a, b) => b.created - a.created);
     return out;
 }
@@ -121,7 +124,11 @@ export async function create({ port, name = '', ttlMinutes, host }) {
 export async function close(port) {
     const p = validPort(port);
     if (!p) throw httpError(400, 'Bad port.');
-    if (!(await hasSession(`tunnel-${p}`))) throw httpError(404, 'No tunnel on that port.');
+    if (!(await hasSession(`tunnel-${p}`))) {
+        const z = zoned.byPort(p);
+        if (z) return zoned.remove(z.slug);
+        throw httpError(404, 'No tunnel on that port.');
+    }
     await killSession(`tunnel-${p}`);
     delete meta[p];
     persist();
@@ -163,6 +170,7 @@ export async function sweep() {
         return containerPorts.has(t.port);
     };
     for (const t of current) {
+        if (t.kind === 'zoned') continue; // permanent until removed
         if (t.expires && t.expires < now) { log('tunnel', `port ${t.port} expired`); await close(t.port).catch(() => {}); continue; }
         if (now - t.created < GRACE_MS) continue;
         const m = meta[t.port]; if (!m) continue;
