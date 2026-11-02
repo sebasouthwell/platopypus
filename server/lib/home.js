@@ -12,6 +12,7 @@ import * as tunnels from './tunnels.js';
 import * as dockerMgr from './docker.js';
 import * as apps from './apps.js';
 import * as system from './system.js';
+import * as servicesMgr from './services.js';
 
 export const projectsDir = path.join(config.root, 'Projects');
 
@@ -72,25 +73,31 @@ export async function services() {
     const containers = dockerAvail ? await dockerMgr.containers().catch(() => []) : [];
     const compose = dockerAvail ? await dockerMgr.composeProjects().catch(() => []) : [];
     const shellList = await shells.list();
+    const servers = await servicesMgr.list().catch(() => []);
+    const serverPorts = new Set(servers.map(s => s.port).filter(Boolean));
 
     const tunnelByPort = new Map(tunnelList.map(t => [t.port, t]));
     const containerPorts = new Set(containers.flatMap(c => c.ports.map(p => p.host)));
     const appByContainer = new Map(catalog.map(a => [`app-${a.key}`, a]));
 
-    // Dev servers: listening ports that aren't a container's published port and aren't Porthole.
+    // Dev servers: listening ports that aren't a container's published port, a registered server, or the box's own
+    // plumbing (those go under "system": visible, never shareable).
     const devservers = ports
-        .filter(p => !containerPorts.has(p.port) && !/^(docker-proxy|cloudflared|tailscaled|sshd|systemd-resolve|nginx)$/.test(p.process || ''))
+        .filter(p => !containerPorts.has(p.port) && !serverPorts.has(p.port) && !p.system)
         .map(p => ({
             port: p.port,
             process: p.process || 'unknown',
             addr: p.addr,
+            pid: p.pid,
             tunnel: tunnelByPort.get(p.port) || null,
             shell: guessShell(shellList, p),
         }));
+    const systemPorts = ports.filter(p => p.system && !containerPorts.has(p.port)).map(p => ({ port: p.port, process: p.process || 'unknown', addr: p.addr, what: describeSystem(p) }));
 
     const links = tunnelList.map(t => {
         const c = containers.find(x => x.ports.some(pp => pp.host === t.port));
-        return { ...t, kind: c ? 'container' : 'devserver', target: c ? (appByContainer.get(c.name)?.title || c.name) : (devservers.find(d => d.port === t.port)?.process || `port ${t.port}`) };
+        const srv = servers.find(s => s.port === t.port);
+        return { ...t, kind: t.kind || 'quick', targetKind: c ? 'container' : srv ? 'server' : 'devserver', target: c ? (appByContainer.get(c.name)?.title || c.name) : srv ? srv.name : (devservers.find(d => d.port === t.port)?.process || `port ${t.port}`) };
     });
 
     const containerRows = containers.map(c => {
@@ -106,11 +113,23 @@ export async function services() {
     return {
         docker: dockerAvail,
         links,
+        servers,
+        system: systemPorts,
         devservers,
         containers: containerRows,
         compose,
         apps: catalog,
     };
+}
+
+function describeSystem(p) {
+    const c = p.cmd || '';
+    if (/claude/.test(c)) return 'Claude Code';
+    if (/codex/.test(c)) return 'Codex CLI';
+    if (/agy|antigravity|gemini/.test(c)) return 'Antigravity CLI';
+    if (/code-server/.test(c) || p.process === 'code-server') return 'code-server';
+    if (/\/opt\/porthole\//.test(c)) return 'Porthole';
+    return p.process || 'system';
 }
 
 function guessShell(shellList, port) {

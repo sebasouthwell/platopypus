@@ -1,0 +1,70 @@
+#!/usr/bin/env node
+// Register long-running servers with Porthole so the phone can see, share, stop and restart them.
+//
+//   svc run --name "Parle API" --port 8000 -- npm run dev          start a command in its own session (logged)
+//   svc add --name "Parle API" --port 8000 [--pid 1234]            register a process that is already running
+//   svc ls                                                          list registered servers and their state
+//   svc stop <name>   svc start <name>   svc rm <name>   svc logs <name> [-n 100]
+//
+// `run` is the better choice: Porthole knows the command, so it can restart it, and the log is kept.
+// Stop kills the whole process group and closes any public link on that port.
+
+import fs from 'node:fs';
+
+const args = process.argv.slice(2);
+const sub = args.shift();
+const port = process.env.PORTHOLE_PORT || '7331';
+const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
+let token = process.env.PORTHOLE_TOKEN || '';
+try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token file */ }
+
+function help(code = 0) { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(code); }
+if (!sub || sub === '-h' || sub === '--help') help();
+
+const opts = {}; const rest = [];
+for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { rest.push(...args.slice(i + 1)); break; }
+    if (a.startsWith('--')) { const k = a.slice(2); if (['name', 'port', 'pid', 'cwd', 'n'].includes(k)) { opts[k] = args[++i]; continue; } }
+    if (a === '-n') { opts.n = args[++i]; continue; }
+    rest.push(a);
+}
+
+const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+let cookie = '';
+async function api(path, method = 'GET', body) {
+    if (!cookie) {
+        const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
+        if (!login.ok) throw new Error('Cannot sign in to Porthole on this box (token).');
+        cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { ...headers, cookie }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+    return data;
+}
+const slugOf = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const show = s => `${s.alive ? '●' : '○'} ${s.name.padEnd(24)} ${s.port ? (':' + s.port).padEnd(7) : '       '} ${s.alive ? 'running' : 'stopped'}${s.listening === false && s.alive ? ' (not listening yet)' : ''}${s.tunnel?.url ? '  ' + s.tunnel.url : ''}${s.external ? '  [registered pid ' + s.pid + ']' : ''}`;
+
+try {
+    if (sub === 'run') {
+        if (!opts.name || !rest.length) { console.error('usage: svc run --name <name> [--port N] -- <command…>'); process.exit(2); }
+        const s = await api('/api/servers/run', 'POST', { name: opts.name, port: opts.port, cwd: opts.cwd || process.cwd(), cmd: rest, project: process.env.PORTHOLE_SHELL_NAME || null });
+        console.log(`started "${s.name}" in its own session${s.port ? ` on :${s.port}` : ''}. Logs: svc logs ${s.slug}. Stop: svc stop ${s.slug}.`);
+    } else if (sub === 'add') {
+        if (!opts.name) { console.error('usage: svc add --name <name> [--port N] [--pid P]'); process.exit(2); }
+        const s = await api('/api/servers', 'POST', { name: opts.name, port: opts.port, pid: opts.pid, cwd: opts.cwd || process.cwd(), project: process.env.PORTHOLE_SHELL_NAME || null });
+        console.log(`registered "${s.name}" (pid ${s.pid}${s.port ? `, :${s.port}` : ''}). The phone can now stop or share it.`);
+    } else if (sub === 'ls' || sub === 'list') {
+        const l = await api('/api/servers');
+        if (!l.length) console.log('no registered servers (svc run --name … -- <command>)');
+        for (const s of l) console.log(show(s));
+    } else if (sub === 'stop' || sub === 'start' || sub === 'rm' || sub === 'remove' || sub === 'logs') {
+        const name = rest[0] || opts.name; if (!name) { console.error(`usage: svc ${sub} <name>`); process.exit(2); }
+        const slug = slugOf(name);
+        if (sub === 'logs') { process.stdout.write(await api(`/api/servers/${slug}/logs?tail=${Number(opts.n) || 100}`) + '\n'); }
+        else if (sub === 'rm' || sub === 'remove') { await api(`/api/servers/${slug}`, 'DELETE'); console.log(`removed ${slug}`); }
+        else { const s = await api(`/api/servers/${slug}/${sub}`, 'POST'); console.log(show(s)); }
+    } else help(2);
+} catch (e) { console.error(`svc: ${e.message}`); process.exit(1); }

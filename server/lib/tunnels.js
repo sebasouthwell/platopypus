@@ -59,7 +59,9 @@ export async function list() {
         out.push({
             port,
             name: m.name || `Port ${port}`,
-            url: readUrl(port),
+            // A tunnel on the user's own domain reports that hostname, never a trycloudflare address.
+            url: m.publicUrl || readUrl(port),
+            kind: m.publicUrl ? 'zoned' : 'quick',
             created: m.created || s.created,
             expires: m.expires || null,
             owner: m.owner || null,
@@ -174,6 +176,12 @@ export async function sweep() {
     }
 }
 
+// Processes that belong to the box or to Porthole/agents rather than to the user's projects. They are listed under
+// "System" with no share button: tunnelling an agent's local callback port or code-server makes no sense.
+const SYSTEM_PROCS = /^(sshd|systemd-resolve|systemd-resolved|nginx|tailscaled|cloudflared|docker-proxy|dockerd|containerd|code-server|snapd|chronyd|rpcbind|cupsd|avahi-daemon|exim4|postfix|master)$/;
+const SYSTEM_CMD = /(^|\/)(claude|codex|agy|antigravity|gemini|code-server|cloudflared|tailscaled)(\s|$)|\/opt\/porthole\/|\.claude\/|\.codex\/|\.gemini\/|\.antigravity\/|\.agent-profiles\//;
+function cmdlineOf(pid) { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ').slice(0, 200); } catch { return ''; } }
+
 // Ports something is listening on locally, so the UI can offer "open a tunnel" for each.
 export async function listeningPorts() {
     let out = '';
@@ -192,9 +200,13 @@ export async function listeningPorts() {
         const port = Number(m[1]);
         if (port === config.port) continue;
         const proc = (line.match(/users:\(\("([^"]+)"/) || [])[1] || '';
+        const pid = Number((line.match(/pid=(\d+)/) || [])[1]) || null;
         const addr = local.replace(/:\d+$/, '');
         if (addr === '127.0.0.11') continue; // Docker's embedded DNS inside a container
-        if (!seen.has(port)) seen.set(port, { port, process: proc, addr });
+        if (seen.has(port)) continue;
+        const cmd = pid ? cmdlineOf(pid) : '';
+        const system = SYSTEM_PROCS.test(proc) || SYSTEM_CMD.test(cmd) || pid === process.pid;
+        seen.set(port, { port, process: proc, addr, pid, cmd, system });
     }
     return [...seen.values()].sort((a, b) => a.port - b.port);
 }

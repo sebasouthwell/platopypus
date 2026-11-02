@@ -20,13 +20,13 @@ function persist() {
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), { mode: 0o600 });
 }
 
-const RESERVED_PREFIX = 'tunnel-';
+const RESERVED_PREFIXES = ['tunnel-', 'svc-', 'zoned-'];
 
 export async function list() {
     const live = await listSessions();
     const shells = [];
     for (const s of live) {
-        if (s.name.startsWith(RESERVED_PREFIX)) continue;
+        if (RESERVED_PREFIXES.some(p => s.name.startsWith(p))) continue;
         const m = meta[s.name] || {};
         let preview = [];
         try { preview = await capture(s.name, 3); } catch { /* racing a kill */ }
@@ -56,7 +56,7 @@ export const scratchRoot = path.join(config.home, 'scratch');
 
 export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false }) {
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
-    if (name.startsWith(RESERVED_PREFIX)) throw httpError(400, 'Names starting with "tunnel-" are reserved.');
+    if (RESERVED_PREFIXES.some(p => name.startsWith(p))) throw httpError(400, `Names starting with ${RESERVED_PREFIXES.map(p => `"${p}"`).join(', ')} are reserved.`);
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
     if (kind === 'claude') { kind = 'agent'; agent = agent || 'claude'; }   // backwards compatible
     if (!['shell', 'agent', 'remote-control'].includes(kind)) throw httpError(400, 'Unknown shell kind.');

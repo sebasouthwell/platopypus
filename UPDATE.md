@@ -13,7 +13,9 @@ anything under `server/lib` that reads or writes state, and before changing `ins
    - snapshot `/opt/porthole` → `/opt/porthole.prev`
    - run `install.sh` from the new source (idempotent: rsync the app, `npm install --omit=dev`, write `VERSION`,
      restart the `porthole` systemd service)
-   - poll `http://127.0.0.1:7331/api/login` for up to 30 s; on failure restore the snapshot and restart
+   - health check for up to 45 s: the API answers, the home page is served with version-stamped assets, `app.js` and
+     `styles.css` come back with a plausible size and `app.js` parses (`node --check`); otherwise restore the snapshot
+     and restart (the reason is written to `update.log`)
    - write `~/.porthole/update-result.json` and append to `~/.porthole/update.log`
 3. The web app shows a full-screen "shutting down for approximately 5 minutes" notice, polls until the API
    answers, and reloads.
@@ -21,6 +23,13 @@ anything under `server/lib` that reads or writes state, and before changing `ins
 **An update must never touch:** `~/.porthole` (except by the running server's own normal reads/writes), user
 files, tmux sessions (shells, tunnels, code-server), Docker containers/volumes, nginx config and certificates,
 `/etc/porthole.env`. If a change needs any of those to move, it is a *migration* and follows the rules below.
+
+## Channels
+
+Boxes follow the **`stable`** branch by default (`PORTHOLE_UPDATE_BRANCH`, set in `/etc/porthole.env`). Every release
+lands on `master`; `stable` is moved to it with `scripts/release.ps1 -Promote` only after the release has run on a
+real box for a while without surprises. Tapping Update therefore never installs something newer than the last
+promoted version. Set `PORTHOLE_UPDATE_BRANCH=master` to follow every release immediately.
 
 ## Versioning
 
@@ -43,9 +52,10 @@ with mode 0600. Formats as of version 1.0:
 | `security.json` | credentials.js, totp.js | `{ passkeys: [{ id, publicKey(base64url), counter, transports, deviceType, backedUp, name, created, lastUsed }], password: { salt, hash, set }, totp: { enabled, secret(base32), enabledAt, lastCounter }, pending: {...} }` — any key may be absent |
 | `shells.json` | shells.js | `{ "<name>": { kind: shell\|agent\|remote-control, cwd, created, agent?, yolo?, resume?, profile?, scratch? } }` — legacy `kind: "claude"` is read as `agent` + `agent: "claude"`; `scratch: true` (1.1.0) marks a shell whose `cwd` under `~/scratch/` is deleted when the shell is ended |
 | `shared-creds.json` | sharedcreds.js | `{ items: [ { id, title, fields: [{ label, value(enc), secret }], url, note, shell, project?, port, at } ] }` — credentials handed over by `credshare`; values encrypted with `vault.key`; dropped after 7 days (1.0.4, documented 1.1.0) |
-| `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses } }`; logs are cloudflared output |
+| `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses, publicUrl? } }`; logs are cloudflared output; `publicUrl` (1.3.0) overrides the trycloudflare address for tunnels on the user's own domain |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
+| `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline? } } }` — registered servers (1.3.0); logs in `services/<slug>.log` |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
@@ -127,6 +137,13 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   agents: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, plus every Claude profile. The block is
   wrapped in `porthole:begin/end` markers and refreshed on each update (a legacy unmarked block is replaced from its
   heading to the end of the file). No state change.
+
+- **1.3.0** — update channel defaults to `stable` (promote with `release.ps1 -Promote`); post-update health check also
+  verifies the page, the stamped assets and that `app.js` parses, rolling back otherwise. Registered servers: `services.json` (new), routes `GET/POST /api/servers`, `POST /api/servers/run`,
+  `POST /api/servers/<slug>/stop|start`, `GET /api/servers/<slug>/logs`, `DELETE /api/servers/<slug>`; `svc` CLI; tmux
+  session prefixes `svc-` and `zoned-` are reserved like `tunnel-`. `/api/services` adds `servers` and `system` (ports
+  owned by Porthole, agents and box daemons, never shareable) and excludes both from `devservers`; links carry
+  `kind: quick|zoned`. No migration.
 
 ## Release checklist
 

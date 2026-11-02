@@ -172,6 +172,23 @@ r = await call('/api/shells/smoke-scratch', { method: 'DELETE' });
 r = await call(`/api/files?path=${encodeURIComponent(scratchDir.replace(/^\//, ''))}`);
 check('scratch folder deleted with the shell', r.status === 404, `status ${r.status}`);
 
+// 6d. Registered servers: run, observe, stop (process group gone), remove.
+await call('/api/servers/smoke-srv', { method: 'DELETE' }).catch(() => {});
+r = await call('/api/servers/run', { method: 'POST', body: { name: 'Smoke Srv', port: 8123, cmd: ['python3', '-m', 'http.server', '8123'] } });
+check('svc run starts a registered server', r.status === 201 && r.body.slug === 'smoke-srv' && r.body.alive === true, JSON.stringify(r.body).slice(0, 200));
+let srv = null; for (let i = 0; i < 15; i++) { await sleep(1000); srv = (await call('/api/servers')).body.find(x => x.slug === 'smoke-srv'); if (srv?.listening) break; }
+check('registered server is listening on its port', !!srv && srv.listening === true && srv.alive === true, JSON.stringify(srv && { alive: srv.alive, listening: srv.listening, pid: srv.pid }));
+r = await call('/api/services'); check('services lists it under servers, not dev servers', r.status === 200 && r.body.servers.some(x => x.slug === 'smoke-srv') && !r.body.devservers.some(d => d.port === 8123), `servers=${r.body.servers?.length} dev=${JSON.stringify(r.body.devservers?.map(d => d.port))}`);
+check('services hides system ports from dev servers', Array.isArray(r.body.system) && !r.body.devservers.some(d => /claude|codex|code-server/.test(d.process)));
+const srvPid = srv?.pid;
+r = await call('/api/servers/smoke-srv/stop', { method: 'POST' });
+await sleep(800);
+const stillListening = (await call('/api/servers')).body.find(x => x.slug === 'smoke-srv');
+check('stop kills the server and frees the port', r.status === 200 && stillListening && stillListening.alive === false && stillListening.listening === false, JSON.stringify(stillListening && { alive: stillListening.alive, listening: stillListening.listening }));
+r = await call('/api/servers/smoke-srv/start', { method: 'POST' }); check('start brings it back', r.status === 201 || r.status === 200, JSON.stringify(r.body).slice(0, 120));
+{ const { execFileSync } = await import('node:child_process'); const out = execFileSync('svc', ['ls'], { encoding: 'utf8' }); check('svc ls shows it', /Smoke Srv/.test(out), out.trim().slice(0, 120)); }
+r = await call('/api/servers/smoke-srv', { method: 'DELETE' }); check('remove forgets it', r.status === 200 && !(await call('/api/servers')).body.some(x => x.slug === 'smoke-srv'));
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

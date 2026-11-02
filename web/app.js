@@ -886,19 +886,34 @@ async function loadServices() {
         html += `<h2 class="section"><span class="bullet kelp"></span>Shared links<span class="meta">public · 4 h max</span></h2>`;
         html += s.links.length ? `<div class="list">${s.links.map(t => `
             <div class="row"><span class="ico kelp">${icon('link')}</span>
-              <div class="main"><div class="title">${esc(t.name || t.target)}${t.owner ? `<span class="tag dim">${esc(t.owner)}</span>` : ''}</div><div class="sub mono">${t.url ? esc(t.url.replace(/^https:\/\//, '')) : 'publishing…'}</div>
+              <div class="main"><div class="title">${esc(t.name || t.target)}${t.kind === 'zoned' ? '<span class="tag">your domain</span>' : ''}${t.owner ? `<span class="tag dim">${esc(t.owner)}</span>` : ''}</div><div class="sub mono">${t.url ? esc(t.url.replace(/^https:\/\//, '')) : 'publishing…'}</div>
                 ${t.expires ? `<div class="bar-mini kelp"><div style="width:${Math.max(2, Math.min(100, (t.expires - Date.now()) / (4 * 3600_000) * 100))}%"></div></div>` : ''}</div>
               ${credChip(t.port)}${t.url ? `<a class="pill kelp" href="${esc(t.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
               <button class="more" data-link-menu="${t.port}" aria-label="Link actions">${icon('more_h')}</button>
             </div>`).join('')}</div>` : `<p class="empty">Nothing shared. Share a dev server or container below.</p>`;
     }
     if (show('dev')) {
-        html += `<h2 class="section"><span class="bullet brass"></span>Dev servers<span class="meta">from your shells</span></h2>`;
-        html += s.devservers.length ? `<div class="list">${s.devservers.map(d => `
+        html += `<h2 class="section"><span class="bullet brass"></span>Servers<span class="meta">registered with svc</span></h2>`;
+        html += s.servers.length ? `<div class="list">${s.servers.map(d => `
+            <div class="row"><span class="ico ${d.alive ? 'brass' : 'dim'}">${icon('devserver')}</span>
+              <div class="main"><div class="title">${esc(d.name)}${d.port ? ` <span class="mono">:${d.port}</span>` : ''}${d.project ? `<span class="tag dim">${esc(d.project)}</span>` : ''}${d.external ? '<span class="tag dim">pid</span>' : ''}</div>
+                <div class="sub">${d.alive ? `<span class="live">● running</span>${d.listening === false ? ' · not listening yet' : ''}` : `stopped${d.stoppedAt ? ' · ' + fmtAgo(d.stoppedAt) : ''}`}${d.tunnel?.url ? ` · <a href="${esc(d.tunnel.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(d.tunnel.url.replace(/^https:\/\//, ''))}</a>` : d.alive && d.port ? ' · local only' : ''}</div></div>
+              ${d.port ? credChip(d.port) : ''}${d.alive && d.port && !d.tunnel ? `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.name)}">${icon('share')}Share</button>` : ''}
+              ${d.alive ? `<button class="pill" data-srv="stop" data-slug="${esc(d.slug)}">${icon('stop')}Stop</button>` : d.canStart ? `<button class="pill" data-srv="start" data-slug="${esc(d.slug)}">${icon('play')}Start</button>` : ''}
+              <button class="more" data-srv-menu="${esc(d.slug)}" aria-label="Server actions">${icon('more_h')}</button>
+            </div>`).join('')}</div>` : `<p class="empty">No registered servers. Agents start them with <span class="mono">svc run --name … --port … -- &lt;command&gt;</span>; anything else listening shows below.</p>`;
+        if (s.devservers.length) {
+            html += `<h2 class="section"><span class="bullet brass"></span>Other listening ports<span class="meta">unregistered</span></h2>`;
+            html += `<div class="list">${s.devservers.map(d => `
             <div class="row"><span class="ico brass">${icon('devserver')}</span>
               <div class="main"><div class="title">${esc(d.process)} · <span class="mono">:${d.port}</span></div><div class="sub">${d.tunnel ? '<span class="live">● shared</span>' : 'local only'}${d.shell ? ` · ${esc(d.shell)} shell` : ''}</div></div>
-              ${credChip(d.port)}${d.tunnel ? `<button class="pill" data-unshare="${d.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.process)}">${icon('share')}Share</button>`}
-            </div>`).join('')}</div>` : `<p class="empty">Nothing listening yet. Start a dev server from a shell and it appears here.</p>`;
+              ${credChip(d.port)}<button class="pill ghost" data-register="${d.port}" data-label="${esc(d.process)}" title="Register as a server">${icon('plus')}</button>${d.tunnel ? `<button class="pill" data-unshare="${d.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.process)}">${icon('share')}Share</button>`}
+            </div>`).join('')}</div>`;
+        }
+        if (s.system?.length) {
+            html += `<details class="sys"><summary><span class="bullet"></span>System · ${s.system.length} local-only port${s.system.length === 1 ? '' : 's'}<span class="meta">Porthole, agents, box services · not shareable</span></summary>
+            <div class="list">${s.system.map(d => `<div class="row plain"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">${esc(d.what)}</div><div class="sub">${esc(d.process)} · <span class="mono">${esc(d.addr)}:${d.port}</span></div></div></div>`).join('')}</div></details>`;
+        }
     }
     if (show('dev')) {
         const cs = await api('/api/codeserver').catch(() => null);
@@ -957,6 +972,9 @@ async function loadServices() {
     const body = $('#services-body');
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
+    $$('[data-srv]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { await api(`/api/servers/${b.dataset.slug}/${b.dataset.srv}`, { method: 'POST' }); toast(b.dataset.srv === 'stop' ? 'Stopped' : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
+    $$('[data-srv-menu]', body).forEach(b => b.onclick = () => serverMenu(s.servers.find(x => x.slug === b.dataset.srvMenu)));
+    $$('[data-register]', body).forEach(b => b.onclick = () => registerServerDialog(Number(b.dataset.register), b.dataset.label));
     $$('[data-unshare]', body).forEach(b => b.onclick = async () => { try { await api(`/api/tunnels/${b.dataset.unshare}`, { method: 'DELETE' }); toast('Link closed'); loadServices(); } catch (ex) { toast(ex.message, true); } });
     $$('[data-link-menu]', body).forEach(b => b.onclick = () => linkMenu(s.links.find(t => t.port === Number(b.dataset.linkMenu))));
     $$('[data-cact]', body).forEach(b => b.onclick = () => containerAction(b.dataset.c, b.dataset.cact));
@@ -1018,6 +1036,27 @@ async function codeServerStartWith(folder, project = false) {
     loadServices();
 }
 
+function serverMenu(d) {
+    if (!d) return;
+    const { panel, close } = openDialog(`<h2>${icon('devserver')}${esc(d.name)}</h2><p class="muted">${d.cmd ? `<span class="mono">${esc(d.cmd.join(' '))}</span><br>` : d.cmdline ? `<span class="mono">${esc(d.cmdline)}</span><br>` : ''}${d.cwd ? `in ${esc(shortPath(d.cwd))} · ` : ''}pid ${d.pid || '—'}${d.port ? ` · :${d.port}` : ''}</p>
+        <div class="menu">${d.log ? `<button data-a="logs">${icon('logs')}Logs</button>` : ''}${d.alive ? `<button data-a="stop">${icon('stop')}Stop (whole process group)</button>` : d.canStart ? `<button data-a="start">${icon('play')}Start</button>` : ''}<button data-a="rm" class="danger">${icon('trash')}Stop and forget</button></div><div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-a]', panel).forEach(b => b.onclick = async () => {
+        const a = b.dataset.a; close();
+        try {
+            if (a === 'logs') { const res = await api(`/api/servers/${d.slug}/logs?tail=400`, { raw: true }); const text = await res.text(); const dlg = openDialog(`<h2>${esc(d.name)} · log</h2><pre style="max-height:60vh">${esc(text || '(empty)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-close>Close</button></div>`); $('[data-copy-all]', dlg.panel).onclick = () => copyText(text, 'Copied'); return; }
+            if (a === 'stop' || a === 'start') await api(`/api/servers/${d.slug}/${a}`, { method: 'POST' });
+            if (a === 'rm') { if (!(await confirmDialog({ title: `Forget "${d.name}"?`, text: 'It is stopped first (process group and any public link). Nothing on disk is deleted.', action: 'Stop and forget' }))) return; await api(`/api/servers/${d.slug}`, { method: 'DELETE' }); }
+            loadServices();
+        } catch (ex) { toast(ex.message, true); }
+    });
+}
+function registerServerDialog(port, label = '') {
+    const { panel, close } = openDialog(`<h2>${icon('devserver')}Register port ${port}</h2><p class="muted">Gives this process a name so it can be stopped, shared and tracked as a server. Porthole will not know how to restart it; for that, start it with <span class="mono">svc run</span>.</p>
+        <div class="field"><label for="rs-name">Name</label><input id="rs-name" type="text" value="${esc(label)}" autocorrect="off"></div>
+        <div class="buttons"><button class="primary" data-ok>Register</button><button data-close>Cancel</button></div>`);
+    const go_ = async () => { try { await api('/api/servers', { method: 'POST', body: { name: $('#rs-name', panel).value, port } }); close(); toast('Registered'); loadServices(); } catch (ex) { toast(ex.message, true); } };
+    $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
+}
 function shareDialog(port, label = '') {
     const { panel, close } = openDialog(`
         <h2>${icon('share')}Share port ${port}</h2>

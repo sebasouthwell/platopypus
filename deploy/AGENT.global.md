@@ -50,6 +50,18 @@ service, and `--note` says what the account can do or where the value goes. Neve
 Porthole shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
 appearing in the terminal scrollback.
 
+## Long-running servers
+
+Start anything that should keep running (dev server, API, bot, worker) through Porthole so the phone can see it as a
+named server, share it, read its log, stop it completely and restart it:
+
+    svc run --name "Parle API" --port 8000 -- npm run dev
+
+It runs in its own session with its output logged, independent of your shell. For a process you already started
+elsewhere, register it: `svc add --name "Parle API" --port 8000` (or `--pid <pid>`). `svc ls`, `svc logs <name>`,
+`svc stop <name>`, `svc start <name>`. Do not leave servers as background jobs of your shell (`&`, nohup): they
+cannot be managed from the phone and die with the shell.
+
 ## Exposing a dev server
 
 `tunnel <port> [label]` opens a public https link to a local port and shows it on the phone's Tunnels

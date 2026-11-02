@@ -174,6 +174,7 @@ ln -sf "$APP_DIR/bin/vault" /usr/local/bin/vault
 ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
+ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
 
 # Global agent instructions (vault, credshare, tunnels, git, phone-sized output). The same text goes into every
 # agent's own global file. The block between the porthole markers is replaced on every run; anything the user wrote

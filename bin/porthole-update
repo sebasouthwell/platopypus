@@ -8,7 +8,7 @@
 set -uo pipefail
 
 REPO="${PORTHOLE_UPDATE_REPO:-sebasouthwell/porthole}"
-BRANCH="${PORTHOLE_UPDATE_BRANCH:-master}"
+BRANCH="${PORTHOLE_UPDATE_BRANCH:-stable}"
 SRC="${PORTHOLE_SRC:-/opt/porthole-src}"
 APP="${PORTHOLE_APP:-/opt/porthole}"
 STATE="${PORTHOLE_STATE:-${HOME:-/root}/.porthole}"
@@ -67,15 +67,29 @@ if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet porth
     kill -TERM 1 2>/dev/null || pkill -TERM -f 'node server.js' 2>/dev/null || true
 fi
 
-# 4. health check with rollback
-for i in $(seq 1 30); do
+# 4. health check with rollback. "The API answers" is not enough: a page whose script fails to load would pass.
+#    So: API up, the page is served with version-stamped assets, the main script and stylesheet come back with a
+#    plausible size, and the script parses. Anything else for 45 s → roll back to the snapshot.
+REASON=""
+healthy() {
+    curl -fsS "http://127.0.0.1:$PORT/api/login" >/dev/null 2>&1 || { REASON="API not answering"; return 1; }
+    local page v
+    page="$(curl -fsS "http://127.0.0.1:$PORT/" 2>/dev/null)" || { REASON="home page not served"; return 1; }
+    v="$(printf '%s' "$page" | sed -n 's/.*\/app\.js?v=\([^"]*\)".*/\1/p' | head -1)"
+    [ -n "$v" ] || { REASON="home page has no stamped app.js"; return 1; }
+    [ "$(curl -fsS -o /dev/null -w '%{size_download}' "http://127.0.0.1:$PORT/app.js?v=$v" 2>/dev/null || echo 0)" -gt 10000 ] || { REASON="app.js missing or truncated"; return 1; }
+    [ "$(curl -fsS -o /dev/null -w '%{size_download}' "http://127.0.0.1:$PORT/styles.css?v=$v" 2>/dev/null || echo 0)" -gt 1000 ] || { REASON="styles.css missing or truncated"; return 1; }
+    node --check "$APP/web/app.js" >/dev/null 2>&1 || { REASON="app.js does not parse"; return 1; }
+    return 0
+}
+for i in $(seq 1 45); do
     sleep 1
-    if curl -fsS "http://127.0.0.1:$PORT/api/login" >/dev/null 2>&1; then
+    if healthy; then
         rm -rf "$APP.prev"
         finish true "updated ${FROM:-?} → $TO"
     fi
 done
-say "service did not come back; rolling back"
+say "health check failed ($REASON); rolling back"
 rm -rf "$APP"; mv "$APP.prev" "$APP"
 systemctl restart porthole 2>/dev/null || kill -TERM 1 2>/dev/null || true
 finish false "health check failed; rolled back to ${FROM:-previous}"

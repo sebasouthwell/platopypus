@@ -4,7 +4,7 @@ services:
     image: porthole:dev
     container_name: porthole
     ports:
-      - "0.0.0.0:7331:7331"     # LAN-reachable for phone testing (token-protected; switch back to 127.0.0.1 when done)
+      - "127.0.0.1:7332:7331"   # host 7331 is taken by the netsh portproxy (LAN access); point that rule at 127.0.0.1:7332
     environment:
       PORTHOLE_TOKEN: ${PORTHOLE_TOKEN:-porthole-test}   # setup token for the first run
       # Passkeys need https/localhost; over the LAN http address only a password works, so allow password-only setup here.

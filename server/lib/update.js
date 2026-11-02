@@ -15,7 +15,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(here, '..', '..');           // /opt/porthole
 const stateFile = path.join(config.state, 'update.json');
 export const REPO = process.env.PORTHOLE_UPDATE_REPO || 'sebasouthwell/porthole';
-export const BRANCH = process.env.PORTHOLE_UPDATE_BRANCH || 'master';
+// Channel: `stable` moves only when a release has soaked on master (scripts/release.ps1 -Promote); set
+// PORTHOLE_UPDATE_BRANCH=master in /etc/porthole.env to follow every release immediately.
+export const BRANCH = process.env.PORTHOLE_UPDATE_BRANCH || 'stable';
 const SRC = process.env.PORTHOLE_SRC || '/opt/porthole-src';
 
 function load() { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { return {}; } }

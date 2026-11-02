@@ -26,6 +26,7 @@ import * as codeserver from './lib/codeserver.js';
 import * as catalog from './lib/catalog.js';
 import * as update from './lib/update.js';
 import * as shared from './lib/sharedcreds.js';
+import * as services from './lib/services.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -409,6 +410,14 @@ const server = http.createServer(async (req, res) => {
         // Aggregates for the Home and Services screens
         if (p === '/api/home' && method === 'GET') return send(res, 200, await home.home());
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
+
+        // Registered servers (svc CLI / Services tab)
+        if (p === '/api/servers' && method === 'GET') return send(res, 200, await services.list());
+        if (p === '/api/servers' && method === 'POST') return send(res, 201, await services.add(await readJson(req, 64 * 1024)));
+        if (p === '/api/servers/run' && method === 'POST') return send(res, 201, await services.runServer(await readJson(req, 64 * 1024)));
+        if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/(stop|start)$/)) && method === 'POST') return send(res, 200, await services[m[2]](m[1]));
+        if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(m[1], url.searchParams.get('tail') || 200));
+        if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})$/)) && method === 'DELETE') { await services.remove(m[1]); return send(res, 200, { ok: true }); }
 
         // Box
         if (p === '/api/status' && method === 'GET') return send(res, 200, await system.status());
