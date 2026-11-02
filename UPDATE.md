@@ -161,6 +161,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   zoned port removes the hostname. Porthole writes `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` on boxes
   with nginx and removes them again; nothing else under /etc/nginx is touched. tmux prefix `zoned-`. No migration.
 
+- **1.6.0** — Vault: required fields may be left empty on save (item reported with `incomplete: [labels]`, and `fields[]`
+  includes the missing definitions with `missing: true`); `POST /api/vault/derive` (Telegram getMe / chat lookup; values
+  are used for the one call, never stored). No state change: an item simply lacks some `fields` keys.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

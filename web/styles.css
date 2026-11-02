@@ -254,6 +254,12 @@ button.row:active { background: var(--hull-2); }
 .quick button:active { color: var(--brass); border-color: rgba(240,184,64,.5); }
 .quick.creds button { color: var(--brass); border-color: rgba(240,184,64,.4); background: rgba(240,184,64,.1); display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .quick.creds button svg.i { width: 14px; height: 14px; }
+.helper-pane { background: var(--hull); border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
+.helper-pane textarea { width: 100%; }
+.crumbs.mini { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-size: 12px; margin-bottom: 6px; }
+.crumbs.mini button { background: none; border: 0; color: var(--brass); padding: 4px 6px; font: inherit; font-size: 12px; }
+.list.mini { max-height: 30vh; overflow: auto; }
+.list.mini .row { min-height: 40px; padding: 6px 10px; }
 details.sys { margin: 14px 0 0; }
 details.sys summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--mist); padding: 6px 2px; }
 details.sys summary::-webkit-details-marker { display: none; }

@@ -1797,8 +1797,8 @@ async function loadVault() {
     for (const [label, list] of groups) {
         $('#vault-list').insertAdjacentHTML('beforebegin', `<div class="vault-group"><h2 class="section">${esc(label)}</h2><div class="list">${list.map(t => `
             <button class="row" data-id="${t.id}"><span class="ico ${t.oauth ? (t.oauth.connected ? 'kelp' : 'flare') : 'brass'}">${icon(t.oauth ? 'link' : 'key')}</span>
-              <div class="main"><div class="title">${esc(t.name)}<span class="tag brass">${esc(t.title || t.provider)}</span>${t.oauth ? `<span class="tag ${t.oauth.connected ? '' : 'dim'}">${t.oauth.connected ? 'connected' : 'not connected'}</span>` : ''}</div>
-                <div class="sub mono">${esc(t.fields.map(f => f.env).join(' · '))}</div></div>
+              <div class="main"><div class="title">${esc(t.name)}<span class="tag brass">${esc(t.title || t.provider)}</span>${t.oauth ? `<span class="tag ${t.oauth.connected ? '' : 'dim'}">${t.oauth.connected ? 'connected' : 'not connected'}</span>` : ''}${t.incomplete?.length ? `<span class="tag" style="color:var(--flare)">incomplete</span>` : ''}</div>
+                <div class="sub mono">${esc(t.fields.filter(f => !f.missing).map(f => f.env).join(' · '))}${t.incomplete?.length ? ` · missing ${esc(t.incomplete.join(', '))}` : ''}</div></div>
               ${icon('more_h', 'i chev')}</button>`).join('')}</div></div>`);
     }
     $$('.vault-group .row').forEach(r => r.onclick = () => vaultMenu(items.find(i => i.id === r.dataset.id)));
@@ -1850,6 +1850,81 @@ async function catalogDialog() {
     $('#cat-q', panel).addEventListener('input', e => render(e.target.value));
 }
 
+
+// ---- credential form helpers: inline folder picker for the project scope, paste-to-fill, format converters ----
+// A folder browser that lives inside the form (the dialog is single-instance, so the big picker cannot be nested).
+async function inlineFolderPicker(host, start, onChange) {
+    let cur = start || '';
+    const load = async p => {
+        let data; try { data = await api(`/api/files?path=${encodeURIComponent(p || '.')}`); } catch (ex) { if (p) return load(''); toast(ex.message, true); return; } // a stale start folder falls back to the root
+        cur = data.path; onChange(cur);
+        const dirs = data.items.filter(i => i.type === 'dir' && !i.hidden);
+        host.innerHTML = `<div class="crumbs mini"><button data-p="">${rootLabel()}</button>${cur ? cur.split('/').map((seg, i, all) => `<span class="sep">›</span><button data-p="${esc(all.slice(0, i + 1).join('/'))}">${esc(seg)}</button>`).join('') : ''}</div>
+            <div class="list mini">${cur ? `<button class="row" data-d="${esc(parentOf(cur))}"><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div></div></button>` : ''}${dirs.map(d => `<button class="row" data-d="${esc(join(cur, d.name))}"><span class="ico brass">${icon('folder')}</span><div class="main"><div class="title">${esc(d.name)}</div></div></button>`).join('') || '<p class="empty">No sub-folders</p>'}</div>`;
+        $$('[data-p]', host).forEach(b => b.onclick = e => { e.preventDefault(); load(b.dataset.p); });
+        $$('[data-d]', host).forEach(b => b.onclick = e => { e.preventDefault(); load(b.dataset.d); });
+    };
+    await load(cur);
+}
+function randomSecret(n = 20) { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.!'; const b = new Uint8Array(n); crypto.getRandomValues(b); return [...b].map(x => a[x % a.length]).join(''); }
+function fieldEl(panel, pfx, name) { return $(`#${pfx}-${name}`, panel); }
+function setField(panel, pfx, name, value) { const el = fieldEl(panel, pfx, name); if (!el) return false; el.value = value; if (el.type === 'password') el.type = 'text'; el.dispatchEvent(new Event('input')); return true; }
+function fieldNames(panel, pfx) { return $$(`input[id^="${pfx}-"], textarea[id^="${pfx}-"]`, panel).map(el => el.id.slice(pfx.length + 1)).filter(n => !['name', 'prefix', 'scope', 'notes', 'authUrl', 'tokenUrl'].includes(n)); }
+// Paste a .env block or a JSON object and fill whatever matches (by field name, label or env suffix).
+function fillFromText(panel, pfx, text) {
+    const names = fieldNames(panel, pfx); const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+    let pairs = [];
+    try { const o = JSON.parse(text); if (o && typeof o === 'object') pairs = Object.entries(o).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]); } catch { /* not JSON */ }
+    if (!pairs.length) for (const line of text.split(/\r?\n/)) { const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][\w.-]*)\s*[=:]\s*(.*)$/); if (m) pairs.push([m[1], m[2].trim().replace(/^(["'])(.*)\1$/, '$2')]); }
+    let filled = 0;
+    for (const [k, v] of pairs) {
+        const nk = norm(k);
+        const target = names.find(n => norm(n) === nk) || names.find(n => nk.endsWith(norm(n))) || names.find(n => { const lbl = $(`label[for="${pfx}-${n}"]`, panel)?.textContent || ''; return norm(lbl).includes(nk) || nk.includes(norm(n)); });
+        if (target && v) { setField(panel, pfx, target, v); filled++; }
+    }
+    return filled;
+}
+function parseDbUrl(u) { try { const x = new URL(u); return { scheme: x.protocol.replace(':', ''), host: x.hostname, port: x.port, user: decodeURIComponent(x.username), password: decodeURIComponent(x.password), database: x.pathname.replace(/^\//, ''), query: x.search.replace(/^\?/, '') }; } catch { return null; } }
+function buildDbUrl(p) { const auth = p.user ? `${encodeURIComponent(p.user)}${p.password ? ':' + encodeURIComponent(p.password) : ''}@` : ''; return `${p.scheme || 'postgres'}://${auth}${p.host || 'localhost'}${p.port ? ':' + p.port : ''}/${p.database || ''}${p.query ? '?' + p.query : ''}`; }
+function jwtInfo(t) { const parts = String(t).split('.'); if (parts.length !== 3) return null; try { const pl = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))); return { exp: pl.exp ? new Date(pl.exp * 1000) : null, iss: pl.iss || null, sub: pl.sub || null }; } catch { return null; } }
+// Helpers per auth style. Each returns pills; the pane below the chips hosts any inline sub-form.
+function credHelpers(style, pfx, panel, pane) {
+    const show = html => { pane.innerHTML = html; pane.hidden = false; };
+    const hide = () => { pane.hidden = true; pane.innerHTML = ''; };
+    const copyRow = (label, v) => v ? `<button class="cred-row" data-cp="${esc(v)}"><span class="lbl">${esc(label)}</span><span class="val">${esc(v)}</span>${icon('copy')}</button>` : '';
+    const list = [{ label: 'Paste .env / JSON', icon: 'paste', run: () => { show(`<textarea class="mono" rows="4" placeholder="KEY=value lines or a JSON object" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea><div class="buttons"><button class="primary" data-fill>Fill fields</button><button data-hide>Close</button></div>`); $('[data-fill]', pane).onclick = () => { const n = fillFromText(panel, pfx, $('textarea', pane).value); toast(n ? `${n} field${n === 1 ? '' : 's'} filled` : 'Nothing matched', !n); if (n) hide(); }; } }];
+    if (style === 'basic' || style === 'smtp') list.push({ label: 'Generate password', icon: 'zap', run: () => { setField(panel, pfx, 'password', randomSecret()); toast('Password generated — copy it to the service too'); } });
+    if (style === 'botChat') {
+        list.push({ label: 'Check token', icon: 'check', run: async () => { try { const r = await api('/api/vault/derive', { method: 'POST', body: { kind: 'telegram-getme', botToken: fieldEl(panel, pfx, 'botToken')?.value } }); show(`<p class="sub">Bot <b>@${esc(r.username || '?')}</b> (${esc(r.name || '')})</p>${copyRow('Bot ID', r.botId)}<div class="buttons"><button data-hide>Close</button></div>`); } catch (ex) { toast(ex.message, true); } } });
+        list.push({ label: 'Find chat ID', icon: 'search', run: async () => { try { const r = await api('/api/vault/derive', { method: 'POST', body: { kind: 'telegram-chats', botToken: fieldEl(panel, pfx, 'botToken')?.value } }); show(r.chats.length ? `<p class="sub">Chats this bot has seen · tap to use</p><div class="list mini">${r.chats.map(c => `<button class="row" data-chat="${esc(c.id)}"><span class="ico brass">${icon('user')}</span><div class="main"><div class="title">${esc(c.title)}</div><div class="sub mono">${esc(c.id)} · ${esc(c.type)}${c.username ? ' · @' + esc(c.username) : ''}</div></div></button>`).join('')}</div><div class="buttons"><button data-hide>Close</button></div>` : `<p class="sub">${esc(r.hint || 'No chats yet.')}</p><div class="buttons"><button data-hide>Close</button></div>`); $$('[data-chat]', pane).forEach(b => b.onclick = () => { setField(panel, pfx, 'chatId', b.dataset.chat); hide(); toast('Chat ID filled'); }); } catch (ex) { toast(ex.message, true); } } });
+        list.push({ label: 'Bot ID from token', icon: 'key', run: () => { const t = fieldEl(panel, pfx, 'botToken')?.value || ''; const id = t.split(':')[0]; if (!/^\d+$/.test(id)) return toast('Enter the bot token first', true); show(copyRow('Bot ID', id) + `<div class="buttons"><button data-hide>Close</button></div>`); } });
+    }
+    if (style === 'dbUrl') {
+        list.push({ label: 'Build from parts', icon: 'edit', run: () => { const cur = parseDbUrl(fieldEl(panel, pfx, 'url')?.value || '') || {}; show(['scheme', 'host', 'port', 'user', 'password', 'database'].map(k => `<div class="field"><label>${k}</label><input data-k="${k}" type="text" class="mono" value="${esc(cur[k] || (k === 'scheme' ? 'postgres' : ''))}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`).join('') + `<div class="buttons"><button class="primary" data-build>Use this URL</button><button data-hide>Close</button></div>`); $('[data-build]', pane).onclick = () => { const p = {}; $$('[data-k]', pane).forEach(i => { p[i.dataset.k] = i.value.trim(); }); setField(panel, pfx, 'url', buildDbUrl(p)); hide(); toast('URL built'); }; } });
+        list.push({ label: 'Parts of this URL', icon: 'search', run: () => { const p = parseDbUrl(fieldEl(panel, pfx, 'url')?.value || ''); if (!p) return toast('Not a valid URL yet', true); show(Object.entries(p).map(([k, v]) => copyRow(k, v)).join('') + `<div class="buttons"><button data-hide>Close</button></div>`); } });
+    }
+    if (style === 'json') list.push({ label: 'Check JSON', icon: 'check', run: () => { const el = fieldEl(panel, pfx, 'json'); try { const o = JSON.parse(el.value); el.value = JSON.stringify(o, null, 2); const info = ['project_id', 'client_email', 'type', 'client_id'].filter(k => o[k]).map(k => copyRow(k, String(o[k]))).join(''); show((info || '<p class="sub">Valid JSON</p>') + `<div class="buttons"><button data-hide>Close</button></div>`); } catch (ex) { toast(`Invalid JSON: ${ex.message}`, true); } } });
+    if (style === 'smtp') { for (const [name, host, port] of [['Gmail', 'smtp.gmail.com', '587'], ['Outlook', 'smtp.office365.com', '587'], ['iCloud', 'smtp.mail.me.com', '587']]) list.push({ label: name, icon: 'server', run: () => { setField(panel, pfx, 'host', host); setField(panel, pfx, 'port', port); toast(`${name} server filled`); } }); }
+    if (['token', 'apiKey', 'urlToken', 'keyToken', 'header'].includes(style)) list.push({ label: 'Tidy value', icon: 'wrap-text', run: () => { let n = 0; for (const f of fieldNames(panel, pfx)) { const el = fieldEl(panel, pfx, f); if (!el) continue; const v = el.value.trim().replace(/^(["'])(.*)\1$/, '$2').replace(/^Bearer\s+/i, ''); if (v !== el.value) { el.value = v; n++; } const j = jwtInfo(v); if (j) show(`<p class="sub">JWT${j.exp ? ` · expires ${esc(j.exp.toLocaleString())}` : ''}${j.iss ? ` · issuer ${esc(j.iss)}` : ''}</p><div class="buttons"><button data-hide>Close</button></div>`); } toast(n ? 'Tidied' : 'Already tidy'); } });
+    if (['urlToken', 'urlTopic', 'webhook'].includes(style)) list.push({ label: 'Trim trailing /', icon: 'wrap-text', run: () => { const el = fieldEl(panel, pfx, 'url'); if (el) { el.value = el.value.trim().replace(/\/+$/, ''); toast('Trimmed'); } } });
+    return list;
+}
+function mountHelpers(panel, style, pfx) {
+    const chips = $('[data-helpers]', panel), pane = $('[data-helper-pane]', panel);
+    if (!chips || !pane) return;
+    const list = credHelpers(style, pfx, panel, pane);
+    chips.innerHTML = list.map((h, i) => `<button type="button" class="pill ghost" data-h="${i}">${icon(h.icon)}${esc(h.label)}</button>`).join('');
+    $$('[data-h]', chips).forEach(b => b.onclick = () => list[Number(b.dataset.h)].run());
+    pane.addEventListener('click', e => { const hideBtn = e.target.closest('[data-hide]'); if (hideBtn) { pane.hidden = true; pane.innerHTML = ''; } const cp = e.target.closest('[data-cp]'); if (cp) copyText(cp.dataset.cp, 'Copied'); });
+}
+// Project scope: show the inline folder browser under the choice; the input mirrors the chosen folder.
+function mountScopePicker(panel, pfx) {
+    const input = $(`#${pfx}-scope`, panel); if (!input) return;
+    let host = $('[data-scope-pick]', panel);
+    if (!host) { host = document.createElement('div'); host.dataset.scopePick = ''; host.hidden = true; host.style.marginTop = '8px'; input.insertAdjacentElement('afterend', host); }
+    return { show: async () => { host.hidden = false; if (!host.innerHTML) await inlineFolderPicker(host, input.value || state.filesPath || '', p => { input.value = p; }); }, hide: () => { host.hidden = true; } };
+}
+
 function credentialForm(svc, cat, styleKey = null) {
     const style = styleKey || svc.styles[0];
     const def = cat.styles[style];
@@ -1862,6 +1937,8 @@ function credentialForm(svc, cat, styleKey = null) {
         <div class="field"><label for="cf-name">Name</label><input id="cf-name" type="text" value="${esc(svc.title)}" autocorrect="off"></div>
         <div class="field"><label for="cf-prefix">Environment prefix</label><input id="cf-prefix" type="text" class="mono" value="${esc(svc.env)}" autocapitalize="characters" autocorrect="off" spellcheck="false"><p class="sub" style="margin:6px 2px 0">Variables: <span class="mono" data-envpreview></span></p></div>
         ${def.fields.filter(f => !f.derived).map(f => `<div class="field"><label for="cf-${f.name}">${esc(f.label)}${f.optional ? ' (optional)' : ''}</label>${f.multiline ? `<textarea id="cf-${f.name}" rows="4" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${esc(f.placeholder || '')}">${f.name === 'scopes' ? esc(preset.scopes || '') : ''}</textarea>` : `<input id="cf-${f.name}" type="${f.secret ? 'password' : 'text'}" class="mono" value="${f.name === 'scopes' ? esc(preset.scopes || '') : ''}" placeholder="${esc(f.placeholder || '')}" autocapitalize="off" autocorrect="off" spellcheck="false">`}</div>`).join('')}
+        <div class="chips" data-helpers style="margin:-2px 0 8px"></div><div data-helper-pane class="helper-pane" hidden></div>
+        <p class="sub" style="margin:0 2px 10px">Save with what you have: missing fields are marked incomplete and can be filled in later from the Vault.</p>
         ${isOAuth ? `<div class="field"><label>Redirect URL to register with ${esc(svc.title)}</label><div class="row plain" style="background:var(--sea-2);border-radius:12px;padding:10px 12px"><div class="main"><div class="title mono" style="font-size:13px;word-break:break-all;white-space:normal">${esc(redirect)}</div></div><button type="button" class="pill" data-copy-redirect>${icon('copy')}</button></div></div>
           ${svc.key === 'custom' || !preset.authUrl ? `<div class="field"><label for="cf-authUrl">Authorization URL</label><input id="cf-authUrl" type="text" class="mono" value="${esc(preset.authUrl || '')}" placeholder="https://provider/oauth/authorize"></div><div class="field"><label for="cf-tokenUrl">Access token URL</label><input id="cf-tokenUrl" type="text" class="mono" value="${esc(preset.tokenUrl || '')}" placeholder="https://provider/oauth/token"></div><div class="field"><label>Client authentication</label><div class="choices" data-cauth><button type="button" data-c="body" class="selected">Body</button><button type="button" data-c="header">Header (basic)</button></div></div><div class="field"><label>PKCE</label><div class="choices" data-pkce><button type="button" data-p="0" class="selected">Off</button><button type="button" data-p="1">On</button></div></div>` : `<p class="sub" style="margin:0 2px">Authorize: <span class="mono">${esc(preset.authUrl)}</span><br>Token: <span class="mono">${esc(preset.tokenUrl)}</span>${preset.pkce ? ' · PKCE' : ''}</p>`}` : ''}
         <div class="field"><label>Scope</label><div class="choices" data-scope><button type="button" data-s="general" class="selected">General</button><button type="button" data-s="project">One project</button></div><input id="cf-scope" type="text" class="mono" value="${esc(state.filesPath || '')}" placeholder="Projects/my-app" style="margin-top:8px" hidden autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -1870,8 +1947,10 @@ function credentialForm(svc, cat, styleKey = null) {
     let scopeMode = 'general', cauth = preset.clientAuth || 'body', pkce = !!preset.pkce;
     const envPreview = () => { const p = $('#cf-prefix', panel).value.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''); $('[data-envpreview]', panel).textContent = def.fields.map(f => `${p}_${f.env}`).join(', '); };
     envPreview(); $('#cf-prefix', panel).addEventListener('input', envPreview);
+    mountHelpers(panel, style, 'cf');
+    const cfPick = mountScopePicker(panel, 'cf');
     $$('[data-style] button', panel).forEach(b => b.onclick = () => { close(); credentialForm(svc, cat, b.dataset.st); });
-    $$('[data-scope] button', panel).forEach(b => b.onclick = () => { scopeMode = b.dataset.s; $$('[data-scope] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('#cf-scope', panel).hidden = scopeMode === 'general'; });
+    $$('[data-scope] button', panel).forEach(b => b.onclick = () => { scopeMode = b.dataset.s; $$('[data-scope] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('#cf-scope', panel).hidden = scopeMode === 'general'; if (scopeMode === 'general') cfPick?.hide(); else cfPick?.show(); });
     $$('[data-cauth] button', panel).forEach(b => b.onclick = () => { cauth = b.dataset.c; $$('[data-cauth] button', panel).forEach(x => x.classList.toggle('selected', x === b)); });
     $$('[data-pkce] button', panel).forEach(b => b.onclick = () => { pkce = b.dataset.p === '1'; $$('[data-pkce] button', panel).forEach(x => x.classList.toggle('selected', x === b)); });
     $('[data-copy-redirect]', panel)?.addEventListener('click', () => copyText(redirect, 'Redirect URL copied'));
@@ -1894,12 +1973,15 @@ function credentialForm(svc, cat, styleKey = null) {
 function vaultEditDialog(t) {
     const { panel, close } = openDialog(`<h2>${icon('edit')}${esc(t.name)}</h2><p class="muted">Leave a value empty to keep it.</p>
         <div class="field"><label for="ve-name">Name</label><input id="ve-name" type="text" value="${esc(t.name)}"></div>
-        ${t.fields.filter(f => !['accessToken', 'refreshToken'].includes(f.name)).map(f => `<div class="field"><label for="ve-${f.name}">${esc(f.label)} <span class="mono" style="text-transform:none;letter-spacing:0">${esc(f.env)}</span></label><input id="ve-${f.name}" type="${f.secret ? 'password' : 'text'}" class="mono" placeholder="${f.secret ? esc(f.hint) : esc(f.hint || '')}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`).join('')}
+        ${t.fields.filter(f => !['accessToken', 'refreshToken'].includes(f.name)).map(f => `<div class="field"><label for="ve-${f.name}">${esc(f.label)}${f.missing ? ' <span class="tag" style="color:var(--flare)">missing</span>' : ''} <span class="mono" style="text-transform:none;letter-spacing:0">${esc(f.env)}</span></label><input id="ve-${f.name}" type="${f.secret ? 'password' : 'text'}" class="mono" placeholder="${f.secret ? esc(f.hint) : esc(f.hint || '')}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`).join('')}
+        <div class="chips" data-helpers style="margin:-2px 0 8px"></div><div data-helper-pane class="helper-pane" hidden></div>
         <div class="field"><label>Scope</label><div class="choices" data-scope><button type="button" data-s="general" class="${t.scope === 'general' ? 'selected' : ''}">General</button><button type="button" data-s="project" class="${t.scope !== 'general' ? 'selected' : ''}">One project</button></div><input id="ve-scope" type="text" class="mono" value="${esc(t.scope === 'general' ? (state.filesPath || '') : t.scope)}" style="margin-top:8px" ${t.scope === 'general' ? 'hidden' : ''}></div>
         <div class="field"><label for="ve-notes">Notes</label><input id="ve-notes" type="text" value="${esc(t.notes || '')}"></div>
         <div class="buttons"><button class="primary" data-ok>Save</button><button data-close>Cancel</button></div>`);
     let scopeMode = t.scope === 'general' ? 'general' : 'project';
-    $$('[data-scope] button', panel).forEach(b => b.onclick = () => { scopeMode = b.dataset.s; $$('[data-scope] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('#ve-scope', panel).hidden = scopeMode === 'general'; });
+    mountHelpers(panel, t.style, 've');
+    const vePick = mountScopePicker(panel, 've');
+    $$('[data-scope] button', panel).forEach(b => b.onclick = () => { scopeMode = b.dataset.s; $$('[data-scope] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('#ve-scope', panel).hidden = scopeMode === 'general'; if (scopeMode === 'general') vePick?.hide(); else vePick?.show(); });
     $('[data-ok]', panel).onclick = async () => {
         const fields = {}; for (const f of t.fields) { const el = $(`#ve-${f.name}`, panel); if (el && el.value) fields[f.name] = el.value; }
         try { await api(`/api/vault/${t.id}`, { method: 'PUT', body: { name: $('#ve-name', panel).value, notes: $('#ve-notes', panel).value, scope: scopeMode === 'general' ? 'general' : $('#ve-scope', panel).value.trim(), fields } }); close(); toast('Saved'); loadVault(); }

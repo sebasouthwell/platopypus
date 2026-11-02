@@ -83,10 +83,16 @@ function envNameFor(it, fieldName) {
 function publicView(raw) {
     const it = normalise(raw);
     const fieldNames = Object.keys(it.fields || {});
+    let missing = [];
+    try { missing = (fieldsFor(it.style) || []).filter(d => !d.derived && !d.optional && !(d.name in (it.fields || {}))); } catch { /* legacy style */ }
     return {
         id: it.id, name: it.name, provider: it.provider, title: it.title || it.name, style: it.style, prefix: it.prefix,
         scope: it.scope, notes: it.notes || '', created: it.created, updated: it.updated, lastUsed: it.lastUsed || null,
-        fields: fieldNames.map(f => ({ name: f, env: envNameFor(it, f), label: it.labels?.[f] || f, secret: (it.secretFields || []).includes(f), hint: (it.secretFields || []).includes(f) ? hintOf(safeDecrypt(it.fields[f])) : safeDecrypt(it.fields[f]).slice(0, 80) })),
+        fields: [
+            ...fieldNames.map(f => ({ name: f, env: envNameFor(it, f), label: it.labels?.[f] || f, secret: (it.secretFields || []).includes(f), hint: (it.secretFields || []).includes(f) ? hintOf(safeDecrypt(it.fields[f])) : safeDecrypt(it.fields[f]) })),
+            ...missing.map(d => ({ name: d.name, env: envNameFor(it, d.name), label: d.label, secret: !!d.secret, hint: '', missing: true })),
+        ],
+        incomplete: missing.map(d => d.label),
         oauth: it.oauth ? { connected: !!it.fields.accessToken, expiresAt: it.oauth.expiresAt || null, scopes: it.oauth.scopes || '', authUrl: it.oauth.authUrl, tokenUrl: it.oauth.tokenUrl, pkce: !!it.oauth.pkce, clientAuth: it.oauth.clientAuth } : null,
         // legacy convenience for older UI code
         envName: fieldNames.length === 1 ? envNameFor(it, fieldNames[0]) : null,
@@ -129,11 +135,12 @@ export function create(body) {
     for (const d of defs) {
         const v = body.fields?.[d.name];
         if (d.derived) continue; // tokens come from the OAuth flow
-        if ((v === undefined || v === '') && !d.optional) throw httpError(400, `${d.label} is required.`);
+        // Missing required fields are allowed: the item is saved as incomplete and finished later from the Vault.
         if (v !== undefined && v !== '') { if (String(v).length > 64 * 1024) throw httpError(413, `${d.label} is too large.`); fields[d.name] = encrypt(v); }
         if (d.secret) secretFields.push(d.name);
         labels[d.name] = d.label;
     }
+    if (!Object.keys(fields).length && style !== 'oauth2') throw httpError(400, 'Enter at least one value; the rest can be filled in later from the Vault.');
     // Custom env mapping (custom service): { fieldName: ENV_NAME }
     const envMap = {};
     if (body.envMap && typeof body.envMap === 'object') {

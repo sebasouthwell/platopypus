@@ -219,6 +219,15 @@ r = await call('/api/zoned', { method: 'POST', body: { port: 8123, hostname: 'no
 r = await call('/api/zoned', { method: 'POST', body: { port: 8123, hostname: 'app.example.com' } }); check('zoned refuses without a token (412)', r.status === 412, `${r.status}`);
 r = await call('/api/zoned'); check('zoned list is empty', r.status === 200 && Array.isArray(r.body) && r.body.length === 0);
 
+// 6g. Vault: partial saves are allowed and marked incomplete; derive helper validates input.
+r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'basic', name: 'smoke partial', prefix: 'SMOKEPART', scope: 'general', fields: { username: 'alice' } } });
+check('vault accepts a partial credential', r.status === 201 && Array.isArray(r.body.incomplete) && r.body.incomplete.includes('Password') && r.body.fields.some(f => f.name === 'password' && f.missing), JSON.stringify(r.body).slice(0, 200));
+const partialId = r.body.id;
+r = await call(`/api/vault/${partialId}`, { method: 'PUT', body: { fields: { password: 'p@ss' } } }); check('filling the missing field clears incomplete', r.status === 200 && r.body.incomplete.length === 0, JSON.stringify(r.body.incomplete));
+r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'basic', name: 'smoke empty', prefix: 'SMOKEEMPTY', scope: 'general', fields: {} } }); check('a credential with no values at all is refused', r.status === 400);
+r = await call('/api/vault/derive', { method: 'POST', body: { kind: 'telegram-getme', botToken: 'nope' } }); check('derive helper rejects a malformed bot token', r.status === 400 && /bot token/.test(r.body.error || ''));
+await call(`/api/vault/${partialId}`, { method: 'DELETE' });
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

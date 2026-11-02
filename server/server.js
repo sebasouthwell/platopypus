@@ -29,6 +29,7 @@ import * as shared from './lib/sharedcreds.js';
 import * as services from './lib/services.js';
 import * as projectFlags from './lib/projects.js';
 import * as zoned from './lib/zoned.js';
+import * as derive from './lib/derive.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -316,6 +317,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Vault
+        if (p === '/api/vault/derive' && method === 'POST') return send(res, 200, await derive.run(await readJson(req, 64 * 1024)));
         if (p === '/api/vault/catalog' && method === 'GET') return send(res, 200, { services: catalog.publicCatalog(), styles: Object.fromEntries(Object.entries(catalog.AUTH_STYLES).map(([k, v]) => [k, { title: v.title, fields: v.fields }])) });
         if (p === '/api/vault' && method === 'GET') return send(res, 200, vault.list());
         if ((m = p.match(/^\/api\/vault\/([a-f0-9]+)\/oauth\/start$/)) && method === 'POST') { const { origin } = creds.rp(req); return send(res, 200, vault.authorizeUrl(m[1], origin)); }

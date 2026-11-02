@@ -40,6 +40,10 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   instead of asking you.
 - **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
   container per image: a second tap restarts the existing one or points you at it in Services.
+- **Vault helpers** — pick the project scope from an inline folder browser, save a credential half-filled and finish
+  it later (marked incomplete), paste a `.env` block or JSON to fill fields, and convert formats: Telegram token →
+  bot ID and chat ID lookup, connection URL ↔ host/port/user/password/database, JSON key file check, SMTP presets,
+  password generator, JWT expiry.
 - **Share on your domain** — the red button in the Share dialog creates a named Cloudflare tunnel, a proxied DNS
   record in your zone and an nginx block for the hostname (app.example.com), using a Cloudflare API token from the
   Vault. Services then show that address instead of a trycloudflare one. Remove deletes all three again.
