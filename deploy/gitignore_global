@@ -1,0 +1,5 @@
+# Porthole: applies to every repository on the box (git config core.excludesFile).
+# Files pasted from the phone into a chat are attachments, never source.
+.pasted/
+# Porthole's own state should never ride along in a project.
+.porthole/

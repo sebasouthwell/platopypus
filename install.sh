@@ -175,6 +175,12 @@ ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
+ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
+# Publishing gate: a global pre-push hook asks Porthole whether the folder is flagged as a repo; .pasted/ never enters git.
+install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$HOME_DIR/.porthole/githooks"
+install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$HOME_DIR/.porthole/githooks/pre-push"
+install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0644 "$APP_DIR/deploy/gitignore_global" "$HOME_DIR/.porthole/gitignore_global"
+sudo -u "$PORTHOLE_USER" -H bash -lc "git config --global core.hooksPath '$HOME_DIR/.porthole/githooks'; git config --global core.excludesFile '$HOME_DIR/.porthole/gitignore_global'" || true
 
 # Global agent instructions (vault, credshare, tunnels, git, phone-sized output). The same text goes into every
 # agent's own global file. The block between the porthole markers is replaced on every run; anything the user wrote

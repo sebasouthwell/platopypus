@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// Project publishing flag — what a folder may do with git remotes.
+//
+//   project status [dir]                 local | private | public (and which folder carries the flag)
+//   project set private|public|local [dir]
+//   project allow-push [dir]             exit 0 if pushing is allowed, 1 otherwise (used by the git pre-push hook)
+//
+// Nothing is pushed anywhere until the user marks the folder as a repo on the phone (Files → folder → Repo). Local
+// commits are always fine. `.pasted/` is ignored by git everywhere on this box.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [sub, ...rest] = process.argv.slice(2);
+const port = process.env.PORTHOLE_PORT || '7331';
+const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
+let token = process.env.PORTHOLE_TOKEN || '';
+try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token */ }
+if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
+
+const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+async function api(p, method = 'GET', body) {
+    const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
+    if (!login.ok) throw new Error('cannot reach Porthole on this box');
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    const res = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...headers, cookie }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+const dirArg = (i) => path.resolve(rest[i] || process.cwd());
+
+try {
+    if (sub === 'status') {
+        const r = await api(`/api/projects/repo?abs=${encodeURIComponent(dirArg(0))}`);
+        console.log(`${r.flag}${r.flag !== 'local' ? ` (flag on ${r.dir})` : ' — pushing is not allowed; ask the user to mark this folder as a repo on the phone'}`);
+    } else if (sub === 'set') {
+        const flag = rest[0]; if (!['local', 'private', 'public'].includes(flag)) { console.error('usage: project set local|private|public [dir]'); process.exit(2); }
+        const r = await api('/api/projects/repo', 'PUT', { abs: dirArg(1), flag });
+        console.log(`${r.dir} → ${r.flag}`);
+    } else if (sub === 'allow-push') {
+        const r = await api(`/api/projects/repo?abs=${encodeURIComponent(dirArg(0))}`);
+        if (r.allowed) process.exit(0);
+        console.error(`porthole: push blocked — ${r.reason}`);
+        process.exit(1);
+    } else { console.error(`unknown command ${sub}`); process.exit(2); }
+} catch (e) {
+    console.error(`project: ${e.message}`);
+    // allow-push fails closed: if Porthole cannot be asked, nothing leaves the box.
+    process.exit(sub === 'allow-push' ? 1 : 1);
+}

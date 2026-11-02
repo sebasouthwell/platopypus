@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Porthole global pre-push hook (git config core.hooksPath). A push leaves the box only from a folder the user has
+# marked as a repo on the phone (private or public). Local commits are never affected. If the folder has its own
+# .git/hooks/pre-push, it still runs afterwards.
+top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if command -v project >/dev/null 2>&1; then
+    project allow-push "$top" || exit 1
+else
+    echo "porthole: 'project' command missing; refusing to push" >&2
+    exit 1
+fi
+own="$top/.git/hooks/pre-push"
+if [ -x "$own" ] && [ "$own" != "${BASH_SOURCE[0]}" ]; then exec "$own" "$@"; fi
+exit 0

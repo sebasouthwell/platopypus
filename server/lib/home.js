@@ -13,6 +13,7 @@ import * as dockerMgr from './docker.js';
 import * as apps from './apps.js';
 import * as system from './system.js';
 import * as servicesMgr from './services.js';
+import * as projectFlags from './projects.js';
 
 export const projectsDir = path.join(config.root, 'Projects');
 
@@ -37,7 +38,7 @@ export async function home() {
         if (!e.isDirectory() || e.name.startsWith('.')) continue;
         const abs = path.join(projectsDir, e.name);
         const st = await fs.stat(abs).catch(() => null);
-        projects.set(abs, { name: e.name, path: rel(abs), modified: st?.mtimeMs || 0, shells: [], links: 0 });
+        projects.set(abs, { name: e.name, path: rel(abs), modified: st?.mtimeMs || 0, shells: [], links: 0, repo: projectFlags.repoFlag(abs).flag });
     }
     // Folders with a running shell count as projects even outside ~/Projects.
     for (const s of shellList) {
@@ -45,7 +46,7 @@ export async function home() {
         // A shell deep inside a project belongs to that project.
         for (const abs of projects.keys()) if (s.cwd === abs || s.cwd.startsWith(abs + path.sep)) key = abs;
         if (!projects.has(key)) {
-            projects.set(key, { name: key === config.root ? 'home' : path.basename(key), path: rel(key), modified: s.created, shells: [], links: 0 });
+            projects.set(key, { name: key === config.root ? 'home' : path.basename(key), path: rel(key), modified: s.created, shells: [], links: 0, repo: projectFlags.repoFlag(key).flag });
         }
         const p = projects.get(key);
         p.shells.push({ name: s.name, kind: s.kind, attached: s.attached, created: s.created });

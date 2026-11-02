@@ -70,10 +70,14 @@ them when done.
 
 ## Git and GitHub
 
-The GitHub CLI (`gh`) is installed. If `GH_TOKEN` is in the environment (from the vault) or `gh auth status`
-succeeds, you can push, clone and create repos without asking the user for credentials. Default new repos to
-**private**. Commit small, descriptive commits; push when a piece of work is done so the user can take the code
-away from this box at any time. Never commit tokens or `.env` files.
+Every folder is **local only** until the user marks it as a repo on the phone (Files → folder → Repo → Private or
+Public). Local only means: commit as much as you like, but never add a remote, push, or create a repository
+anywhere — a global pre-push hook blocks it anyway. Check with `project status` (prints local | private | public).
+When the folder is flagged, use that visibility (`gh repo create --private|--public`), commit small descriptive
+commits and push when a piece of work is done so the user can take the code away from this box. If a push is
+blocked, tell the user to flag the folder on the phone; do not try to work around it. `.pasted/` (phone attachments)
+is ignored by git everywhere on this box. Never commit tokens or `.env` files. The GitHub CLI (`gh`) is installed and
+signed in through `GH_TOKEN` from the vault or `gh auth login`.
 
 ## Docker
 

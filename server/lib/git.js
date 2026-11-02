@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { config } from './config.js';
 import { resolveInRoot, relative, safeName } from './files.js';
 import { envForSync as envFor } from './vault.js';
+import * as projectFlags from './projects.js';
 import { log } from './log.js';
 
 const run = promisify(execFile);
@@ -58,7 +59,7 @@ export async function isRepo(dir) {
 
 export async function status(rel) {
     const dir = resolveInRoot(rel || '.');
-    if (!(await isRepo(dir))) return { repo: false, path: relative(dir) };
+    if (!(await isRepo(dir))) return { repo: false, path: relative(dir), publish: projectFlags.repoFlag(dir).flag };
     const [branch, porcelain, remote, lastLog] = await Promise.all([
         git(dir, ['symbolic-ref', '--short', 'HEAD']).catch(() => git(dir, ['rev-parse', '--short', 'HEAD']).then(h => `detached @ ${h.trim()}`).catch(() => 'main')),
         git(dir, ['status', '--porcelain=v1']),
@@ -74,7 +75,7 @@ export async function status(rel) {
     const lines = porcelain.split('\n').filter(Boolean);
     const [hash, when, subject] = lastLog.trim().split('\t');
     return {
-        repo: true, path: relative(dir), branch: branch.trim(), remote: remote.trim() || null, upstream, ahead, behind,
+        repo: true, path: relative(dir), publish: projectFlags.repoFlag(dir).flag, branch: branch.trim(), remote: remote.trim() || null, upstream, ahead, behind,
         changed: lines.length, files: lines.slice(0, 50).map(l => ({ state: l.slice(0, 2).trim() || '??', file: l.slice(3) })),
         last: hash ? { hash, when, subject } : null,
         github: parseGithub(remote.trim()),
@@ -143,6 +144,8 @@ export async function push(rel) {
     const st = await status(rel);
     if (!st.repo) throw httpError(400, 'Not a git repository.');
     if (!st.remote) throw httpError(400, 'No remote yet. Publish to GitHub first.');
+    const gate = projectFlags.allowPush(dir);
+    if (!gate.allowed) throw httpError(409, gate.reason);
     const args = st.upstream ? ['push'] : ['push', '-u', 'origin', st.branch];
     await git(dir, args, 180_000);
     log('git', `push ${relative(dir)} (${st.branch})`);
@@ -158,8 +161,12 @@ export async function pull(rel) {
 }
 
 // Create a GitHub repo for the folder and push it. Default private.
-export async function publish(rel, { name, isPrivate = true, description = '' } = {}) {
+export async function publish(rel, { name, description = '' } = {}) {
     const dir = resolveInRoot(rel || '.');
+    // Visibility comes from the folder's flag, never from the request; a local-only folder cannot be published.
+    const gate = projectFlags.allowPush(dir);
+    if (!gate.allowed) throw httpError(409, gate.reason);
+    const isPrivate = gate.flag !== 'public';
     if (!(await isRepo(dir))) await init(rel);
     const st = await status(rel);
     if (st.remote) throw httpError(409, 'This folder already has a remote.');

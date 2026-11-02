@@ -189,6 +189,30 @@ r = await call('/api/servers/smoke-srv/start', { method: 'POST' }); check('start
 { const { execFileSync } = await import('node:child_process'); const out = execFileSync('svc', ['ls'], { encoding: 'utf8' }); check('svc ls shows it', /Smoke Srv/.test(out), out.trim().slice(0, 120)); }
 r = await call('/api/servers/smoke-srv', { method: 'DELETE' }); check('remove forgets it', r.status === 200 && !(await call('/api/servers')).body.some(x => x.slug === 'smoke-srv'));
 
+// 6e. Publishing flag: local by default, gates publish and the global pre-push hook, settable.
+await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-repo' } }).catch(() => {});
+r = await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-repo' } });
+r = await call('/api/projects/repo?path=smoke-repo'); check('project is local only by default', r.status === 200 && r.body.flag === 'local' && r.body.allowed === false, JSON.stringify(r.body));
+const flagDir = r.body.dir; // files root may be / or the home folder
+r = await call('/api/git/init', { method: 'POST', body: { path: 'smoke-repo' } });
+r = await call('/api/git/publish', { method: 'POST', body: { path: 'smoke-repo', name: 'smoke-repo' } }); check('publish refused while local only', r.status === 409 && /local only/i.test(r.body.error || ''), `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+{
+    const { execFileSync } = await import('node:child_process');
+    const dir = flagDir; const bare = `/tmp/smoke-bare-${marker}.git`;
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh(`git init -q --bare ${bare} && cd ${dir} && git -c user.email=s@x -c user.name=s commit -q --allow-empty -m init && git remote add origin ${bare}`);
+    let blocked = false; try { sh(`cd ${dir} && git push -q origin HEAD:main`); } catch (e) { blocked = /push blocked|local only/i.test(String(e.stderr || e.message)); }
+    check('global pre-push hook blocks a push from a local-only folder', blocked);
+    r = await call('/api/projects/repo', { method: 'PUT', body: { path: 'smoke-repo', flag: 'private' } }); check('flag set to private', r.status === 200 && r.body.flag === 'private');
+    let pushed = false; try { sh(`cd ${dir} && git push -q origin HEAD:main`); pushed = true; } catch (e) { pushed = false; }
+    check('push allowed once flagged private', pushed);
+    r = await call('/api/projects/repo?path=smoke-repo/sub/deeper'); check('sub-folders inherit the flag', r.body.flag === 'private' && r.body.allowed === true);
+    sh(`cd ${dir} && mkdir -p .pasted && echo x > .pasted/img.png && git add -A && git status --porcelain`); check('.pasted is ignored by git everywhere', !/pasted/.test(sh(`cd ${dir} && git status --porcelain --ignored=no`)));
+    await call('/api/projects/repo', { method: 'PUT', body: { path: 'smoke-repo', flag: 'local' } });
+    sh(`rm -rf ${bare}`);
+}
+await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-repo' } }).catch(() => {});
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

@@ -274,7 +274,7 @@ async function loadHome() {
     $('#home-projects').innerHTML = list.map(p => {
         const ag = p.shells.find(s => s.kind === 'agent');
         const status = ag ? `<span class="live">● ${esc(agentTitle(ag.agent))} running</span>` : p.shells.length ? `${p.shells.length} shell${p.shells.length > 1 ? 's' : ''} open` : 'nothing running';
-        return `<button class="row" data-folder="${esc(p.path)}"><span class="ico brass">${icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}</div><div class="sub">${status} · ${fmtAgo(p.modified)}</div></div>${icon('chevron', 'i chev')}</button>`;
+        return `<button class="row" data-folder="${esc(p.path)}"><span class="ico brass">${icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}${p.repo && p.repo !== 'local' ? `<span class="tag ${p.repo === 'public' ? 'brass' : 'dim'}">${icon(p.repo === 'public' ? 'globe' : 'lock')}${p.repo}</span>` : ''}</div><div class="sub">${status} · ${fmtAgo(p.modified)}</div></div>${icon('chevron', 'i chev')}</button>`;
     }).join('') + `<button class="row" data-new-project><span class="ico">${icon('folder-plus')}</span><div class="main"><div class="title" style="color:var(--brass)">New project</div></div></button>`;
     $$('#home-projects [data-folder]').forEach(b => b.onclick = () => { state.filesPath = b.dataset.folder; go('files'); });
     $('[data-new-project]').onclick = newProjectDialog;
@@ -1259,14 +1259,34 @@ async function loadRepoCard(rel) {
           <div class="btns">
             <button class="pill ${st.changed ? 'accent' : ''}" data-g="commit" ${st.changed ? '' : 'disabled'}>${icon('commit')}Commit</button>
             ${st.remote ? `<button class="pill ${st.ahead || !st.upstream ? 'accent' : ''}" data-g="push">${icon('cloud-up')}Push</button><button class="pill" data-g="pull">${icon('cloud-down')}Pull</button>` : `<button class="pill accent" data-g="publish">${icon('rocket')}Publish to GitHub</button>`}
+            <button class="pill ${st.publish === 'local' ? 'ghost' : ''}" data-g="flag" title="Publishing allowed?">${icon(st.publish === 'public' ? 'globe' : st.publish === 'private' ? 'lock' : 'shield')}${st.publish === 'local' ? 'Local only' : st.publish === 'public' ? 'Public repo' : 'Private repo'}</button>
           </div>
         </div>`;
     $$('[data-g]', card).forEach(b => b.onclick = () => gitAction(rel, b.dataset.g, st));
 }
 
+// Where may this folder go? Nothing leaves the box until the user says private or public here.
+function repoFlagDialog(rel, current = 'local', { forPublish = false } = {}) {
+    return new Promise(resolve => {
+        const { panel, close } = openDialog(`<h2>${icon('shield')}Publishing for ${esc(basename(rel) || 'this folder')}</h2>
+            <p class="muted">${forPublish ? 'This folder is local only, so it cannot be published yet. ' : ''}Local only means no push, no remote, nothing leaves the box; commits still work. Choosing Private or Public allows publishing to GitHub with that visibility, and agents may push.</p>
+            <div class="menu">
+              <button data-f="local" class="${current === 'local' ? 'selected' : ''}">${icon('shield')}<span>Local only<br><span class="sub">default · commits stay on the box</span></span></button>
+              <button data-f="private" class="${current === 'private' ? 'selected' : ''}">${icon('lock')}<span>Private repo<br><span class="sub">may be pushed to a private GitHub repository</span></span></button>
+              <button data-f="public" class="${current === 'public' ? 'selected' : ''}">${icon('globe')}<span>Public repo<br><span class="sub">may be pushed to a public repository · check for secrets first</span></span></button>
+            </div><div class="buttons"><button data-close>Cancel</button></div>`);
+        $('[data-close]', panel).addEventListener('click', () => resolve(null));
+        $$('[data-f]', panel).forEach(b => b.onclick = async () => {
+            try { const r = await api('/api/projects/repo', { method: 'PUT', body: { path: rel || '.', flag: b.dataset.f } }); close(); toast(r.flag === 'local' ? 'Local only' : `${r.flag} repo`); resolve(r.flag); }
+            catch (ex) { toast(ex.message, true); resolve(null); }
+        });
+    });
+}
+
 async function gitAction(rel, act, st) {
     const busy = (label) => { $$('#repo-card [data-g]').forEach(b => { b.disabled = true; }); toast(label); };
     try {
+        if (act === 'flag') { await repoFlagDialog(rel, st.publish); loadRepoCard(rel); refresh(); return; }
         if (act === 'commit') {
             const { panel, close } = openDialog(`<h2>${icon('commit')}Commit ${st.changed} change${st.changed === 1 ? '' : 's'}</h2>
                 <div class="menu" style="max-height:30vh;overflow:auto;margin-bottom:8px">${st.files.map(f => `<div class="row plain" style="min-height:36px;padding:6px 4px"><span class="tag ${f.state === '??' ? 'brass' : 'dim'}">${esc(f.state === '??' ? 'new' : f.state)}</span><span class="mono" style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.file)}</span></div>`).join('')}</div>
@@ -1282,16 +1302,15 @@ async function gitAction(rel, act, st) {
         if (act === 'push') { busy('Pushing…'); await api('/api/git/push', { method: 'POST', body: { path: rel } }); toast('Pushed'); }
         if (act === 'pull') { busy('Pulling…'); await api('/api/git/pull', { method: 'POST', body: { path: rel } }); toast('Pulled'); }
         if (act === 'publish') {
-            const { panel, close } = openDialog(`<h2>${icon('rocket')}Publish to GitHub</h2><p class="muted">Creates the repository on your GitHub account and pushes this folder to it.</p>
+            let flag = st.publish || 'local';
+            if (flag === 'local') { flag = await repoFlagDialog(rel, flag, { forPublish: true }); if (!flag || flag === 'local') { loadRepoCard(rel); return; } }
+            const { panel, close } = openDialog(`<h2>${icon('rocket')}Publish to GitHub</h2><p class="muted">Creates a <b>${flag}</b> repository on your GitHub account (from this folder's Repo setting) and pushes this folder to it.</p>
                 <div class="field"><label for="gp-name">Repository name</label><input id="gp-name" type="text" class="mono" value="${esc(basename(rel))}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-                <div class="field"><label>Visibility</label><div class="choices" data-vis><button type="button" data-v="private" class="selected">${icon('lock')}Private</button><button type="button" data-v="public">${icon('globe')}Public</button></div></div>
                 <div class="field"><label for="gp-desc">Description (optional)</label><input id="gp-desc" type="text"></div>
-                <div class="buttons"><button class="primary" data-ok>Create and push</button><button data-close>Cancel</button></div>`);
-            let vis = 'private';
-            $$('[data-vis] button', panel).forEach(b => b.onclick = () => { vis = b.dataset.v; $$('[data-vis] button', panel).forEach(x => x.classList.toggle('selected', x === b)); });
+                <div class="buttons"><button class="primary" data-ok>Create ${flag} repo and push</button><button data-close>Cancel</button></div>`);
             $('[data-ok]', panel).onclick = async () => {
                 const btn = $('[data-ok]', panel); btn.disabled = true; btn.textContent = 'Creating…';
-                try { await api('/api/git/publish', { method: 'POST', body: { path: rel, name: $('#gp-name', panel).value.trim(), private: vis === 'private', description: $('#gp-desc', panel).value } }); close(); toast('Published to GitHub'); loadRepoCard(rel); }
+                try { await api('/api/git/publish', { method: 'POST', body: { path: rel, name: $('#gp-name', panel).value.trim(), description: $('#gp-desc', panel).value } }); close(); toast('Published to GitHub'); loadRepoCard(rel); }
                 catch (ex) { toast(ex.message, true); btn.disabled = false; btn.textContent = 'Create and push'; if (ex.status === 401) { go('more'); push('github'); } }
             };
             return;

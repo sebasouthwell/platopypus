@@ -55,6 +55,7 @@ with mode 0600. Formats as of version 1.0:
 | `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses, publicUrl? } }`; logs are cloudflared output; `publicUrl` (1.3.0) overrides the trycloudflare address for tunnels on the user's own domain |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
+| `projects.json` | projects.js | `{ repos: { "<abs folder>": { flag: private\|public, set } } }` — publishing flags (1.4.0); a folder absent from the map is local only |
 | `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline? } } }` — registered servers (1.3.0); logs in `services/<slug>.log` |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
@@ -66,7 +67,8 @@ never edits nginx config. Do not hand-edit the site file on a box; change the te
 
 Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profiles/claude/<name>` (Claude
 profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, the agent instruction files
-`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and each profile's `CLAUDE.md` (only the block
+`~/.porthole/githooks/pre-push` and `~/.porthole/gitignore_global` (installed by `install.sh`, referenced from the service
+user's global git config), `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and each profile's `CLAUDE.md` (only the block
 between `<!-- porthole:begin -->` and `<!-- porthole:end -->` is Porthole's; it is rewritten by `install.sh` on every update), `~/.config/gh`, `~/.ssh/id_ed25519`,
 `~/apps/<app>/` (volumes for catalogue apps), `~/scratch/<date>-<shell>/` (scratch shells; deleted by the server when
 that shell is ended, never by an update), `<project>/.pasted/` (attachments), `/etc/porthole.env`.
@@ -144,6 +146,12 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   session prefixes `svc-` and `zoned-` are reserved like `tunnel-`. `/api/services` adds `servers` and `system` (ports
   owned by Porthole, agents and box daemons, never shareable) and excludes both from `devservers`; links carry
   `kind: quick|zoned`. No migration.
+
+- **1.4.0** — publishing flag per project: `projects.json` (new), routes `GET/PUT /api/projects/repo`, `GET /api/projects/repo/all`;
+  `git/status` adds `publish`; `git/publish` ignores the request's `private` and uses the flag (409 when local only);
+  `git/push` is gated the same way. install.sh sets the service user's `core.hooksPath` to `~/.porthole/githooks`
+  (pre-push asks `project allow-push`) and `core.excludesFile` to `~/.porthole/gitignore_global` (`.pasted/`). New CLI
+  `project`. No migration; existing folders become local only until flagged.
 
 ## Release checklist
 

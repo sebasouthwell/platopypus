@@ -27,6 +27,7 @@ import * as catalog from './lib/catalog.js';
 import * as update from './lib/update.js';
 import * as shared from './lib/sharedcreds.js';
 import * as services from './lib/services.js';
+import * as projectFlags from './lib/projects.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -396,12 +397,16 @@ const server = http.createServer(async (req, res) => {
         if ((m = p.match(/^\/api\/agents\/claude\/profiles\/([A-Za-z0-9_-]+)$/)) && method === 'DELETE') { agents.removeProfile(m[1]); return send(res, 200, { ok: true }); }
 
         // Git / GitHub
+        // Project publishing flag (local | private | public). `abs` from box CLIs, `path` (root-relative) from the app.
+        if (p === '/api/projects/repo' && method === 'GET') { const rel = url.searchParams.get('path') || '.'; let abs = url.searchParams.get('abs'); if (!abs) { try { abs = files.resolveInRoot(rel); } catch { abs = path.resolve(config.root, rel.replace(/^\/+/, '')); if (!abs.startsWith(config.root)) throw shells.httpError(403, 'Outside the allowed folder.'); } } return send(res, 200, projectFlags.allowPush(abs)); }
+        if (p === '/api/projects/repo' && method === 'PUT') { const b = await readJson(req); const abs = b.abs || files.resolveInRoot(b.path || '.'); return send(res, 200, projectFlags.setRepoFlag(abs, b.flag)); }
+        if (p === '/api/projects/repo/all' && method === 'GET') return send(res, 200, projectFlags.listFlags());
         if (p === '/api/git/status' && method === 'GET') return send(res, 200, await gitMgr.status(url.searchParams.get('path') || '.'));
         if (p === '/api/git/init' && method === 'POST') return send(res, 201, await gitMgr.init((await readJson(req)).path));
         if (p === '/api/git/commit' && method === 'POST') { const b = await readJson(req); return send(res, 200, await gitMgr.commit(b.path, b.message)); }
         if (p === '/api/git/push' && method === 'POST') return send(res, 200, await gitMgr.push((await readJson(req)).path));
         if (p === '/api/git/pull' && method === 'POST') return send(res, 200, await gitMgr.pull((await readJson(req)).path));
-        if (p === '/api/git/publish' && method === 'POST') { const b = await readJson(req); return send(res, 201, await gitMgr.publish(b.path, { name: b.name, isPrivate: b.private !== false, description: b.description })); }
+        if (p === '/api/git/publish' && method === 'POST') { const b = await readJson(req); return send(res, 201, await gitMgr.publish(b.path, { name: b.name, description: b.description })); }
         if (p === '/api/git/clone' && method === 'POST') { const b = await readJson(req); return send(res, 201, await gitMgr.clone(b.repo, b.dest)); }
         if (p === '/api/github/account' && method === 'GET') return send(res, 200, await gitMgr.account());
         if (p === '/api/github/repos' && method === 'GET') return send(res, 200, await gitMgr.repos());

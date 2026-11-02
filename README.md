@@ -40,6 +40,9 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   instead of asking you.
 - **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
   container per image: a second tap restarts the existing one or points you at it in Services.
+- **Publishing flag** — every folder is local only until you mark it Private or Public (Files → folder → Repo). Until
+  then nothing can be pushed from it: Publish refuses, and a global pre-push hook blocks agents too. Commits always
+  work. Phone attachments in `.pasted/` are ignored by git everywhere.
 - **Servers** — `svc run --name "API" --port 8000 -- npm run dev` starts a process in its own logged session and lists
   it on Services as a named server with Stop (whole process group, plus its public link), Start, Logs and Share.
   `svc add --port 8000` registers something already running. Box plumbing (Porthole, agents' local ports,
