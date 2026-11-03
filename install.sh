@@ -39,8 +39,8 @@ ARCH=$(dpkg --print-architecture)   # amd64 | arm64
 
 # ---------- base packages ----------
 say "base packages"
-apt-get update -q
-apt-get install -y -q --no-install-recommends \
+apt-get -o DPkg::Lock::Timeout=600 update -q
+apt-get -o DPkg::Lock::Timeout=600 install -y -q --no-install-recommends \
     ca-certificates curl gnupg git tmux jq unzip zip ripgrep iproute2 procps less nano \
     build-essential python3 python3-pip python3-venv sudo locales openssl ncurses-term rsync
 locale-gen en_GB.UTF-8 en_US.UTF-8 >/dev/null 2>&1 || true
@@ -51,7 +51,7 @@ if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2-3)" -lt 20 ]; the
     install -d -m 0755 /etc/apt/keyrings
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg --yes
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-    apt-get update -q && apt-get install -y -q nodejs
+    apt-get -o DPkg::Lock::Timeout=600 update -q && apt-get -o DPkg::Lock::Timeout=600 install -y -q nodejs
 fi
 
 # ---------- cloudflared ----------
@@ -60,7 +60,7 @@ if ! command -v cloudflared >/dev/null 2>&1; then
     install -d -m 0755 /usr/share/keyrings
     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
     echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list
-    apt-get update -q && apt-get install -y -q cloudflared
+    apt-get -o DPkg::Lock::Timeout=600 update -q && apt-get -o DPkg::Lock::Timeout=600 install -y -q cloudflared
 fi
 
 # ---------- other agents: Codex CLI (OpenAI), Antigravity CLI (Google) ----------
@@ -88,7 +88,7 @@ if ! command -v gh >/dev/null 2>&1; then
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
     echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
-    apt-get update -q && apt-get install -y -q gh
+    apt-get -o DPkg::Lock::Timeout=600 update -q && apt-get -o DPkg::Lock::Timeout=600 install -y -q gh
 fi
 # git defaults for the service user: main branch, gh as credential helper (uses GH_TOKEN from the vault or gh login)
 sudo -u "$PORTHOLE_USER" -H bash -lc '
@@ -132,7 +132,7 @@ if [ "$MODE" = "box" ]; then
     # ---------- docker ----------
     if ! command -v docker >/dev/null 2>&1; then
         say "docker"
-        apt-get install -y -q docker.io docker-compose-v2
+        apt-get -o DPkg::Lock::Timeout=600 install -y -q docker.io docker-compose-v2
         systemctl enable --now docker
     fi
     [ "$PORTHOLE_USER" = root ] || usermod -aG docker "$PORTHOLE_USER"
@@ -152,7 +152,7 @@ if [ "$MODE" = "box" ]; then
     fi
 
     # ---------- unattended security updates ----------
-    apt-get install -y -q unattended-upgrades
+    apt-get -o DPkg::Lock::Timeout=600 install -y -q unattended-upgrades
     dpkg-reconfigure -f noninteractive unattended-upgrades >/dev/null 2>&1 || true
 fi
 
@@ -161,7 +161,7 @@ say "porthole app -> $APP_DIR"
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" "$APP_DIR"
 rsync -a --delete --exclude node_modules --exclude .git --exclude infra --exclude test \
     "$PORTHOLE_SRC"/ "$APP_DIR"/ 2>/dev/null || {
-    apt-get install -y -q rsync
+    apt-get -o DPkg::Lock::Timeout=600 install -y -q rsync
     rsync -a --delete --exclude node_modules --exclude .git --exclude infra --exclude test "$PORTHOLE_SRC"/ "$APP_DIR"/
 }
 chown -R "$PORTHOLE_USER:$PORTHOLE_USER" "$APP_DIR"
@@ -249,7 +249,7 @@ EOF
     if [ -n "$PORTHOLE_DOMAIN" ]; then
         [ -n "$LE_EMAIL" ] || { echo "LE_EMAIL is required with PORTHOLE_DOMAIN"; exit 1; }
         say "nginx for $PORTHOLE_DOMAIN"
-        apt-get install -y -q nginx certbot python3-certbot-nginx
+        apt-get -o DPkg::Lock::Timeout=600 install -y -q nginx certbot python3-certbot-nginx
         rm -f /etc/nginx/sites-enabled/default
         install -d -m 0755 /var/www/html
         cp "$APP_DIR/deploy/nginx-snippets.conf" /etc/nginx/conf.d/porthole-snippets.conf

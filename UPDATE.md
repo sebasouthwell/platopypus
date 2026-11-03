@@ -172,6 +172,9 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   certificate too (`certbot delete`). Only `/etc/nginx/sites-{available,enabled}/porthole-zoned-*` and
   `/etc/letsencrypt/live|archive|renewal/<hostname>` for shared hostnames are touched.
 
+- **1.7.1** — install.sh waits up to 10 minutes for the dpkg lock (`-o DPkg::Lock::Timeout=600`) instead of failing when
+  unattended-upgrades is running; an update on the box had rolled back for exactly that reason.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.
