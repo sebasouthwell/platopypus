@@ -66,8 +66,8 @@ cannot be managed from the phone and die with the shell.
 
 `tunnel <port> [label]` opens a temporary public https link (random trycloudflare address, closes after a few
 hours) and shows it on the phone. `tunnel ls` and `tunnel rm <port>` manage them. For a permanent address on the
-user's own domain (app.example.com) the user taps "Share on your domain" on the phone; do not try to create
-Cloudflare tunnels or DNS records yourself. When a service already has such a hostname, use that URL in anything
+user's own domain (app.example.com, served by the box's nginx with a Let's Encrypt certificate) the user taps
+"Share on your domain" on the phone; do not create DNS records, certificates, nginx blocks or tunnels yourself. When a service already has such a hostname, use that URL in anything
 you hand to the user (credshare --url), never localhost.
 
 ## Git and GitHub

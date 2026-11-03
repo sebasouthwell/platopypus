@@ -1081,7 +1081,7 @@ async function zonedDialog(port, label = '') {
     }
     const suggested = `${(label || `port-${port}`).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'app'}${pre.apex ? '.' + pre.apex : ''}`;
     const { panel, close } = openDialog(`<h2>${icon('globe')}Share port ${port} on your domain</h2>
-        <p class="muted">Creates a Cloudflare tunnel named for this hostname, a proxied DNS record in your zone${pre.via === 'nginx' ? ', and an nginx server block on the box that forwards the name to the port' : ''}. The address is permanent until you remove it, and removing it deletes all three again.</p>
+        <p class="muted">${pre.mode === 'direct' ? 'Creates a DNS record pointing this name at the box, an nginx server block for it and a Let\'s Encrypt certificate, then serves the port directly, no tunnel. Permanent until you remove it; removing deletes the record, the block and the certificate again.' : `This box has no public address, so the name is served through a named Cloudflare tunnel (${esc(pre.via)}) with a DNS record in your zone. Permanent until you remove it; removing deletes everything again.`}</p>
         <div class="field"><label for="zd-host">Hostname</label><input id="zd-host" type="text" class="mono" value="${esc(suggested)}" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url"></div>
         <div class="field"><label for="zd-label">Label</label><input id="zd-label" type="text" value="${esc(label)}" placeholder="what is it"></div>
         <p class="sub" style="margin:0 2px 8px">Public to anyone who knows the name: make sure the service has its own login.</p>
@@ -1096,13 +1096,13 @@ async function zonedDialog(port, label = '') {
 function linkMenu(t) {
     if (!t) return;
     if (t.kind === 'zoned') {
-        const { panel, close } = openDialog(`<h2 class="mono">${esc(t.hostname)}</h2><p class="muted">${t.connected ? '<span class="live">● connected</span>' : t.alive ? 'connecting…' : '<span style="color:var(--flare)">● cloudflared not running</span>'} · port ${t.port} · via ${esc(t.via)}</p>
+        const { panel, close } = openDialog(`<h2 class="mono">${esc(t.hostname)}</h2><p class="muted">${t.connected ? '<span class="live">● live</span>' : t.alive ? 'connecting…' : '<span style="color:var(--flare)">● not serving</span>'} · port ${t.port} · ${esc(t.via || t.mode)}</p>
             <div class="menu"><button data-a="copy">${icon('copy')}Copy link</button><button data-a="remove" class="danger">${icon('trash')}Remove from your domain</button></div><div class="buttons"><button data-close>Close</button></div>`);
         $$('[data-a]', panel).forEach(b => b.onclick = async () => {
             const a = b.dataset.a; close();
             try {
                 if (a === 'copy') await copyText(t.url, 'Link copied');
-                if (a === 'remove') { if (!(await confirmDialog({ title: `Remove ${t.hostname}?`, text: 'Deletes the DNS record, the Cloudflare tunnel and the nginx block. The service itself keeps running.', action: 'Remove' }))) return; toast('Removing…'); await api(`/api/zoned/${t.slug}`, { method: 'DELETE' }); toast('Removed'); loadServices(); }
+                if (a === 'remove') { if (!(await confirmDialog({ title: `Remove ${t.hostname}?`, text: t.mode === 'direct' ? 'Deletes the DNS record, the nginx block and the certificate. The service itself keeps running.' : 'Deletes the DNS record, the Cloudflare tunnel and the nginx block. The service itself keeps running.', action: 'Remove' }))) return; toast('Removing…'); await api(`/api/zoned/${t.slug}`, { method: 'DELETE' }); toast('Removed'); loadServices(); }
             } catch (ex) { toast(ex.message, true); }
         });
         return;

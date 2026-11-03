@@ -44,9 +44,10 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   it later (marked incomplete), paste a `.env` block or JSON to fill fields, and convert formats: Telegram token →
   bot ID and chat ID lookup, connection URL ↔ host/port/user/password/database, JSON key file check, SMTP presets,
   password generator, JWT expiry.
-- **Share on your domain** — the red button in the Share dialog creates a named Cloudflare tunnel, a proxied DNS
-  record in your zone and an nginx block for the hostname (app.example.com), using a Cloudflare API token from the
-  Vault. Services then show that address instead of a trycloudflare one. Remove deletes all three again.
+- **Share on your domain** — the red button in the Share dialog puts a service on a real hostname in your zone
+  (app.example.com): a DNS record to the box, an nginx server block and a Let's Encrypt certificate, served directly
+  with no tunnel. Boxes without a public address get a named Cloudflare tunnel instead. Needs a Cloudflare API token
+  in the Vault. Services then show that address. Remove deletes everything it created.
 - **Publishing flag** — every folder is local only until you mark it Private or Public (Files → folder → Repo). Until
   then nothing can be pushed from it: Publish refuses, and a global pre-push hook blocks agents too. Commits always
   work. Phone attachments in `.pasted/` are ignored by git everywhere.

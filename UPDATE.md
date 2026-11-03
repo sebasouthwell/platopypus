@@ -55,7 +55,7 @@ with mode 0600. Formats as of version 1.0:
 | `tunnels/tunnels.json`, `tunnels/<port>.log` | tunnels.js | `{ "<port>": { name, created, expires, origin, owner, misses, publicUrl? } }`; logs are cloudflared output; `publicUrl` (1.3.0) overrides the trycloudflare address for tunnels on the user's own domain |
 | `vault.key` | vault.js | 32-byte key, base64 |
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
-| `zoned.json`, `zoned/<slug>.log` | zoned.js | `{ items: { "<slug>": { slug, hostname, port, name, zoneId, zoneName, accountId, tunnelId, dnsRecordId, via: nginx\|direct, origin, created, token(enc) } } }` — hostnames on the user's domain (1.5.0); `token` is the cloudflared run token encrypted with `vault.key` |
+| `zoned.json`, `zoned/<slug>.log` | zoned.js | `{ items: { "<slug>": { slug, hostname, port, name, mode: direct\|tunnel, zoneId, zoneName, accountId, tunnelId, dnsRecordId, via, origin, created, token(enc) } } }` — hostnames on the user's domain (1.5.0); `token` is the cloudflared run token encrypted with `vault.key` |
 | `projects.json` | projects.js | `{ repos: { "<abs folder>": { flag: private\|public, set } } }` — publishing flags (1.4.0); a folder absent from the map is local only |
 | `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline? } } }` — registered servers (1.3.0); logs in `services/<slug>.log` |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -164,6 +164,13 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.6.0** — Vault: required fields may be left empty on save (item reported with `incomplete: [labels]`, and `fields[]`
   includes the missing definitions with `missing: true`); `POST /api/vault/derive` (Telegram getMe / chat lookup; values
   are used for the one call, never stored). No state change: an item simply lacks some `fields` keys.
+
+- **1.7.0** — "Share on your domain" gains **direct** mode (default on a box with a public address, nginx and a Let's Encrypt
+  certificate for the Porthole hostname): A record → box (proxied like the Porthole record), nginx :80/:443 blocks,
+  `certbot certonly --webroot` for the hostname (renewed by certbot's timer), no tunnel process. Items without `mode`
+  (1.5.0) are treated as tunnel mode. `/api/zoned/prereq` adds `mode`; entries add `mode`. Remove deletes the
+  certificate too (`certbot delete`). Only `/etc/nginx/sites-{available,enabled}/porthole-zoned-*` and
+  `/etc/letsencrypt/live|archive|renewal/<hostname>` for shared hostnames are touched.
 
 ## Release checklist
 
