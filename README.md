@@ -44,6 +44,9 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   update strategy, operator actions, links, credentials). Services lists them first with Start/Stop, and each has a
   page where actions are buttons, credentials are tap-to-copy and Put on hostname sets up DNS, nginx and a Let's
   Encrypt certificate (a coming-up page shows until the service answers). Format: docs/LIVE.md.
+- **Agents without root** — start an agent as the unprivileged agent user (New shell → Run as). It works in its project
+  and asks for root one command at a time with `elevate`; the phone shows a red banner with Allow once, Allow this
+  shell for 30 minutes, or Deny. Its token only reaches the box CLIs' routes. Migration plan: docs/AGENT-USER.md.
 - **Project credentials** — general Vault entries reach every shell; project entries are only given out by
   `vault get` run from that project's main folder.
 - **Vault helpers** — pick the project scope from an inline folder browser, save a credential half-filled and finish

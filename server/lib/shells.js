@@ -10,6 +10,8 @@ import { tmux, tmuxBase, listSessions, hasSession, newSession, killSession, capt
 import { resolveInRoot } from './files.js';
 import { envFor } from './vault.js';
 import * as agents from './agents.js';
+import crypto from 'node:crypto';
+import * as agentUser from './agentuser.js';
 import { log } from './log.js';
 
 const metaFile = path.join(config.state, 'shells.json');
@@ -34,7 +36,7 @@ export async function list() {
             name: s.name,
             kind: m.kind === 'claude' ? 'agent' : (m.kind || 'shell'),
             agent: m.agent || (m.kind === 'claude' ? 'claude' : null),
-            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null, scratch: !!m.scratch,
+            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null, scratch: !!m.scratch, runAs: m.runAs || 'root',
             cwd: m.cwd || config.root,
             created: m.created || s.created,
             attached: s.attached,
@@ -54,7 +56,8 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = 'root' }) {
+    if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
     if (RESERVED_PREFIXES.some(p => name.startsWith(p))) throw httpError(400, `Names starting with ${RESERVED_PREFIXES.map(p => `"${p}"`).join(', ')} are reserved.`);
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
@@ -83,15 +86,38 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (profile && profile !== 'default') agentEnv.CLAUDE_CONFIG_DIR = agents.profileDir(profile);
     }
 
-    // General-scope vault tokens plus any scoped to this folder become environment variables.
-    const secrets = await envFor(dir, { project: 'none' }); // project credentials: `vault get` from the project folder
-    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv });
+    // Agent user: no root, its own API token, project folder made group-writable.
+    let tokenHash = null, shellEnv = {};
+    if (runAs === 'agent') {
+        if (kind === 'remote-control') throw httpError(400, 'Remote Control runs as root for now.');
+        await agentUser.prepareFolder(dir);
+        const token = crypto.randomBytes(24).toString('base64url');
+        tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        shellEnv = { PORTHOLE_TOKEN: token, PORTHOLE_RUN_AS: 'agent' };
+        if (agentEnv.CLAUDE_CONFIG_DIR) delete agentEnv.CLAUDE_CONFIG_DIR; // root profiles are not readable; stage 2 moves them
+        command = agentUser.wrap(command || '');
+    }
+    // General-scope vault tokens become environment variables; project credentials: `vault get` from the project folder.
+    const secrets = await envFor(dir, { project: 'none' });
+    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...shellEnv });
     if (Object.keys(secrets).length) log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`);
-    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, ...(agentInfo || {}) };
+    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, runAs, ...(tokenHash ? { tokenHash } : {}), ...(agentInfo || {}) };
     persist();
     log('shell', `created ${kind}${agentInfo ? ` (${agentInfo.agent}${agentInfo.yolo ? ', auto-approve' : ''}${agentInfo.resume ? ', resume' : ''}${agentInfo.profile !== 'default' ? ', profile ' + agentInfo.profile : ''})` : ''} "${name}" in ${dir}`);
-    return { name, kind, cwd: dir, created: meta[name].created, ...(agentInfo || {}) };
+    return { name, kind, cwd: dir, created: meta[name].created, runAs, ...(agentInfo || {}) };
 }
+
+// Which live agent-user shell a token belongs to (null for anything else).
+export async function shellForToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    const h = crypto.createHash('sha256').update(token).digest('hex');
+    for (const [name, m] of Object.entries(meta)) {
+        if (m.tokenHash && m.tokenHash.length === h.length && crypto.timingSafeEqual(Buffer.from(m.tokenHash), Buffer.from(h))) return (await hasSession(name)) ? { name, ...m } : null;
+    }
+    return null;
+}
+export function shellMeta(name) { return meta[name] || null; }
+export async function panePid(name) { try { return Number((await tmux('display-message', '-p', '-t', `${name}:`, '#{pane_pid}')).trim()) || null; } catch { return null; } }
 
 export async function kill(name, { deleteScratch = true } = {}) {
     if (!validName(name)) throw httpError(400, 'Bad shell name.');

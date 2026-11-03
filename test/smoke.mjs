@@ -273,6 +273,50 @@ EOF`);
     sh('rm -rf /Projects/smoke-live');
 }
 
+// 6i. Agent user: no root, restricted API, vault get by real folder, elevate with phone approval.
+r = await call('/api/agent-user');
+if (r.body.available) {
+    const { execFileSync } = await import('node:child_process');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh('rm -rf /Projects/smoke-agent && mkdir -p /Projects/smoke-agent/sub');
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke agent key', prefix: 'SMOKE_AGENT_X', scope: 'Projects/smoke-agent', fields: { token: 'ag-777' }, envMap: { token: 'SMOKE_AGENT_KEY' } } }); const agVault = r.body.id;
+    await call('/api/shells/smoke-agent', { method: 'DELETE' }).catch(() => {});
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-agent', kind: 'shell', cwd: 'Projects/smoke-agent', runAs: 'agent' } });
+    check('agent-user shell starts', r.status === 201 && r.body.runAs === 'agent', JSON.stringify(r.body).slice(0, 160));
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-agent-bad', kind: 'shell', cwd: 'etc', runAs: 'agent' } });
+    check('agent-user shell refused outside projects', r.status === 403, `${r.status}`);
+    await sleep(1500);
+    const keys = (cmd) => { execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-agent:', '-l', cmd]); execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-agent:', 'Enter']); };
+    const typeIn = async (cmd, marker2, wait = 12) => { keys(cmd + `; echo DONE-${marker2}`); for (let i = 0; i < wait * 2; i++) { await sleep(500); const out = sh('tmux -L porthole capture-pane -p -J -S -200 -t smoke-agent:'); const lines = out.split('\n'); const idx = lines.findIndex(l => l.startsWith(`DONE-${marker2}`)); if (idx >= 0) return lines.slice(0, idx).join('\n'); } return sh('tmux -L porthole capture-pane -p -J -S -200 -t smoke-agent:'); };
+    let out = await typeIn('id -u; whoami', 'a1');
+    check('agent-user shell is not root', /\nagent\s*$/.test(out.trimEnd()) || out.includes('\nagent'), out.slice(-120));
+    out = await typeIn('cat /root/.porthole/token >/dev/null 2>&1 && echo READ-TOKEN || echo NO-TOKEN', 'a2');
+    check('agent user cannot read the box token', out.includes('NO-TOKEN') && !out.includes('READ-TOKEN\n'), out.slice(-80));
+    out = await typeIn('echo "V=$(vault get SMOKE_AGENT_KEY)"', 'a3');
+    check('vault get works from the project main folder', out.includes('V=ag-777'), out.slice(-120));
+    out = await typeIn('cd sub && vault get SMOKE_AGENT_KEY; echo RC=$?; cd ..', 'a4');
+    check('vault get refuses from a sub-folder (real cwd)', out.includes('main folder') && out.includes('RC=1'), out.slice(-160));
+    out = await typeIn('curl -s -o /dev/null -w "files=%{http_code}" -c /tmp/aj -H "Content-Type: application/json" -H "X-Porthole: 1" -d "{\\"token\\":\\"$PORTHOLE_TOKEN\\"}" http://127.0.0.1:7331/api/login/token; curl -s -o /dev/null -w " %{http_code}" -b /tmp/aj -H "X-Porthole: 1" "http://127.0.0.1:7331/api/files?path=."', 'a5');
+    check('shell token session is refused on the files API', /files=200 403/.test(out), out.slice(-80));
+    keys('elevate --reason smoke -- id -u > /tmp/elev-out 2>&1; echo ELEV-RC=$? >> /tmp/elev-out');
+    let pend = []; for (let i = 0; i < 20 && !pend.length; i++) { await sleep(500); pend = (await call('/api/elevate/pending')).body; }
+    check('elevate request appears for approval', pend.length === 1 && pend[0].shell === 'smoke-agent' && pend[0].cwd === '/Projects/smoke-agent', JSON.stringify(pend));
+    if (pend[0]) await call(`/api/elevate/${pend[0].id}/allow`, { method: 'POST', body: {} });
+    let elevOut = ''; for (let i = 0; i < 20 && !/ELEV-RC/.test(elevOut); i++) { await sleep(500); try { elevOut = sh('cat /tmp/elev-out'); } catch { /* not yet */ } }
+    check('approved elevate runs as root and returns', /^0\s*$/m.test(elevOut) && /ELEV-RC=0/.test(elevOut), elevOut);
+    sh('rm -f /tmp/elev-out'); keys('elevate -- id -u > /tmp/elev-out 2>&1; echo ELEV-RC=$? >> /tmp/elev-out');
+    pend = []; for (let i = 0; i < 20 && !pend.length; i++) { await sleep(500); pend = (await call('/api/elevate/pending')).body; }
+    if (pend[0]) await call(`/api/elevate/${pend[0].id}/deny`, { method: 'POST', body: {} });
+    elevOut = ''; for (let i = 0; i < 20 && !/ELEV-RC/.test(elevOut); i++) { await sleep(500); try { elevOut = sh('cat /tmp/elev-out'); } catch { /* not yet */ } }
+    check('denied elevate exits 126', /ELEV-RC=126/.test(elevOut), elevOut);
+    out = await typeIn('svc run --name smoke-agent-srv --port 8160 -- python3 -m http.server 8160 >/dev/null; sleep 2; ps -o user= -p $(ss -ltnpH | grep ":8160 " | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2)', 'a6', 20);
+    check('svc run from an agent-user shell runs as the agent user', /\nagent\s*$/.test(out.trimEnd()), out.slice(-120));
+    await call('/api/servers/smoke-agent-srv', { method: 'DELETE' }).catch(() => {});
+    await call('/api/shells/smoke-agent', { method: 'DELETE' });
+    await call(`/api/vault/${agVault}`, { method: 'DELETE' });
+    sh('rm -rf /Projects/smoke-agent /tmp/elev-out /tmp/aj');
+} else check('agent user present in the test image', false, 'install.sh did not create it');
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

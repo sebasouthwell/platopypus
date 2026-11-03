@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// Run one command as root, after the user approves it on the phone (agent-user shells only).
+//
+//   elevate [--reason "why"] -- <command …>
+//   elevate "apt-get install -y ffmpeg"
+//
+// Prints "waiting for approval", then the command's output, and exits with its exit code. Denied or unanswered
+// requests (10 minutes) exit 126. The phone can also grant this shell elevation for a while; then it runs at once.
+
+import fs from 'node:fs';
+
+const argv = process.argv.slice(2);
+let reason = '';
+if (argv[0] === '--reason') { reason = argv[1] || ''; argv.splice(0, 2); }
+if (argv[0] === '--') argv.shift();
+if (!argv.length || argv[0] === '-h' || argv[0] === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 8).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(argv.length ? 0 : 2); }
+const q = s => /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\''`)}'`;
+const cmd = argv.length === 1 ? argv[0] : argv.map(q).join(' ');
+if (process.getuid && process.getuid() === 0 && process.env.PORTHOLE_RUN_AS !== 'agent') { console.error('elevate: already root; just run the command.'); process.exit(2); }
+
+const port = process.env.PORTHOLE_PORT || '7331';
+const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+try {
+    const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token: process.env.PORTHOLE_TOKEN || '' }), signal: AbortSignal.timeout(5000) });
+    if (!login.ok) throw new Error('this shell has no Porthole token');
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    const call = async (p, method = 'GET', body) => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...headers, cookie }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15000) }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; };
+    let r = await call('/api/agent/elevate', 'POST', { cmd, reason, pid: process.pid });
+    if (r.status === 'pending') process.stderr.write(`elevate: asked the user on the phone to run as root: ${cmd}\nelevate: waiting for approval…\n`);
+    const deadline = Date.now() + 11 * 60_000;
+    while (!['done', 'denied', 'expired'].includes(r.status) && Date.now() < deadline) { await sleep(2000); r = await call(`/api/agent/elevate/${r.id}`); }
+    if (r.status === 'denied') { console.error('elevate: the user denied this command.'); process.exit(126); }
+    if (r.status !== 'done') { console.error('elevate: no answer from the user (request expired).'); process.exit(126); }
+    if (r.output) process.stdout.write(r.output.endsWith('\n') ? r.output : r.output + '\n');
+    process.exit(r.code ?? 0);
+} catch (e) { console.error(`elevate: ${e.message}`); process.exit(1); }

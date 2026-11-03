@@ -98,6 +98,22 @@ git config --global --add safe.directory "*"
 git config --global credential.helper "!gh auth git-credential"
 ' || true
 
+# ---------- agent user (docs/AGENT-USER.md stage 1): AI agents can run without root ----------
+AGENT_USER="${PORTHOLE_AGENT_USER:-agent}"
+getent group porthole-dev >/dev/null || groupadd --system porthole-dev
+id "$AGENT_USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --user-group "$AGENT_USER"
+usermod -aG porthole-dev "$AGENT_USER"; usermod -aG porthole-dev "$PORTHOLE_USER" 2>/dev/null || true
+passwd -l "$AGENT_USER" >/dev/null 2>&1 || true
+AGENT_HOME="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
+if ! sudo -u "$AGENT_USER" -H bash -lc 'test -x ~/.local/bin/claude' >/dev/null 2>&1; then
+    say "claude code for the agent user"
+    sudo -u "$AGENT_USER" -H bash -lc 'curl -fsSL https://claude.ai/install.sh | bash' || echo "claude install for $AGENT_USER failed (retry on next run)"
+fi
+if ! sudo -u "$AGENT_USER" -H bash -lc 'command -v agy' >/dev/null 2>&1; then
+    sudo -u "$AGENT_USER" -H bash -lc 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || echo "antigravity install for $AGENT_USER failed (retry on next run)"
+fi
+sudo -u "$AGENT_USER" -H bash -lc 'git config --global init.defaultBranch main; git config --global pull.ff only; git config --global --add safe.directory "*"' || true
+
 # ---------- claude code (native installer, per user) ----------
 if ! sudo -u "$PORTHOLE_USER" -H bash -lc 'command -v claude || test -x ~/.local/bin/claude' >/dev/null 2>&1; then
     say "claude code"
@@ -177,6 +193,7 @@ ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
 ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
 ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
+ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
 # Publishing gate: a global pre-push hook asks Porthole whether the folder is flagged as a repo; .pasted/ never enters git.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$HOME_DIR/.porthole/githooks"
 install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$HOME_DIR/.porthole/githooks/pre-push"
@@ -208,6 +225,17 @@ install_agent_md "$HOME_DIR/.claude" "$HOME_DIR/.claude/CLAUDE.md"   # Claude Co
 install_agent_md "$HOME_DIR/.codex"  "$HOME_DIR/.codex/AGENTS.md"    # Codex CLI
 install_agent_md "$HOME_DIR/.gemini" "$HOME_DIR/.gemini/GEMINI.md"   # Antigravity CLI (Gemini CLI lineage)
 for d in "$HOME_DIR"/.agent-profiles/claude/*/; do [ -d "$d" ] && install_agent_md "$d" "${d}CLAUDE.md"; done   # Claude profiles
+if [ -n "${AGENT_HOME:-}" ]; then   # the same instructions for agents running as the agent user
+    PORTHOLE_USER_SAVED="$PORTHOLE_USER"; PORTHOLE_USER="$AGENT_USER"
+    install_agent_md "$AGENT_HOME/.claude" "$AGENT_HOME/.claude/CLAUDE.md"
+    install_agent_md "$AGENT_HOME/.codex"  "$AGENT_HOME/.codex/AGENTS.md"
+    install_agent_md "$AGENT_HOME/.gemini" "$AGENT_HOME/.gemini/GEMINI.md"
+    PORTHOLE_USER="$PORTHOLE_USER_SAVED"
+    # the global pre-push hook and .pasted ignore apply to the agent user too
+    # (the root copies under ~/.porthole are unreadable to this user, and git silently skips an unreadable hooks path)
+    chmod 0755 "$APP_DIR/deploy/githooks/pre-push"; chmod 0644 "$APP_DIR/deploy/gitignore_global"
+    sudo -u "$AGENT_USER" -H bash -lc "git config --global core.hooksPath '$APP_DIR/deploy/githooks'; git config --global core.excludesFile '$APP_DIR/deploy/gitignore_global'" 2>/dev/null || true
+fi
 sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR/server && npm install --omit=dev --no-audit --no-fund --loglevel=error"
 sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR && node scripts/make-icons.mjs >/dev/null"
 

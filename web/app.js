@@ -40,6 +40,31 @@ function noteServerVersion(v) {
 
 function timeAgo(t) { const d = Math.max(0, Date.now() - t); if (d < 60e3) return 'just now'; if (d < 3600e3) return `${Math.round(d / 60e3)} min ago`; if (d < 86400e3) return `${Math.round(d / 3600e3)} h ago`; return `${Math.round(d / 86400e3)} d ago`; }
 
+// Root requests from agent-user shells: a banner while any are waiting; tap to decide.
+let elevSeen = new Set();
+async function pollElevation() {
+    if (document.hidden || $('#app')?.hidden) return;
+    let list; try { list = await api('/api/elevate/pending'); } catch { return; }
+    let bar = $('#elev-bar');
+    if (!list.length) { if (bar) bar.remove(); return; }
+    if (!bar) { bar = document.createElement('button'); bar.id = 'elev-bar'; bar.className = 'elev-bar'; document.body.appendChild(bar); }
+    bar.innerHTML = `${icon('shield')}<span><b>${esc(list[0].shell)}</b> asks to run as root${list.length > 1 ? ` · +${list.length - 1} more` : ''}</span>`;
+    bar.onclick = () => elevationDialog(list[0]);
+    if (!elevSeen.has(list[0].id)) { elevSeen.add(list[0].id); try { navigator.vibrate?.(60); } catch { /* ignore */ } }
+}
+setInterval(pollElevation, 3000);
+function elevationDialog(r) {
+    const { panel, close } = openDialog(`<h2>${icon('shield')}Run as root?</h2>
+        <p class="muted"><b>${esc(r.shell)}</b> · in <span class="mono">${esc(r.cwd)}</span>${r.reason ? `<br>${esc(r.reason)}` : ''}</p>
+        <pre style="white-space:pre-wrap;max-height:30vh">${esc(r.cmd)}</pre>
+        <p class="sub">Runs once as root in that folder, 10-minute limit. Output goes back to the agent.</p>
+        <div class="buttons"><button class="primary" data-allow>Allow once</button><button data-grant>Allow this shell for 30 min</button><button class="danger" data-deny>Deny</button></div>`);
+    const decide = async (verb, minutes = 0) => { try { await api(`/api/elevate/${r.id}/${verb}`, { method: 'POST', body: { minutes } }); toast(verb === 'deny' ? 'Denied' : minutes ? 'Allowed · shell elevated for 30 min' : 'Allowed'); } catch (ex) { toast(ex.message, true); } close(); pollElevation(); };
+    $('[data-allow]', panel).onclick = () => decide('allow');
+    $('[data-grant]', panel).onclick = () => decide('allow', 30);
+    $('[data-deny]', panel).onclick = () => decide('deny');
+}
+
 let toastTimer;
 function toast(message, bad = false) {
     const el = $('#toast');
@@ -346,7 +371,7 @@ async function loadShells() {
 }
 function shellRow(s) {
     return `<button class="shell-row" data-name="${esc(s.name)}">
-        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}</div>
+        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}${s.runAs === 'agent' ? '<span class="tag">agent user</span>' : s.kind === 'agent' ? '<span class="tag dim" style="color:var(--flare)">root</span>' : ''}</div>
         ${s.preview?.length ? `<pre class="shell-preview">${esc(s.preview.join('\n'))}</pre>` : ''}
       </button>`;
 }
@@ -376,9 +401,15 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
             <button type="button" data-o="scratch">${icon('trash')}Scratch: temp folder, deleted when the shell ends</button></div>
             <p class="sub" data-yolo-warn hidden style="margin:6px 2px 0;color:var(--flare)">Auto-approve lets the agent run any command without asking. Use it only in folders you can afford to lose.</p></div>
         </div>
+        <div class="field" data-runas-field hidden><label>Run as</label><div class="choices" data-runas>
+          <button type="button" data-r="agent">${icon('shield')}Agent user · no root</button>
+          <button type="button" data-r="root" class="selected">${icon('lock')}Root</button></div>
+          <p class="sub" data-runas-note style="margin:6px 2px 0"></p></div>
         <div class="field"><label for="ns-name">Name</label><input id="ns-name" type="text" value="${esc(suggested)}" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
         <div class="buttons"><button class="primary" data-ok>Start</button><button data-close>Cancel</button></div>`);
-    let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false;
+    let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false, runAs = 'root';
+    const runNote = () => { $('[data-runas-note]', panel).textContent = runAs === 'agent' ? 'No root. Root commands are asked for on this phone (elevate). Project credentials via vault get from the project folder. Needs a folder under /Projects or a scratch folder; signs in as the agent user, separately from root logins.' : 'Full access to the whole box, as today.'; };
+    api('/api/agent-user').then(a => { if (!a.available) return; const f = $('[data-runas-field]', panel); f.hidden = false; runAs = localStorage.getItem('porthole.runAs') === 'agent' ? 'agent' : 'root'; $$('[data-runas] button', panel).forEach(b => { b.classList.toggle('selected', b.dataset.r === runAs); b.onclick = () => { runAs = b.dataset.r; localStorage.setItem('porthole.runAs', runAs); $$('[data-runas] button', panel).forEach(x => x.classList.toggle('selected', x === b)); runNote(); }; }); runNote(); }).catch(() => {});
     $$('[data-kind] button', panel).forEach(b => b.onclick = () => { kind = b.dataset.k; $$('[data-kind] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('[data-agent-opts]', panel).hidden = kind !== 'agent'; });
     $$('[data-opts] button', panel).forEach(b => b.onclick = () => {
         if (b.dataset.o === 'resume') resume = !resume; else if (b.dataset.o === 'yolo') yolo = !yolo; else scratch = !scratch;
@@ -411,7 +442,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
     const go_ = async () => {
         const name = $('#ns-name', panel).value.trim();
         const finalName = scratch && name === suggested ? `scratch-${Math.random().toString(36).slice(2, 6)}` : name;
-        try { await api('/api/shells', { method: 'POST', body: { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch } }); close(); openTerminal(finalName, 'Shells'); }
+        try { await api('/api/shells', { method: 'POST', body: { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch, runAs } }); close(); openTerminal(finalName, 'Shells'); }
         catch (ex) { toast(ex.message, true); }
     };
     $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);

@@ -76,9 +76,9 @@ function setCookie(value, maxAgeSeconds = Math.floor(maxAgeMs / 1000)) {
     return parts.join('; ');
 }
 
-function newSession(req, how) {
+function newSession(req, how, extra = {}) {
     const sid = crypto.randomBytes(32).toString('base64url');
-    sessions.set(sid, { created: Date.now(), lastSeen: Date.now(), ua: (req.headers['user-agent'] || '').slice(0, 200), how });
+    sessions.set(sid, { created: Date.now(), lastSeen: Date.now(), ua: (req.headers['user-agent'] || '').slice(0, 200), how, ...extra });
     persist();
     clearFailures(req);
     log('auth', `signed in via ${how} from ${clientAddr(req)}`);
@@ -86,6 +86,9 @@ function newSession(req, how) {
 }
 
 // A credential was verified. Either hand back a session, or (two-step on) a short-lived ticket for the code step.
+// A box CLI signing in with an agent-user shell's token: restricted to the CLI routes (see server.js AGENT_ROUTES).
+export function agentLogin(req, shell) { return { cookie: newSession(req, `shell token (${shell})`, { agent: shell }) }; }
+
 export function finishLogin(req, how, { skipTotp = false } = {}) {
     if (totp.enabled() && !skipTotp) {
         log('auth', `${how} ok from ${clientAddr(req)}; awaiting two-step code`);

@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { config } from './config.js';
 import { tmux, hasSession, newSession, killSession } from './tmux.js';
 import * as tunnels from './tunnels.js';
+import * as agentUser from './agentuser.js';
 import { log } from './log.js';
 
 const run = promisify(execFile);
@@ -92,6 +93,8 @@ export async function list() {
     return out.sort((a, b) => (b.alive - a.alive) || (b.created - a.created));
 }
 
+export function ownerOf(slug) { return load().items[slug]?.owner || null; }
+
 export async function get(slug) {
     const it = load().items[slug];
     if (!it) throw httpError(404, 'No such server.');
@@ -99,7 +102,7 @@ export async function get(slug) {
 }
 
 // Start a command in its own tmux session and register it.
-export async function runServer({ name, port, cwd, cmd, project = null, env = {} }) {
+export async function runServer({ name, port, cwd, cmd, project = null, env = {}, owner = null }) {
     const slug = slugify(name);
     if (!Array.isArray(cmd) || !cmd.length || cmd.some(c => typeof c !== 'string')) throw httpError(400, 'Command is required.');
     const p = port === undefined || port === null || port === '' ? null : tunnels.validPort(port);
@@ -113,18 +116,19 @@ export async function runServer({ name, port, cwd, cmd, project = null, env = {}
     const logFile = path.join(logDir, `${slug}.log`);
     const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     // The pane shell is the process-group leader; the command and tee hang off it, so TERM -pgid takes everything.
-    const shellCmd = `cd ${q(dir)} && (${cmd.map(q).join(' ')}) 2>&1 | tee -a ${q(logFile)}; echo "[svc] exited $?" | tee -a ${q(logFile)}; sleep 1`;
+    let shellCmd = `cd ${q(dir)} && (${cmd.map(q).join(' ')}) 2>&1 | tee -a ${q(logFile)}; echo "[svc] exited $?" | tee -a ${q(logFile)}; sleep 1`;
+    if (owner) { fs.chmodSync(logDir, 0o755); fs.writeFileSync(logFile, '', { flag: 'a', mode: 0o644 }); fs.chownSync(logFile, agentUser.info().uid, agentUser.info().gid); shellCmd = agentUser.wrap(shellCmd); } // started by an agent-user shell: runs as that user
     await newSession(session, dir, shellCmd, { ...env, PORTHOLE_SERVICE: slug });
     let pid = null;
     try { pid = Number((await tmux('display-message', '-p', '-t', `${session}:`, '#{pane_pid}')).trim()) || null; } catch { /* no pane yet */ }
-    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false };
+    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false, ...(owner ? { owner } : {}) };
     save(db);
     log('svc', `started "${slug}" (${cmd.join(' ')}) in ${dir}${p ? ` on :${p}` : ''}`);
     return (await list()).find(s => s.slug === slug);
 }
 
 // Register a process that is already running (started by an agent in its shell, for example).
-export async function add({ name, pid, port, cwd, project = null }) {
+export async function add({ name, pid, port, cwd, project = null, owner = null }) {
     const slug = slugify(name);
     const p = port === undefined || port === null || port === '' ? null : tunnels.validPort(port);
     if (port && !p) throw httpError(400, 'Port must be between 1 and 65535.');
@@ -134,8 +138,9 @@ export async function add({ name, pid, port, cwd, project = null }) {
     if (!id) throw httpError(400, 'Give --pid, or a --port something is already listening on.');
     if (!pidAlive(id)) throw httpError(404, `No process with pid ${id}.`);
     if (id === process.pid) throw httpError(403, 'That is Porthole itself.');
+    if (owner && agentUser.proc(id)?.uid !== agentUser.info()?.uid) throw httpError(403, 'An agent-user shell can only register its own processes.');
     const db = load();
-    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: cwd || null, cmd: null, pid: id, session: null, project, created: Date.now(), stoppedAt: null, log: null, external: true, cmdline: cmdlineOf(id) };
+    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: cwd || null, cmd: null, pid: id, session: null, project, created: Date.now(), stoppedAt: null, log: null, external: true, cmdline: cmdlineOf(id), ...(owner ? { owner } : {}) };
     save(db);
     log('svc', `registered "${slug}" pid ${id}${p ? ` on :${p}` : ''}`);
     return (await list()).find(s => s.slug === slug);
@@ -160,7 +165,7 @@ export async function start(slug) {
     const it = await get(slug);
     if (slug.startsWith('live-')) throw httpError(409, 'Start live services from the Live section so their environment is loaded.');
     if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; Porthole does not know how to start it.');
-    return runServer({ name: it.name, port: it.port, cwd: it.cwd, cmd: it.cmd, project: it.project });
+    return runServer({ name: it.name, port: it.port, cwd: it.cwd, cmd: it.cmd, project: it.project, owner: it.owner || null });
 }
 
 export async function remove(slug) {

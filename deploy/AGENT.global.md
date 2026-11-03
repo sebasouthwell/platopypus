@@ -59,6 +59,19 @@ a service and keep it current; run `live check` after editing. Never put secret 
 (`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
 from the phone; `live status` shows what Porthole sees.
 
+## Running without root
+
+If `echo $PORTHOLE_RUN_AS` prints `agent`, you are the unprivileged agent user. You can work freely in this project,
+but not as root. For a command that needs root (installing a system package, editing /etc, binding a port below 1024,
+restarting a system service) run:
+
+    elevate --reason "install ffmpeg for audio conversion" -- apt-get install -y ffmpeg
+
+The user approves it on the phone; you get the output and exit code. Ask for the smallest command that does the job,
+one at a time, and say why. Exit code 126 means it was denied or not answered: do not retry in a loop, explain what you
+needed instead. Never try to get root another way. Porthole's own files, other users' homes and the box token are off
+limits; the box CLIs (vault, credshare, svc, tunnel, live, project) work as usual.
+
 ## Project credentials
 
 General Vault entries are in every shell's environment. Project entries are not: read them with `vault get NAME`

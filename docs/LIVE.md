@@ -93,7 +93,7 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 
 ## Hosting modes
 
-A live service runs in one of two places, chosen per service on the phone. Both read the same `PORTHOLE.md`, so a
+A live service runs in one of two places (static sites have a third option, below), chosen per service on the phone. Both read the same `PORTHOLE.md`, so a
 service can move between them.
 
 | | **On this box** | **On its own host** (roadmap) |
@@ -108,6 +108,18 @@ service can move between them.
 The service page shows the same controls in both modes (start, stop, actions, logs, backup, update); only the
 transport differs. For an external host, Porthole talks to its admin API over https with that host's credential,
 which can do nothing except operate that one service and is destroyed with the host.
+
+### Static sites on a static host (roadmap)
+
+A service declared `static: { build: npm run build, output: dist }` (no `start`, no port) can be published to a static
+host instead of running anywhere. First integration: **Vercel** — a Vercel account sits under Cloud accounts like the
+others (an access token in the Vault), Publish runs the build on the box, uploads the output with the Vercel API,
+and attaches the service's hostname (Porthole adds the DNS record in Cloudflare and Vercel issues the certificate).
+The service page shows the deployment URL, the last deploy and its commit, with Publish and Remove. Rules:
+
+- Static only: no server process, no data engines, no `actions` that need a running service.
+- Vercel's free Hobby plan is for personal, non-commercial use; Porthole says so when the account is added.
+- **Cloudflare Pages** is the natural second integration: same flow, uses the Cloudflare token Porthole already has.
 
 ## Later: ephemeral hosts (roadmap, not built)
 

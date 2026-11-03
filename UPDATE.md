@@ -183,6 +183,14 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   domain hostname. **Behaviour change:** project-scoped Vault entries are no longer exported into shells; `vault get`
   returns them only from the project's main folder (general entries are unchanged). New CLI `live`; dependency `yaml`.
 
+- **1.9.0** — agents without root, stage 1 of docs/AGENT-USER.md (additive; root stays the default). install.sh creates
+  the `agent` user and `porthole-dev` group and installs Claude Code / Antigravity and the agent instructions for it.
+  `shells.json` entries gain `runAs` (missing = root) and `tokenHash`. `POST /api/shells` accepts `runAs: agent`. Shell
+  tokens sign in through `/api/login/token` to a restricted session (AGENT_ROUTES in server.js; WebSocket refused).
+  New: `POST /api/agent/vault`, `POST /api/agent/elevate`, `GET /api/agent/elevate/<id>`, `GET /api/elevate/pending`,
+  `POST /api/elevate/<id>/allow|deny`, `POST /api/shells/<name>/elevation`, `GET /api/agent-user`; CLI `elevate`.
+  `services.json` items may carry `owner` (agent-user shell). Agent-user folders get group `porthole-dev` + setgid.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

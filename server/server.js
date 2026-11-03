@@ -31,6 +31,8 @@ import * as projectFlags from './lib/projects.js';
 import * as zoned from './lib/zoned.js';
 import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
+import * as agentUser from './lib/agentuser.js';
+import * as elevate from './lib/elevate.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +51,17 @@ const vendor = {
 const TOKEN = loadToken();
 
 // ---------- helpers ----------
+
+// What a restricted (agent-user shell) session may call: the box CLIs and nothing else.
+const AGENT_ROUTES = [
+    ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
+    ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
+    ['POST', /^\/api\/creds\/share$/],
+    ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
+    ['GET', /^\/api\/live$/], ['GET', /^\/api\/live\/check$/],
+    ['GET', /^\/api\/projects\/repo$/],
+    ['GET', /^\/api\/tunnels$/], ['POST', /^\/api\/tunnels$/], ['DELETE', /^\/api\/tunnels\/\d{1,5}$/], ['POST', /^\/api\/tunnels\/\d{1,5}\/extend$/],
+];
 
 const RUNNING_VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '0'; } catch { return '0'; } })();
 
@@ -202,6 +215,8 @@ const server = http.createServer(async (req, res) => {
             // Box-local CLIs (vault, tunnel): token login from loopback only, never via the proxy.
             if (p === '/api/login/token') {
                 if (!creds.isLoopbackDirect(req)) return send(res, 403, { error: 'Token sign-in is only available from the box itself.' });
+                const sh = await shells.shellForToken(body.token);
+                if (sh) return send(res, 200, { ok: true, agent: true }, { 'Set-Cookie': auth.agentLogin(req, sh.name).cookie });
                 if (!auth.checkToken(req, body.token, TOKEN)) return send(res, 401, { error: 'Token is not right.' });
                 const r = auth.finishLogin(req, 'local token', { skipTotp: true });
                 return send(res, 200, { ok: true }, { 'Set-Cookie': r.cookie });
@@ -218,6 +233,46 @@ const server = http.createServer(async (req, res) => {
         if (method !== 'GET') {
             if (!auth.originAllowed(req)) return send(res, 403, { error: 'Bad origin.' });
             if (!auth.hasCsrfHeader(req)) return send(res, 403, { error: 'Missing request header.' });
+        }
+
+        // Agent-user shells: only the routes the box CLIs need (docs/AGENT-USER.md).
+        if (session.agent) {
+            let am;
+            const allowed = AGENT_ROUTES.some(([meth, re]) => meth === method && re.test(p));
+            if (!allowed) { log('agent', `"${session.agent}" refused ${method} ${p}`); return send(res, 403, { error: 'Not available to agent-user shells. Ask the user, or use elevate for root commands.' }); }
+            const sh = shells.shellMeta(session.agent);
+            if (!sh || !(await shells.panePid(session.agent))) return send(res, 401, { error: 'That shell has ended.' });
+            const ag = agentUser.info();
+            // The calling process must be this shell's, run as the agent user; its real folder comes from /proc.
+            const caller = async (pid) => {
+                const pr = agentUser.proc(pid);
+                const pane = await shells.panePid(session.agent);
+                if (!pr || pr.uid !== ag.uid || !agentUser.isDescendant(pr.pid, pane)) throw shells.httpError(403, 'Caller is not a process of this shell.');
+                if (!pr.cwd) throw shells.httpError(403, 'Cannot tell which folder the caller is in.');
+                return pr;
+            };
+            if (p === '/api/agent/vault' && method === 'POST') {
+                const b = await readJson(req, 4096);
+                const pr = await caller(b.pid);
+                const env = await vault.envFor(pr.cwd, { project: 'exact' });
+                if (b.name) {
+                    if (!(b.name in env)) { const it = vault.list().find(i => i.fields.some(f => f.env === b.name)); return send(res, 404, { error: it ? `${b.name} belongs to project ${it.scope}; run vault get from that project's main folder (/${it.scope}), not elsewhere or a sub-folder` : `no variable named ${b.name} (try: vault ls)` }); }
+                    log('vault', `"${session.agent}" read ${b.name} from ${pr.cwd}`);
+                    return send(res, 200, { value: env[b.name] });
+                }
+                log('vault', `"${session.agent}" read ${Object.keys(env).length} values from ${pr.cwd}`);
+                return send(res, 200, { env });
+            }
+            if (p === '/api/agent/elevate' && method === 'POST') {
+                const b = await readJson(req, 16 * 1024);
+                const pr = await caller(b.pid);
+                return send(res, 201, elevate.request(session.agent, { cmd: b.cmd, cwd: pr.cwd, reason: b.reason }));
+            }
+            if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
+            if (p === '/api/servers/run' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.runServer({ ...b, env: {}, owner: session.agent })); }
+            if (p === '/api/servers' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.add({ ...b, owner: session.agent })); }
+            if ((am = p.match(/^\/api\/tunnels\/(\d{1,5})$/)) && method === 'DELETE' && zoned.byPort(am[1])) return send(res, 403, { error: 'Hostnames on your domain are removed from the phone.' });
+            if ((am = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})(\/(stop|start))?$/)) && (method === 'POST' || method === 'DELETE') && !services.ownerOf(am[1])) return send(res, 403, { error: 'That server was not started from an agent-user shell.' });
         }
 
         if (p === '/api/me' && method === 'GET') return send(res, 200, { ok: true, created: session.created, version: RUNNING_VERSION });
@@ -425,6 +480,12 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/home' && method === 'GET') return send(res, 200, await home.home());
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
 
+        // Elevation (phone side)
+        if (p === '/api/elevate/pending' && method === 'GET') return send(res, 200, elevate.pending());
+        if ((m = p.match(/^\/api\/elevate\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, elevate.decide(m[1], { allow: m[2] === 'allow', minutes: Number(b.minutes) || 0 })); }
+        if ((m = p.match(/^\/api\/shells\/([^/]+)\/elevation$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, { until: elevate.grant(decodeURIComponent(m[1]), b.minutes) }); }
+        if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home } : { available: false }); }
+
         // Live services (PORTHOLE.md)
         if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());
         if (p === '/api/live/check' && method === 'GET') return send(res, 200, live.check(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')));
@@ -465,7 +526,7 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
     const m = url.pathname.match(/^\/ws\/shell\/([^/]+)$/);
-    if (!m || !auth.authenticate(req) || !auth.originAllowed(req)) {
+    if (!m || !auth.authenticate(req) || auth.authenticate(req).agent || !auth.originAllowed(req)) {
         log('ws', `rejected upgrade from ${auth.clientAddr(req)} for ${url.pathname}`);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();

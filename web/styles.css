@@ -254,6 +254,8 @@ button.row:active { background: var(--hull-2); }
 .quick button:active { color: var(--brass); border-color: rgba(240,184,64,.5); }
 .quick.creds button { color: var(--brass); border-color: rgba(240,184,64,.4); background: rgba(240,184,64,.1); display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .quick.creds button svg.i { width: 14px; height: 14px; }
+.elev-bar { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 60; display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(244,106,92,.5); background: #2a1416; color: var(--foam); font: inherit; font-size: 14px; text-align: left; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.elev-bar svg.i { color: var(--flare); flex: none; }
 .helper-pane { background: var(--hull); border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
 .helper-pane textarea { width: 100%; }
 .crumbs.mini { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-size: 12px; margin-bottom: 6px; }
