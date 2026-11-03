@@ -99,7 +99,7 @@ export async function get(slug) {
 }
 
 // Start a command in its own tmux session and register it.
-export async function runServer({ name, port, cwd, cmd, project = null }) {
+export async function runServer({ name, port, cwd, cmd, project = null, env = {} }) {
     const slug = slugify(name);
     if (!Array.isArray(cmd) || !cmd.length || cmd.some(c => typeof c !== 'string')) throw httpError(400, 'Command is required.');
     const p = port === undefined || port === null || port === '' ? null : tunnels.validPort(port);
@@ -114,7 +114,7 @@ export async function runServer({ name, port, cwd, cmd, project = null }) {
     const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     // The pane shell is the process-group leader; the command and tee hang off it, so TERM -pgid takes everything.
     const shellCmd = `cd ${q(dir)} && (${cmd.map(q).join(' ')}) 2>&1 | tee -a ${q(logFile)}; echo "[svc] exited $?" | tee -a ${q(logFile)}; sleep 1`;
-    await newSession(session, dir, shellCmd, { PORTHOLE_SERVICE: slug });
+    await newSession(session, dir, shellCmd, { ...env, PORTHOLE_SERVICE: slug });
     let pid = null;
     try { pid = Number((await tmux('display-message', '-p', '-t', `${session}:`, '#{pane_pid}')).trim()) || null; } catch { /* no pane yet */ }
     db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false };
@@ -142,13 +142,14 @@ export async function add({ name, pid, port, cwd, project = null }) {
 }
 
 // Complete shutdown: process group (or tree), tmux session, tunnel on its port.
-export async function stop(slug) {
+export async function stop(slug, { keepTunnel = false } = {}) {
     const db = load();
     const it = db.items[slug];
     if (!it) throw httpError(404, 'No such server.');
     if (it.pid) await killTree(it.pid, { group: !!it.session });
     if (it.session && (await hasSession(it.session))) await killSession(it.session).catch(() => {});
-    if (it.port) { try { await tunnels.close(it.port); } catch { /* no tunnel */ } }
+    // Quick links die with the server; a hostname on your domain stays (it shows the coming-up page until restart).
+    if (it.port && !keepTunnel) { try { const q = (await tunnels.list()).find(t => t.port === it.port && t.kind !== 'zoned'); if (q) await tunnels.close(it.port); } catch { /* no tunnel */ } }
     it.stoppedAt = Date.now();
     save(db);
     log('svc', `stopped "${slug}"`);
@@ -157,6 +158,7 @@ export async function stop(slug) {
 
 export async function start(slug) {
     const it = await get(slug);
+    if (slug.startsWith('live-')) throw httpError(409, 'Start live services from the Live section so their environment is loaded.');
     if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; Porthole does not know how to start it.');
     return runServer({ name: it.name, port: it.port, cwd: it.cwd, cmd: it.cmd, project: it.project });
 }

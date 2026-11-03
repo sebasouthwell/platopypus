@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Read tokens from the Porthole vault from a shell (or from Claude Code running in one).
 //   vault ls                 list what is available (never prints values)
-//   vault get <ENV_NAME>     print one value (for command substitution: TOKEN=$(vault get SPOTIFY_SECRET))
+//   vault get <ENV_NAME>     print one value (for command substitution: TOKEN=$(vault get SPOTIFY_SECRET)).
+//                            Project credentials are only given out when the current folder IS that project's
+//                            main folder (not a sub-folder); general ones work anywhere.
 //   vault env [folder]       print `export NAME=value` lines for the general scope + the folder's project scope
 //                            use as: eval "$(vault env)"
 // Values are decrypted with the key in ~/.porthole/vault.key, which only this user can read.
@@ -33,7 +35,7 @@ switch (cmd) {
         const env = await vault.envFor(cwd);
         if (!(arg in env)) {
             const all = vault.list().find(i => i.fields.some(f => f.env === arg));
-            console.error(all ? `${arg} is scoped to ${all.scope}; run from inside that folder` : `no variable named ${arg} (try: vault ls)`);
+            console.error(all ? `${arg} belongs to project ${all.scope}; run vault get from that project's main folder (/${all.scope}), not elsewhere or a sub-folder` : `no variable named ${arg} (try: vault ls)`);
             process.exit(1);
         }
         process.stdout.write(env[arg]);

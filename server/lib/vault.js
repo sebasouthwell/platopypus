@@ -247,14 +247,17 @@ export async function reveal(id, who = '', field = null) {
 }
 
 // Environment variables for a shell starting in `cwd` (absolute): general + matching project scope.
-export async function envFor(cwd) {
+// project: 'exact' → general + the project whose folder is exactly `cwd` (vault get, live services);
+//          'none'  → general only (exported into every new shell).
+// A sub-folder of a project never qualifies: project credentials are read deliberately from the project's main folder.
+export async function envFor(cwd, { project = 'exact' } = {}) {
     const rel = path.relative(config.root, cwd).split(path.sep).join('/');
     const db = load();
     const env = {};
     let dirty = false;
     for (const raw of db.items) {
         const it = normalise(raw);
-        const applies = it.scope === 'general' || rel === it.scope || rel.startsWith(it.scope + '/');
+        const applies = it.scope === 'general' || (project === 'exact' && rel === it.scope);
         if (!applies) continue;
         try { if (await refreshIfNeeded(it, db, false)) dirty = true; } catch (e) { log('vault', `refresh failed for ${it.provider} "${it.name}": ${e.message}`); }
         for (const f of Object.keys(it.fields)) { try { env[envNameFor(it, f)] = decrypt(it.fields[f]); } catch { /* corrupt entry */ } }
@@ -263,12 +266,12 @@ export async function envFor(cwd) {
     return env;
 }
 // Synchronous variant for callers that cannot await (no refresh).
-export function envForSync(cwd) {
+export function envForSync(cwd, { project = 'exact' } = {}) {
     const rel = path.relative(config.root, cwd).split(path.sep).join('/');
     const env = {};
     for (const raw of load().items) {
         const it = normalise(raw);
-        if (!(it.scope === 'general' || rel === it.scope || rel.startsWith(it.scope + '/'))) continue;
+        if (!(it.scope === 'general' || (project === 'exact' && rel === it.scope))) continue;
         for (const f of Object.keys(it.fields)) { try { env[envNameFor(it, f)] = decrypt(it.fields[f]); } catch { /* skip */ } }
     }
     return env;

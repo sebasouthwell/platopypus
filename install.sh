@@ -176,6 +176,7 @@ ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
 ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
+ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
 # Publishing gate: a global pre-push hook asks Porthole whether the folder is flagged as a repo; .pasted/ never enters git.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$HOME_DIR/.porthole/githooks"
 install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$HOME_DIR/.porthole/githooks/pre-push"

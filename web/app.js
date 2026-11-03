@@ -560,7 +560,7 @@ function credPanel(list, { persisted = false, focus = null } = {}) {
         $$('[data-forget]', panel).forEach(el => el.onclick = async () => {
             const c = list[Number(el.dataset.forget)];
             seenCreds = seenCreds.filter(x => x.id !== c.id); renderCreds();
-            await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
+            if (!String(c.id).startsWith('svc-')) await api(`/api/creds/${c.id}`, { method: 'DELETE' }).catch(() => {});
             list.splice(Number(el.dataset.forget), 1);
             if (persisted) { loadCredsPage().catch(() => {}); if (state.tab === 'services') loadServices(); }
             list.length ? render() : close();
@@ -882,6 +882,23 @@ async function loadServices() {
     const show = k => f === 'all' || f === k;
     let html = '';
 
+    if (show('dev') || show('links')) {
+        const liveRows = (s.live || []).flatMap(p => p.services.map(v => ({ p, v })));
+        if (liveRows.length || (s.live || []).some(p => p.errors.length)) {
+            html += `<h2 class="section"><span class="bullet kelp"></span>Live services<span class="meta">from PORTHOLE.md</span></h2><div class="list">`;
+            for (const p of s.live) {
+                if (p.errors.length) html += `<button class="row" data-live-errors="${esc(p.project)}"><span class="ico flare">${icon('info')}</span><div class="main"><div class="title">${esc(p.name)}<span class="tag" style="color:var(--flare)">PORTHOLE.md has errors</span></div><div class="sub">${esc(p.errors[0])}</div></div>${icon('chevron', 'i chev')}</button>`;
+                for (const v of p.services) html += `
+                <div class="row"><span class="ico ${v.running ? 'kelp' : 'dim'}">${icon(v.worker ? 'cpu' : 'globe')}</span>
+                  <div class="main"><div class="title">${esc(v.title)}<span class="tag dim">${esc(p.name)}</span>${v.worker ? '<span class="tag dim">worker</span>' : ''}</div>
+                    <div class="sub">${v.running ? `<span class="live">● running</span>` : 'stopped'}${v.host ? ` · <a href="${esc(v.host.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
+                  ${v.running ? `<button class="pill" data-live="stop" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('stop')}Stop</button>` : `<button class="pill" data-live="start" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('play')}Start</button>`}
+                  <button class="more" data-live-page="${esc(p.project)}" data-k="${esc(v.key)}" aria-label="Service page">${icon('more_h')}</button>
+                </div>`;
+            }
+            html += `</div>`;
+        }
+    }
     if (show('links')) {
         html += `<h2 class="section"><span class="bullet kelp"></span>Shared links<span class="meta">quick links close after 4 h · your domain stays</span></h2>`;
         html += s.links.length ? `<div class="list">${s.links.map(t => `
@@ -972,6 +989,9 @@ async function loadServices() {
     const body = $('#services-body');
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
+    $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : 'Starting…'); } catch (ex) { toast(ex.message, true); } loadServices(); });
+    $$('[data-live-page]', body).forEach(b => b.onclick = () => livePage(s.live.find(p => p.project === b.dataset.livePage), b.dataset.k));
+    $$('[data-live-errors]', body).forEach(b => b.onclick = () => { const p = s.live.find(x => x.project === b.dataset.liveErrors); openDialog(`<h2>${icon('info')}${esc(p.name)} · ${esc(p.file || 'PORTHOLE.md')}</h2>${p.errors.map(e => `<p class="muted" style="color:var(--flare)">${esc(e)}</p>`).join('')}${p.warnings.map(w => `<p class="sub">${esc(w)}</p>`).join('')}<p class="sub">Ask the agent in that project to fix it and run <span class="mono">live check</span>.</p><div class="buttons"><button data-close>Close</button></div>`); });
     $$('[data-srv]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { await api(`/api/servers/${b.dataset.slug}/${b.dataset.srv}`, { method: 'POST' }); toast(b.dataset.srv === 'stop' ? 'Stopped' : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
     $$('[data-srv-menu]', body).forEach(b => b.onclick = () => serverMenu(s.servers.find(x => x.slug === b.dataset.srvMenu)));
     $$('[data-register]', body).forEach(b => b.onclick = () => registerServerDialog(Number(b.dataset.register), b.dataset.label));
@@ -1034,6 +1054,53 @@ async function codeServerStartWith(folder, project = false) {
         toast(project ? 'Project editor is running' : 'Box editor is running');
     } catch (ex) { toast(ex.message, true); }
     loadServices();
+}
+
+// The page for one live service: state, address, actions as buttons, links, credentials, log.
+async function livePage(p, key) {
+    const v = p?.services.find(x => x.key === key); if (!v) return;
+    const shared = v.port ? (await api('/api/creds').catch(() => [])).filter(c => c.port === v.port) : [];
+    const base = v.host?.url || null;
+    const { panel, close } = openDialog(`<h2>${icon(v.worker ? 'cpu' : 'globe')}${esc(v.title)}</h2>
+        <p class="muted">${esc(p.name)}${p.summary ? ` · ${esc(p.summary)}` : ''}</p>
+        <p class="sub">${v.running ? '<span class="live">● running</span>' : 'stopped'}${v.port ? ` · <span class="mono">:${v.port}</span>` : ' · worker'}${p.commit ? ` · <span class="mono">${esc(p.commit)}</span>` : ''}${v.update ? ` · updates: ${esc(v.update)}` : ''}</p>
+        <div class="menu">
+          ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
+          ${v.host ? `<a class="row" href="${esc(v.host.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
+          <button data-a="logs">${icon('logs')}Log</button>
+        </div>
+        ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
+        ${v.links.length && base ? `<h3 class="section" style="margin-top:14px">Links</h3><div class="chips" style="flex-wrap:wrap">${v.links.map(l => `<a class="pill" href="${esc(base.replace(/\/$/, '') + (l.path.startsWith('/') ? l.path : '/' + l.path))}" target="_blank" rel="noopener">${icon('external')}${esc(l.label)}</a>`).join('')}</div>` : ''}
+        ${v.credentials.length || shared.length ? `<h3 class="section" style="margin-top:14px">Credentials</h3><div class="list">
+          ${v.credentials.map((c, i) => `<button class="row" data-cred="${i}"><span class="ico brass">${icon('key')}</span><div class="main"><div class="title">${esc(c.label)}<span class="tag dim">service</span></div><div class="sub">${esc(c.fields.map(f => f.label).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}
+          ${shared.map(c => `<button class="row" data-shared="${esc(c.id)}"><span class="ico kelp">${icon('key')}</span><div class="main"><div class="title">${esc(c.title)}<span class="tag">from agent</span></div><div class="sub">${esc(c.fields.map(f => f.label).join(' · '))} · ${fmtAgo(c.at)}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : ''}
+        ${p.warnings.length ? `<p class="sub" style="margin-top:12px">${p.warnings.map(esc).join('<br>')}</p>` : ''}
+        <div class="buttons"><button data-close>Close</button></div>`);
+    const url = a => `/api/live/${encodeURIComponent(p.project)}/${key}/${a}`;
+    const refresh_ = async () => { close(); await loadServices(); const fresh = (await api('/api/services')).live?.find(x => x.project === p.project); if (fresh) livePage(fresh, key); };
+    $$('[data-a]', panel).forEach(b => b.onclick = async () => {
+        const a = b.dataset.a;
+        try {
+            if (a === 'start' || a === 'stop') { b.disabled = true; await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : 'Starting…'); return refresh_(); }
+            if (a === 'restart') { b.disabled = true; await api(url('stop'), { method: 'POST' }).catch(() => {}); await api(url('start'), { method: 'POST' }); toast('Restarted'); return refresh_(); }
+            if (a === 'hostname') { b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…'; await api(url('hostname'), { method: 'POST' }); toast(`${v.hostname} is set up`); return refresh_(); }
+            if (a === 'share') { close(); return shareDialog(v.port, v.title); }
+            if (a === 'logs') { const res = await api(url('logs') + '?tail=400', { raw: true }); const text = await res.text(); close(); const d = openDialog(`<h2>${esc(v.title)} · log</h2><pre style="max-height:60vh">${esc(text || '(empty — start the service first)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-close>Close</button></div>`); $('[data-copy-all]', d.panel).onclick = () => copyText(text, 'Copied'); }
+        } catch (ex) { toast(ex.message, true); b.disabled = false; }
+    });
+    $$('[data-act]', panel).forEach(b => b.onclick = async () => {
+        if (b.dataset.confirm === '1' && !(await confirmDialog({ title: `Run "${b.textContent.trim()}"?`, text: `In ${p.name}. Output appears here and in the service log.`, action: 'Run', danger: false }))) return livePage(p, key);
+        const out = $('[data-act-out]', panel); if (out) { out.hidden = false; out.textContent = 'Running…'; }
+        $$('[data-act]', panel).forEach(x => { x.disabled = true; });
+        try { const r = await api(url(`actions/${b.dataset.act}`), { method: 'POST' }); const o = $('[data-act-out]', panel); if (o) o.textContent = `${r.label} · exit ${r.code} · ${(r.ms / 1000).toFixed(1)} s\n\n${r.output || '(no output)'}`; }
+        catch (ex) { toast(ex.message, true); }
+        $$('[data-act]', panel).forEach(x => { x.disabled = false; });
+    });
+    $$('[data-cred]', panel).forEach(b => b.onclick = async () => {
+        try { const c = await api(url(`credentials/${b.dataset.cred}`), { method: 'POST' }); close(); credPanel([{ id: `svc-${key}-${b.dataset.cred}`, title: c.label, project: p.project, note: c.fields.some(f => f.missing) ? `Missing in the Vault: ${c.fields.filter(f => f.missing).map(f => f.ref).join(', ')}` : null, fields: c.fields.filter(f => !f.missing).map(f => ({ label: f.label, value: f.value, secret: f.secret })), openUrl: base, at: Date.now() }]); }
+        catch (ex) { toast(ex.message, true); }
+    });
+    $$('[data-shared]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.shared); });
 }
 
 function serverMenu(d) {

@@ -228,6 +228,51 @@ r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style
 r = await call('/api/vault/derive', { method: 'POST', body: { kind: 'telegram-getme', botToken: 'nope' } }); check('derive helper rejects a malformed bot token', r.status === 400 && /bot token/.test(r.body.error || ''));
 await call(`/api/vault/${partialId}`, { method: 'DELETE' });
 
+// 6h. Live services from PORTHOLE.md.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh(`rm -rf /Projects/smoke-live && mkdir -p /Projects/smoke-live && cat > /Projects/smoke-live/PORTHOLE.md <<'EOF'
+---
+porthole: 1
+name: Smoke Live
+services:
+  web:
+    title: Smoke web
+    start: python3 -m http.server 8140
+    port: 8140
+    env:
+      GREETING: hello
+    needs: [SMOKE_LIVE_PASS]
+    update: full
+    actions:
+      - label: Say hello
+        run: echo "$GREETING from $PORTHOLE_PROJECT"
+    credentials:
+      - label: Admin
+        username: admin
+        password: $SMOKE_LIVE_PASS
+---
+A test service.
+EOF`);
+    r = await call('/api/live'); const lp = r.body.find(p => p.project === 'smoke-live');
+    check('live lists the PORTHOLE.md service', !!lp && lp.errors.length === 0 && lp.services[0]?.key === 'web' && lp.services[0].actions.length === 1, JSON.stringify(lp && { e: lp.errors, s: lp.services.map(x => x.key) }));
+    r = await call('/api/live/smoke-live/web/start', { method: 'POST' }); check('live start refuses while a needed Vault entry is missing', r.status === 412 && /SMOKE_LIVE_PASS/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke live pass', prefix: 'SMOKE_LIVE_PASS_X', scope: 'Projects/smoke-live', fields: { token: 'pw-123' }, envMap: { token: 'SMOKE_LIVE_PASS' } } }); const liveVaultId = r.body.id;
+    r = await call('/api/live/smoke-live/web/start', { method: 'POST' }); check('live start runs the service', r.status === 200 && r.body.alive === true, `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
+    let up = false; for (let i = 0; i < 15 && !up; i++) { await sleep(1000); up = (await call('/api/live')).body.find(p => p.project === 'smoke-live')?.services[0]?.listening === true; }
+    check('live service listens on its port', up);
+    r = await call('/api/live/smoke-live/web/actions/0', { method: 'POST' }); check('live action runs with the service env', r.status === 200 && /hello from smoke-live/.test(r.body.output), JSON.stringify(r.body).slice(0, 160));
+    r = await call('/api/live/smoke-live/web/credentials/0', { method: 'POST' }); check('live credentials resolve Vault references for the project', r.status === 200 && r.body.fields.some(f => f.label === 'password' && f.value === 'pw-123'), JSON.stringify(r.body).slice(0, 200));
+    r = await call('/api/services'); check('registered-servers list does not repeat live services', !r.body.servers.some(x => x.slug.startsWith('live-')) && r.body.live.some(p => p.project === 'smoke-live'));
+    r = await call('/api/live/smoke-live/web/stop', { method: 'POST' }); await sleep(800);
+    check('live stop stops it', r.status === 200 && (await call('/api/live')).body.find(p => p.project === 'smoke-live')?.services[0]?.running === false);
+    sh(`printf -- '---\nservices:\n  Bad Key:\n    port: 99999\n---\n' > /Projects/smoke-live/PORTHOLE.md`);
+    r = await call('/api/live/check?path=Projects/smoke-live'); check('live check reports manifest errors', r.status === 200 && r.body.ok === false && r.body.errors.length >= 2, JSON.stringify(r.body.errors));
+    await call(`/api/vault/${liveVaultId}`, { method: 'DELETE' }); await call('/api/servers/live-smoke-live-web', { method: 'DELETE' }).catch(() => {});
+    sh('rm -rf /Projects/smoke-live');
+}
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });
@@ -336,7 +381,8 @@ const envOut = await new Promise((resolve, reject) => {
 });
 // tmux redraws can interleave cursor-movement escapes with text, so strip them before matching.
 const plainOut = envOut.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b[()][A-Z0-9]/g, '').replace(/\r/g, '');
-check('general + project tokens exported into shell env', plainOut.includes('G=general-secret-1234 P={"access"'), plainOut.slice(-300));
+check('general tokens exported, project tokens not (vault get from the project folder instead)', plainOut.includes('G=general-secret-1234 P=') && !plainOut.includes('P={"access"') && plainOut.includes('{"access":"abc"'), plainOut.slice(-300));
+{ const { execFileSync } = await import('node:child_process'); let refused = false; try { execFileSync('bash', ['-lc', 'mkdir -p /smoke-proj/sub && cd /smoke-proj/sub && vault get SMOKE_PROJECT'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { refused = /main folder/.test(String(e.stderr)); } check('vault get refuses project credentials from a sub-folder', refused); }
 check('vault CLI lists and gets inside shell', /SMOKE_GENERAL\s+smoketest/.test(plainOut) && plainOut.includes('{"access":"abc","refresh":"def"}'), plainOut.slice(-400));
 r = await call(`/api/vault/${projectId}/reveal`, { method: 'POST' });
 check('vault reveal returns value', r.status === 200 && r.body.value === '{"access":"abc","refresh":"def"}');

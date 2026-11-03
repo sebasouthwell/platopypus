@@ -79,8 +79,64 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
   start or update it (the user confirms on the phone for updates that touch data).
 - Do not create DNS records, certificates, nginx blocks or tunnels yourself. Set `hostname` and let Porthole do it.
 
-## Open points to decide
+## Decisions
 
-1. File name: `PORTHOLE.md` in the project root (proposed) or `docs/porthole.md`.
-2. Whether `start` without `port` is allowed (worker processes with no listener): proposed yes.
-3. Placeholder page: Porthole-branded "coming up" page, or a plain 503.
+1. **Where the file lives:** `PORTHOLE.md` in the project root or `docs/PORTHOLE.md`; the root one wins if both exist.
+2. **Services with no port** (workers, bots, game servers on raw UDP) are allowed. Porthole suggests running them on
+   their own host; there they are controlled only through Porthole (Terraform lifecycle + the admin API), with no
+   hostname. On this box they run like any other service, just without Share.
+3. **Before a service is up** its hostname shows a Porthole "coming up" page, served by nginx over https. The same
+   page shows whenever the service is stopped or restarting, so the address never errors.
+4. **Raw ports:** a service may declare `expose: [{ port: 27015, proto: udp }]` for clients that do not speak http
+   (game servers). On its own host these become security-group rules; on this box they are refused (the box only
+   admits Cloudflare's edge on 80/443).
+
+## Hosting modes
+
+A live service runs in one of two places, chosen per service on the phone. Both read the same `PORTHOLE.md`, so a
+service can move between them.
+
+| | **On this box** | **On its own host** (roadmap) |
+|---|---|---|
+| Where | the Porthole box, next to your shells and agents | a separate cloud machine created by Terraform for this service |
+| Cost | nothing extra | the host's hourly price, bounded by its lifetime |
+| Isolation | shares the box, its disk and the agents' access | separate machine; a compromise of the service cannot reach the box, the Vault or your shells |
+| Lifetime | until you stop it | until you stop it, or self-destructs at a set expiry |
+| Control | directly, as with any registered server | through a small admin API on the host, authenticated with a per-host key that Porthole holds |
+| Good for | dev previews, small always-on tools, anything cheap | public game nights, anything strangers will hit, anything you want gone afterwards |
+
+The service page shows the same controls in both modes (start, stop, actions, logs, backup, update); only the
+transport differs. For an external host, Porthole talks to its admin API over https with that host's credential,
+which can do nothing except operate that one service and is destroyed with the host.
+
+## Later: ephemeral hosts (roadmap, not built)
+
+Run a live service on its own short-lived cloud machine instead of the Porthole box, e.g. a game server for one night.
+
+- **Cloud accounts** work like the AI agent profiles: a page under More lists providers (AWS first), each with one
+  or more named accounts ("personal", "work sandbox") you sign in to once and switch between. Each account shows
+  its status, the regions it is allowed to use (multi-region; one default) and spend this month across all its
+  hosts, with an optional monthly cap that blocks new hosts once reached. An account holds a narrowly scoped key that may only create and destroy
+  resources tagged `porthole:ephemeral`. When you create a host you pick the account the way you pick a Claude
+  profile for a shell.
+- **Host on its own machine** on a live service: pick provider, region and size from a dropdown (t3.micro … t3.large,
+  with the hourly price), and a lifetime (2 h, tonight until 06:00, 24 h, custom).
+- **Security groups** are generated from the manifest and nothing else: 80/443 from Cloudflare's published edge
+  ranges when the hostname is proxied (from anywhere when not), each `expose` port with its protocol, and no SSH at
+  all (management goes through SSM and the admin API). Egress stays open for package installs and git.
+- **Every host comes ready:** nginx, certbot and the coming-up page are installed by cloud-init before the project is
+  cloned, so the hostname answers on https within minutes, then switches to the service once its health check passes.
+- Porthole renders a Terraform stack per host from a template, applies it with its own state under
+  `~/.porthole/ephemeral/<id>/`, boots the instance with cloud-init that clones the project at the pinned commit and
+  starts the service from `PORTHOLE.md`, then points the chosen hostname at it with nginx + Let's Encrypt on that host.
+- **Admin API** on each host: a tiny agent (start, stop, status, logs, actions, backup) bound behind nginx on the
+  host's hostname under a random path, requiring a per-host key generated at creation. **Porthole holds the key**
+  (encrypted in its own state, like a tunnel run token) and uses it whenever you operate the service from the
+  phone; it is never exported to shells or agents, and it is revoked with the host. The host never has the cloud
+  access key either; only Porthole does.
+- **Expiry is enforced three ways**, so it holds even if Porthole is off: the instance's shutdown behaviour is
+  `terminate` and cloud-init schedules `shutdown -h` at expiry; an EventBridge one-shot terminates it at expiry plus a
+  margin; Porthole runs `terraform destroy` at expiry and removes the DNS record. EBS volumes delete on termination.
+- **"Leaves nothing behind"** means no running resources, disks, addresses, DNS records or Porthole state remain.
+  It cannot mean no record at all: the provider keeps billing lines and, if enabled, CloudTrail events.
+- Data from the host is only kept if you press Backup before expiry (same private S3 bucket as above).

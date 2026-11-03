@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+// Live services from PORTHOLE.md (see /opt/porthole/docs/LIVE.md for the format).
+//
+//   live check [dir]          validate PORTHOLE.md (or docs/PORTHOLE.md) in the project folder
+//   live status               every live service Porthole knows about, with state and address
+//   live start <service>      start a service of the project you are in
+//   live stop <service>
+//
+// Run from the project's main folder. Hostnames, DNS and certificates are handled by Porthole on the phone.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [sub, ...rest] = process.argv.slice(2);
+const port = process.env.PORTHOLE_PORT || '7331';
+const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
+let token = process.env.PORTHOLE_TOKEN || '';
+try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* none */ }
+if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
+
+const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+let cookie = '';
+async function api(p, method = 'GET', body) {
+    if (!cookie) {
+        const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
+        if (!login.ok) throw new Error('cannot reach Porthole on this box');
+        cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const res = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...headers, cookie }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+
+try {
+    if (sub === 'check') {
+        const r = await api(`/api/live/check?abs=${encodeURIComponent(path.resolve(rest[0] || process.cwd()))}`);
+        if (r.file) console.log(`${r.file}: ${r.ok ? 'ok' : 'has errors'} · services: ${r.services.join(', ') || 'none'}`);
+        for (const e of r.errors) console.log(`  error: ${e}`);
+        for (const w of r.warnings) console.log(`  note:  ${w}`);
+        process.exit(r.ok ? 0 : 1);
+    } else if (sub === 'status') {
+        const l = await api('/api/live');
+        if (!l.length) console.log('no projects with a PORTHOLE.md under /Projects');
+        for (const p of l) {
+            console.log(`${p.name} (${p.project})${p.commit ? ` @ ${p.commit}` : ''}${p.errors.length ? `  [${p.errors.length} error(s): live check]` : ''}`);
+            for (const s of p.services) console.log(`  ${s.running ? '●' : '○'} ${s.key.padEnd(14)} ${s.port ? (':' + s.port).padEnd(7) : 'worker '} ${s.running ? 'running' : 'stopped'}${s.host ? `  ${s.host.url}${s.host.live ? '' : ' (not live)'}` : s.hostname ? `  ${s.hostname} (not provisioned)` : ''}`);
+        }
+    } else if (sub === 'start' || sub === 'stop') {
+        const key = rest[0]; if (!key) { console.error(`usage: live ${sub} <service>`); process.exit(2); }
+        const project = path.basename(process.cwd());
+        await api(`/api/live/${encodeURIComponent(project)}/${encodeURIComponent(key)}/${sub}`, 'POST');
+        console.log(`${sub === 'start' ? 'started' : 'stopped'} ${project}/${key}`);
+    } else { console.error(`unknown command ${sub}`); process.exit(2); }
+} catch (e) { console.error(`live: ${e.message}`); process.exit(1); }

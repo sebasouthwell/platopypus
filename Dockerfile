@@ -9,6 +9,7 @@ COPY scripts /tmp/porthole-src/scripts
 COPY web /tmp/porthole-src/web
 COPY bin /tmp/porthole-src/bin
 COPY deploy /tmp/porthole-src/deploy
+COPY docs /tmp/porthole-src/docs
 COPY package.json /tmp/porthole-src/package.json
 
 # Tools + dependencies first so code changes don't redo the slow layers.

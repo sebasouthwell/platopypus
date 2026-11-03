@@ -175,6 +175,14 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.7.1** — install.sh waits up to 10 minutes for the dpkg lock (`-o DPkg::Lock::Timeout=600`) instead of failing when
   unattended-upgrades is running; an update on the box had rolled back for exactly that reason.
 
+- **1.8.0** — live services from `PORTHOLE.md` (see docs/LIVE.md): routes `GET /api/live`, `GET /api/live/check`,
+  `POST /api/live/<project>/<service>/start|stop|hostname`, `POST …/actions/<n>`, `POST …/credentials/<n>`, `GET …/logs`;
+  `/api/services` adds `live` and its `servers` no longer include `live-*` registrations. Live services run through the
+  servers registry as `live-<project>-<key>`. Hostnames on your domain now show a coming-up page
+  (`/var/www/porthole/coming-up.html`) when the service is not answering; stopping a server no longer removes a
+  domain hostname. **Behaviour change:** project-scoped Vault entries are no longer exported into shells; `vault get`
+  returns them only from the project's main folder (general entries are unchanged). New CLI `live`; dependency `yaml`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

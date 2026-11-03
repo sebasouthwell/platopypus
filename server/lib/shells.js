@@ -84,7 +84,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     }
 
     // General-scope vault tokens plus any scoped to this folder become environment variables.
-    const secrets = await envFor(dir);
+    const secrets = await envFor(dir, { project: 'none' }); // project credentials: `vault get` from the project folder
     await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv });
     if (Object.keys(secrets).length) log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`);
     meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, ...(agentInfo || {}) };

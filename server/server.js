@@ -30,6 +30,7 @@ import * as services from './lib/services.js';
 import * as projectFlags from './lib/projects.js';
 import * as zoned from './lib/zoned.js';
 import * as derive from './lib/derive.js';
+import * as live from './lib/live.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -423,6 +424,17 @@ const server = http.createServer(async (req, res) => {
         // Aggregates for the Home and Services screens
         if (p === '/api/home' && method === 'GET') return send(res, 200, await home.home());
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
+
+        // Live services (PORTHOLE.md)
+        if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());
+        if (p === '/api/live/check' && method === 'GET') return send(res, 200, live.check(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')));
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|hostname)$/)) && method === 'POST') {
+            const [proj, key, act] = [decodeURIComponent(m[1]), m[2], m[3]];
+            return send(res, 200, act === 'hostname' ? await live.putOnHostname(proj, key) : await live[act](proj, key));
+        }
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3]));
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/credentials\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.credentials(decodeURIComponent(m[1]), m[2], m[3]));
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(services.slugify(`live ${decodeURIComponent(m[1])} ${m[2]}`), url.searchParams.get('tail') || 300));
 
         // Registered servers (svc CLI / Services tab)
         if (p === '/api/servers' && method === 'GET') return send(res, 200, await services.list());

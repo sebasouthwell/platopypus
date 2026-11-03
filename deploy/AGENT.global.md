@@ -18,8 +18,8 @@ API keys and OAuth tokens live in the Porthole vault. Before asking the user for
 1. Run `vault ls` to see what exists: one line per environment variable (e.g. `SPOTIFY_CLIENT_ID`,
    `SPOTIFY_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`, `PG_URL`), with service, auth style
    and scope. It never prints values.
-2. General-scope credentials are already in this shell's environment. Project-scope ones are present when
-   the shell was started inside that project folder.
+2. General-scope credentials are already in this shell's environment. Project-scope ones are never exported:
+   `vault get NAME` returns them only when run from that project's main folder.
 3. If a variable is listed but not in the environment, read it with `vault get ENV_NAME` or load all
    applicable ones with `eval "$(vault env)"`. OAuth2 access tokens are refreshed automatically by `vault get`.
 4. Build on these variables instead of hard-coding or re-asking: a new project that needs Telegram should
@@ -49,6 +49,21 @@ service, and `--note` says what the account can do or where the value goes. Neve
 
 Porthole shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
 appearing in the terminal scrollback.
+
+## Live services (PORTHOLE.md)
+
+A project that should run as a live service describes itself in `PORTHOLE.md` in its root (or `docs/PORTHOLE.md`):
+how to start each service, its port, the hostname it should live on, the Vault names it needs, how it updates, and
+the operator commands worth having as buttons. The format is in `/opt/porthole/docs/LIVE.md`. Write it when you add
+a service and keep it current; run `live check` after editing. Never put secret values in it: reference Vault names
+(`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
+from the phone; `live status` shows what Porthole sees.
+
+## Project credentials
+
+General Vault entries are in every shell's environment. Project entries are not: read them with `vault get NAME`
+from the project's main folder (not a sub-folder, not elsewhere). If it refuses, `cd` to the project root first;
+do not look for the value any other way.
 
 ## Long-running servers
 

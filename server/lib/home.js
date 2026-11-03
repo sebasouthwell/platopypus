@@ -14,6 +14,7 @@ import * as apps from './apps.js';
 import * as system from './system.js';
 import * as servicesMgr from './services.js';
 import * as projectFlags from './projects.js';
+import * as live from './live.js';
 
 export const projectsDir = path.join(config.root, 'Projects');
 
@@ -74,8 +75,10 @@ export async function services() {
     const containers = dockerAvail ? await dockerMgr.containers().catch(() => []) : [];
     const compose = dockerAvail ? await dockerMgr.composeProjects().catch(() => []) : [];
     const shellList = await shells.list();
-    const servers = await servicesMgr.list().catch(() => []);
-    const serverPorts = new Set(servers.map(s => s.port).filter(Boolean));
+    const allServers = await servicesMgr.list().catch(() => []);
+    const servers = allServers.filter(s => !s.slug.startsWith('live-'));
+    const liveList = await live.list().catch(e => [{ project: '?', errors: [e.message], warnings: [], services: [] }]);
+    const serverPorts = new Set(allServers.map(s => s.port).filter(Boolean));
 
     const tunnelByPort = new Map(tunnelList.map(t => [t.port, t]));
     const containerPorts = new Set(containers.flatMap(c => c.ports.map(p => p.host)));
@@ -114,6 +117,7 @@ export async function services() {
     return {
         docker: dockerAvail,
         links,
+        live: liveList,
         servers,
         system: systemPorts,
         devservers,

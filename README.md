@@ -40,6 +40,12 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   instead of asking you.
 - **Run any image** — look an image up first (ports, default environment, volumes), then start it. One quick-run
   container per image: a second tap restarts the existing one or points you at it in Services.
+- **Live services** — a project's `PORTHOLE.md` declares its services (start command, port, hostname, Vault needs,
+  update strategy, operator actions, links, credentials). Services lists them first with Start/Stop, and each has a
+  page where actions are buttons, credentials are tap-to-copy and Put on hostname sets up DNS, nginx and a Let's
+  Encrypt certificate (a coming-up page shows until the service answers). Format: docs/LIVE.md.
+- **Project credentials** — general Vault entries reach every shell; project entries are only given out by
+  `vault get` run from that project's main folder.
 - **Vault helpers** — pick the project scope from an inline folder browser, save a credential half-filled and finish
   it later (marked incomplete), paste a `.env` block or JSON to fill fields, and convert formats: Telegram token →
   bot ID and chat ID lookup, connection URL ↔ host/port/user/password/database, JSON key file check, SMTP presets,

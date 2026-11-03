@@ -30,6 +30,15 @@ const logDir = path.join(config.state, 'zoned');
 const CF = 'https://api.cloudflare.com/client/v4';
 const HOST_RE = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const WEBROOT = '/var/www/html';
+const COMING_UP_DIR = '/var/www/porthole';
+const COMING_UP = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="10"><title>Coming up</title>
+<style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#0b1424;color:#dde5ee;font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:34ch;padding:24px;text-align:center}h1{font-size:22px;margin:0 0 6px;color:#e8b86d}p{margin:0;color:#9fb0c3}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3fd39a;margin-right:8px;animation:p 1.4s infinite}@keyframes p{50%{opacity:.25}}@media (prefers-reduced-motion:reduce){.dot{animation:none}}</style></head>
+<body><main><h1><span class="dot"></span>Coming up</h1><p>This service is starting or being updated. The page refreshes by itself.</p></main></body></html>
+`;
+function ensureComingUp() { try { fs.mkdirSync(COMING_UP_DIR, { recursive: true, mode: 0o755 }); fs.writeFileSync(path.join(COMING_UP_DIR, 'coming-up.html'), COMING_UP, { mode: 0o644 }); } catch { /* not a box */ } }
+const COMING_UP_NGINX = `
+    error_page 502 503 504 /__porthole_coming_up.html;
+    location = /__porthole_coming_up.html { root ${COMING_UP_DIR}; try_files /coming-up.html =503; internal; add_header Cache-Control "no-store" always; add_header Retry-After "10" always; }`;
 export const SESSION_PREFIX = 'zoned-';
 
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
@@ -108,7 +117,8 @@ const PROXY = port => `
         proxy_read_timeout 1h;
         proxy_send_timeout 1h;
         proxy_request_buffering off;
-        proxy_buffering off;`;
+        proxy_buffering off;
+        proxy_connect_timeout 3s;`;
 function blockHttp(host) {
     return `# Porthole share: ${host}. Created and removed by Porthole; do not edit.
 server {
@@ -131,7 +141,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
     add_header Strict-Transport-Security "max-age=31536000" always;
-    client_max_body_size 600m;
+    client_max_body_size 600m;${COMING_UP_NGINX}
     location / {${PROXY(port)}
     }
 }
@@ -143,13 +153,14 @@ server {
     listen 127.0.0.1:80;
     server_name ${host};
     if ($host != "${host}") { return 444; }
-    client_max_body_size 600m;
+    client_max_body_size 600m;${COMING_UP_NGINX}
     location / {${PROXY(port)}
     }
 }
 `;
 }
 async function nginxApply(slug, text) {
+    ensureComingUp();
     const avail = `/etc/nginx/sites-available/porthole-zoned-${slug}`;
     fs.writeFileSync(avail, text, { mode: 0o644 });
     try { fs.symlinkSync(avail, `/etc/nginx/sites-enabled/porthole-zoned-${slug}`); } catch { /* exists */ }
