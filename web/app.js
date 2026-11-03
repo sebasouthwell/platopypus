@@ -387,15 +387,36 @@ $('#home-wish').addEventListener('submit', e => {
 });
 $('#wish-text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#home-wish').requestSubmit(); } });
 // Temp: "do this now" — a scratch folder, no root, no questions; the folder goes when the shell ends.
+let tempMode = localStorage.getItem('porthole.tempMode') === 'once' ? 'once' : 'session';
+const tempLabel = () => { $('#wish-now-label').textContent = tempMode === 'once' ? 'Once' : 'Temp'; };
+tempLabel();
+$('#wish-now-menu').addEventListener('click', () => {
+    const { panel, close } = openDialog(`<h2>${icon('history')}Temp</h2>
+        <div class="menu">
+          <button data-m="session" class="${tempMode === 'session' ? 'selected' : ''}">${icon('terminal')}<span>Temp session<br><span class="sub">scratch folder, no root; stays open so you can keep talking · folder goes when you end it</span></span></button>
+          <button data-m="once" class="${tempMode === 'once' ? 'selected' : ''}">${icon('zap')}<span>One-shot<br><span class="sub">runs your message once (auto-approved, no root), shows the answer, then the shell and folder are destroyed · Claude Code or Codex</span></span></button>
+          <button data-m="results">${icon('logs')}<span>One-shot results<br><span class="sub">answers from finished one-shot runs</span></span></button>
+        </div><div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-m]', panel).forEach(b => b.onclick = async () => {
+        if (b.dataset.m === 'results') { close(); return oneshotResultsDialog(); }
+        tempMode = b.dataset.m; localStorage.setItem('porthole.tempMode', tempMode); tempLabel(); close();
+    });
+});
+async function oneshotResultsDialog() {
+    const list = await api('/api/oneshot').catch(() => []);
+    const { panel } = openDialog(`<h2>${icon('logs')}One-shot results</h2>${list.length ? `<div class="list">${list.map((r, i) => `<button class="row" data-r="${i}"><span class="ico brass">${icon('zap')}</span><div class="main"><div class="title">${esc((r.prompt || '').split('\n')[0].slice(0, 70))}</div><div class="sub">${esc(agentTitle(r.agent))} · ${fmtAgo(r.finished)}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No one-shot runs yet.</p>'}<div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-r]', panel).forEach(b => b.onclick = () => { const r = list[Number(b.dataset.r)]; const d = openDialog(`<h2>${esc((r.prompt || '').split('\n')[0].slice(0, 60))}</h2><pre style="max-height:60vh;white-space:pre-wrap">${esc(r.output || '(no output)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-back>Back</button></div>`); $('[data-copy-all]', d.panel).onclick = () => copyText(r.output || '', 'Copied'); $('[data-back]', d.panel).onclick = () => oneshotResultsDialog(); });
+}
 $('#wish-now').addEventListener('click', async () => {
     const text = $('#wish-text').value.trim(); if (!text) return $('#wish-text').focus();
-    const name = `temp-${Math.random().toString(36).slice(2, 6)}`;
+    const once = tempMode === 'once';
+    const name = `${once ? 'once' : 'temp'}-${Math.random().toString(36).slice(2, 6)}`;
     const au = await api('/api/agent-user').catch(() => ({ available: false }));
     const btn = $('#wish-now'); btn.disabled = true;
     try {
-        await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: localStorage.getItem('porthole.agent') || 'claude', scratch: true, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}
-
-(From Porthole: temporary session in a scratch folder that is deleted when this shell ends. Just do it; keep anything worth keeping out of this folder.)` } });
+        let agentKey = localStorage.getItem('porthole.agent') || 'claude'; if (once && !['claude', 'codex'].includes(agentKey)) agentKey = 'claude';
+        const note = once ? 'one-shot run in a scratch folder; it is destroyed when you finish, so answer fully in your final message' : 'temporary session in a scratch folder that is deleted when this shell ends';
+        await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: agentKey, scratch: true, oneshot: once, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}\n\n(From Porthole: ${note}. Just do it; keep anything worth keeping out of this folder.)` } });
         $('#wish-text').value = ''; openTerminal(name, 'Home');
     } catch (ex) { toast(ex.message, true); }
     btn.disabled = false;

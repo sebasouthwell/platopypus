@@ -50,7 +50,7 @@ export async function list() {
     const liveNames = new Set(live.map(s => s.name));
     let dirty = false;
     for (const name of Object.keys(meta)) {
-        if (!liveNames.has(name)) { delete meta[name]; dirty = true; }
+        if (!liveNames.has(name)) { if (meta[name].oneshot) finishOneshot(name, meta[name]); delete meta[name]; dirty = true; }
     }
     if (dirty) persist();
     shells.sort((a, b) => b.created - a.created);
@@ -59,7 +59,12 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false }) {
+    if (oneshot) {
+        if (kind !== 'agent' || !['claude', 'codex'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code or Codex.');
+        if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
+        scratch = true;
+    }
     // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
     if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
@@ -92,6 +97,16 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
         // Antigravity gets it typed in once it is up.
         if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
+        if (oneshot) {
+            // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
+            // throwaway folder. Output is tee'd to /tmp so Porthole can keep it after the shell and folder are gone.
+            const bin = agents.catalog[agent].bin;
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox "$PORTHOLE_FIRST_PROMPT"`;
+            const out = `/tmp/porthole-oneshot-${name}.log`;
+            command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
+            if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';
+            agentInfo.oneshot = true;
+        }
     }
     if (kind === 'remote-control') {
         command = 'claude remote-control';
@@ -135,10 +150,31 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         const text = agentEnv.PORTHOLE_FIRST_PROMPT;
         setTimeout(() => { tmuxCmd('send-keys', '-t', `${name}:`, '-l', text).then(() => tmuxCmd('send-keys', '-t', `${name}:`, 'Enter')).catch(() => {}); }, 9000);
     }
-    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, runAs, ...(session ? { session } : {}), ...(security ? { security } : {}), ...(tokenHash ? { tokenHash } : {}), ...(agentInfo || {}) };
+    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, runAs, ...(oneshot ? { oneshot: true, prompt: String(firstPrompt).slice(0, 2000) } : {}), ...(session ? { session } : {}), ...(security ? { security } : {}), ...(tokenHash ? { tokenHash } : {}), ...(agentInfo || {}) };
     persist();
     log('shell', `created ${kind}${agentInfo ? ` (${agentInfo.agent}${agentInfo.yolo ? ', auto-approve' : ''}${agentInfo.resume ? ', resume' : ''}${agentInfo.profile !== 'default' ? ', profile ' + agentInfo.profile : ''})` : ''} "${name}" in ${dir}`);
     return { name, kind, cwd: dir, created: meta[name].created, runAs, ...(agentInfo || {}) };
+}
+
+// ---- one-shot runs: results outlive the shell and its scratch folder ----
+const oneshotDir = path.join(config.state, 'oneshot');
+function finishOneshot(name, m) {
+    try {
+        fs.mkdirSync(oneshotDir, { recursive: true, mode: 0o700 });
+        const tmp = `/tmp/porthole-oneshot-${name}.log`;
+        let output = ''; try { output = fs.readFileSync(tmp, 'utf8'); fs.rmSync(tmp, { force: true }); } catch { /* nothing printed */ }
+        fs.writeFileSync(path.join(oneshotDir, `${name}.json`), JSON.stringify({ name, agent: m.agent, prompt: m.prompt, started: m.created, finished: Date.now(), output: output.slice(-200_000) }), { mode: 0o600 });
+        const agentScratch = agentUser.info() ? path.join(agentUser.info().home, 'scratch') : null;
+        if (m.cwd && (m.cwd.startsWith(scratchRoot + path.sep) || (agentScratch && m.cwd.startsWith(agentScratch + path.sep)))) fs.rmSync(m.cwd, { recursive: true, force: true });
+        // keep the 30 most recent results
+        const all = fs.readdirSync(oneshotDir).filter(f => f.endsWith('.json')).map(f => ({ f, t: fs.statSync(path.join(oneshotDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+        for (const old of all.slice(30)) fs.rmSync(path.join(oneshotDir, old.f), { force: true });
+        log('shell', `one-shot "${name}" finished; output kept, folder removed`);
+    } catch (e) { log('shell', `one-shot "${name}" cleanup failed: ${e.message}`); }
+}
+export async function reapOneshots() { if (Object.values(meta).some(m => m.oneshot)) await list(); }
+export function oneshotResults() {
+    try { return fs.readdirSync(oneshotDir).filter(f => f.endsWith('.json')).map(f => JSON.parse(fs.readFileSync(path.join(oneshotDir, f), 'utf8'))).sort((a, b) => b.finished - a.finished); } catch { return []; }
 }
 
 // Which live agent-user shell a token belongs to (null for anything else).
@@ -158,6 +194,7 @@ export async function kill(name, { deleteScratch = true } = {}) {
     if (!(await hasSession(name))) throw httpError(404, 'No such shell.');
     await killSession(name);
     const m = meta[name];
+    if (m?.oneshot) { finishOneshot(name, m); delete meta[name]; persist(); return; }   // keep what it printed
     delete meta[name];
     persist();
     log('shell', `killed "${name}"`);

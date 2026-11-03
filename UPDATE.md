@@ -219,6 +219,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   the agent user for AI agents. Home "I wish for:" gains Temp (scratch folder, agent user, throwaway brief, first message, no
   questions).
 
+- **1.13.0** — one-shot runs: `POST /api/shells` accepts `oneshot: true` (Claude `-p` / `codex exec`, auto-approved, scratch
+  folder); when the session ends Porthole stores `{ name, agent, prompt, started, finished, output }` in `~/.porthole/oneshot/<name>.json`
+  (30 kept) and deletes the folder. `GET /api/oneshot`. Home Temp gains a ▾ menu: Temp session / One-shot / results.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

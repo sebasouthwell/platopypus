@@ -355,6 +355,16 @@ if (r.body.available) {
     execFileSync('bash', ['-lc', 'rm -rf /Projects/smoke-sec']);
 }
 
+// 6k. One-shot runs: shell ends by itself, output kept, scratch folder removed (fake agent binary on PATH is not
+// needed: a bad first message makes Claude print mode exit at once in the test image, which is enough for the lifecycle).
+r = await call('/api/shells', { method: 'POST', body: { name: 'once-smoke', kind: 'agent', agent: 'antigravity', firstPrompt: 'x', oneshot: true } });
+check('one-shot refuses agents without a non-interactive mode', r.status === 400);
+r = await call('/api/shells', { method: 'POST', body: { name: 'once-smoke', kind: 'agent', agent: 'claude', firstPrompt: 'reply with the word ok', oneshot: true, runAs: 'root', session: 'project' } });
+check('one-shot shell starts in a scratch folder', r.status === 201 && /\/scratch\//.test(r.body.cwd), `${r.status} ${JSON.stringify(r.body).slice(0, 140)}`);
+{ const { execFileSync } = await import('node:child_process'); try { execFileSync('tmux', ['-L', 'porthole', 'kill-session', '-t', 'once-smoke']); } catch { /* already ended */ } }
+let res1 = []; for (let i = 0; i < 20 && !res1.some(x => x.name === 'once-smoke'); i++) { await sleep(1000); await call('/api/shells'); res1 = (await call('/api/oneshot')).body; }
+check('finished one-shot keeps its result and removes its folder', res1.some(x => x.name === 'once-smoke' && x.prompt.startsWith('reply')) && !(await call('/api/shells')).body.some(x => x.name === 'once-smoke'), JSON.stringify(res1.map(x => x.name)));
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

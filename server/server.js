@@ -490,6 +490,7 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/elevate/pending' && method === 'GET') return send(res, 200, elevate.pending());
         if ((m = p.match(/^\/api\/elevate\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, elevate.decide(m[1], { allow: m[2] === 'allow', minutes: Number(b.minutes) || 0 })); }
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/elevation$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, { until: elevate.grant(decodeURIComponent(m[1]), b.minutes) }); }
+        if (p === '/api/oneshot' && method === 'GET') return send(res, 200, shells.oneshotResults());
         if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home, signedIn: agentUser.signIns(), loginsMoved: agentUser.loginsMoved(), rootLogins: agentUser.rootLogins() } : { available: false }); }
         if ((m = p.match(/^\/api\/agent-user\/(move-logins|undo-move)$/)) && method === 'POST') {
             const list = await shells.list();
@@ -602,6 +603,7 @@ wss.on('connection', ws => { ws.isAlive = true; ws.on('pong', () => { ws.isAlive
 // Tunnel watcher: expiry + "is the process behind this port still there?"
 setInterval(() => tunnels.sweep().catch(e => console.error(e)), 10_000);
 zoned.ensure().catch(e => console.error(e));
+setInterval(() => shells.reapOneshots().catch(e => console.error(e)), 15_000);
 setInterval(() => zoned.ensure().catch(e => console.error(e)), 60_000);
 
 // Daily update check against the public repo (first one a minute after boot).
