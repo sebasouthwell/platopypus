@@ -4,6 +4,8 @@
 //   project status [dir]                 local | private | public (and which folder carries the flag)
 //   project set private|public|local [dir]
 //   project allow-push [dir]             exit 0 if pushing is allowed, 1 otherwise (used by the git pre-push hook)
+//   project security                     this project's security level, its brief, and whether a CVE check is due
+//   project cve-checked                  record that today's dependency / CVE check is done
 //
 // Nothing is pushed anywhere until the user marks the folder as a repo on the phone (Files → folder → Repo). Local
 // commits are always fine. `.pasted/` is ignored by git everywhere on this box.
@@ -16,7 +18,7 @@ const port = process.env.PORTHOLE_PORT || '7331';
 const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
 let token = process.env.PORTHOLE_TOKEN || '';
 try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token */ }
-if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
+if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 12).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
 
 const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
 async function api(p, method = 'GET', body) {
@@ -43,6 +45,14 @@ try {
         if (r.allowed) process.exit(0);
         console.error(`porthole: push blocked — ${r.reason}`);
         process.exit(1);
+    } else if (sub === 'security') {
+        const r = await api(`/api/projects/profile?abs=${encodeURIComponent(dirArg(0))}`);
+        if (!r.root) console.log('not inside a project under /Projects');
+        else if (!r.profile) console.log(`${r.name}: no security level yet — the user picks one on the phone when starting a project session`);
+        else console.log(`${r.name}: ${r.profile.key}\nbrief: ${r.securityFile}${r.profile.level === 'professional' ? `\nCVE check: ${r.cveDue ? 'DUE — run it before other work, then: project cve-checked' : 'done in the last 24 h'}` : ''}`);
+    } else if (sub === 'cve-checked') {
+        const r = await api('/api/projects/profile/cve-checked', 'POST', { abs: dirArg(0) });
+        console.log(`${r.name}: CVE check recorded`);
     } else { console.error(`unknown command ${sub}`); process.exit(2); }
 } catch (e) {
     console.error(`project: ${e.message}`);

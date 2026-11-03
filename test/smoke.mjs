@@ -317,6 +317,31 @@ if (r.body.available) {
     sh('rm -rf /Projects/smoke-agent /tmp/elev-out /tmp/aj');
 } else check('agent user present in the test image', false, 'install.sh did not create it');
 
+// 6j. Session type and security level.
+{
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('bash', ['-lc', 'rm -rf /Projects/smoke-sec && mkdir -p /Projects/smoke-sec/sub']);
+    r = await call('/api/projects/profile?path=Projects/smoke-sec/sub'); check('new project has no security level', r.status === 200 && r.body.root === '/Projects/smoke-sec' && r.body.profile === null, JSON.stringify(r.body).slice(0, 120));
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-sec', kind: 'agent', agent: 'claude', cwd: 'Projects/smoke-sec', session: 'project' } });
+    check('project session refused until a level is chosen', r.status === 428 && r.body.needProfile === true, `${r.status} ${JSON.stringify(r.body)}`);
+    r = await call('/api/projects/profile', { method: 'PUT', body: { path: 'Projects/smoke-sec', level: 'personal' } }); check('personal level needs private or shared', r.status === 400);
+    r = await call('/api/projects/profile', { method: 'PUT', body: { path: 'Projects/smoke-sec', level: 'professional', tier: 'public' } });
+    check('level saved with its brief in the project', r.status === 200 && r.body.profile.key === 'professional-public' && r.body.cveDue === true && /daily routine/i.test(execFileSync('cat', ['/Projects/smoke-sec/.porthole/security.md'], { encoding: 'utf8' })), JSON.stringify(r.body).slice(0, 160));
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-sec', kind: 'shell', cwd: 'Projects/smoke-sec/sub' } });
+    const out = execFileSync('bash', ['-lc', 'cd /Projects/smoke-sec/sub && project security && project cve-checked && project security'], { encoding: 'utf8' });
+    check('project CLI reports the level and records the CVE check', /professional-public/.test(out) && /DUE/.test(out) && /done in the last 24 h/.test(out), out.slice(0, 300));
+    await call('/api/shells/smoke-sec', { method: 'DELETE' }).catch(() => {});
+    // Agent starts trusted in its folder and receives the first message as an argument.
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-trust', kind: 'agent', agent: 'claude', cwd: 'Projects/smoke-sec', session: 'project', firstPrompt: 'say hello' } });
+    check('agent shell with a first message starts', r.status === 201, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+    const cj = JSON.parse(execFileSync('cat', [`${process.env.HOME || '/root'}/.claude.json`], { encoding: 'utf8' }));
+    check('Claude Code pre-trusts the folder', cj.projects?.['/Projects/smoke-sec']?.hasTrustDialogAccepted === true);
+    const envDump = execFileSync('tmux', ['-L', 'porthole', 'show-environment', '-t', 'smoke-trust'], { encoding: 'utf8' });
+    check('first message reaches the agent session', /PORTHOLE_FIRST_PROMPT=say hello/.test(envDump));
+    await call('/api/shells/smoke-trust', { method: 'DELETE' }).catch(() => {});
+    execFileSync('bash', ['-lc', 'rm -rf /Projects/smoke-sec']);
+}
+
 // 7b. Text editor endpoints.
 await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-edit' } }).catch(() => {});
 await call('/api/files/mkdir', { method: 'POST', body: { path: '.', name: 'smoke-edit' } });

@@ -33,6 +33,7 @@ import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
 import * as agentUser from './lib/agentuser.js';
 import * as elevate from './lib/elevate.js';
+import * as profile from './lib/profile.js';
 import { log } from './lib/log.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,7 +60,7 @@ const AGENT_ROUTES = [
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
     ['GET', /^\/api\/live$/], ['GET', /^\/api\/live\/check$/],
-    ['GET', /^\/api\/projects\/repo$/],
+    ['GET', /^\/api\/projects\/repo$/], ['GET', /^\/api\/projects\/profile$/], ['POST', /^\/api\/projects\/profile\/cve-checked$/],
     ['GET', /^\/api\/tunnels$/], ['POST', /^\/api\/tunnels$/], ['DELETE', /^\/api\/tunnels\/\d{1,5}$/], ['POST', /^\/api\/tunnels\/\d{1,5}\/extend$/],
 ];
 
@@ -480,6 +481,11 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/home' && method === 'GET') return send(res, 200, await home.home());
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
 
+        // Project security profile (level chosen on the phone; brief injected into agent sessions)
+        if (p === '/api/projects/profile' && method === 'GET') { const abs = url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.'); return send(res, 200, { ...profile.get(abs), levels: profile.LEVELS }); }
+        if (p === '/api/projects/profile' && method === 'PUT') { const b = await readJson(req, 4096); return send(res, 200, profile.set(b.abs || files.resolveInRoot(b.path || '.'), b)); }
+        if (p === '/api/projects/profile/cve-checked' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, profile.cveChecked(b.abs || files.resolveInRoot(b.path || '.'))); }
+
         // Elevation (phone side)
         if (p === '/api/elevate/pending' && method === 'GET') return send(res, 200, elevate.pending());
         if ((m = p.match(/^\/api\/elevate\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, elevate.decide(m[1], { allow: m[2] === 'allow', minutes: Number(b.minutes) || 0 })); }
@@ -512,7 +518,7 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
         const status = err.status || 500;
         if (status >= 500) console.error(err);
-        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.' });
+        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.', ...(err.needProfile ? { needProfile: true } : {}) });
         else res.end();
     }
 });

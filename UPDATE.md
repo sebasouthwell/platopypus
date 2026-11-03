@@ -194,6 +194,19 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.9.1** — one projects folder: clone and New shell default to `<files root>/Projects` (was `~/Projects`, which on a
   root-at-/ box made a second folder); install.sh links `~/Projects` → `/Projects` when it is missing or empty. Red Stop button beside Send in the terminal sends Ctrl+C; live service page shows the running dot in green. UI only.
 
+- **1.10.0** — session type and security level for agent sessions. New per-project files `<project>/.porthole/project.json`
+  (`{ level: throwaway|personal|professional, audience?, tier?, set, lastCveCheck? }`) and `.porthole/security.md` (copied from
+  `deploy/security/<key>.md`); both travel with the repo. `POST /api/shells` accepts `session: control|project` (428 with
+  `needProfile` when a project has no level yet); shells get `PORTHOLE_SESSION`, `PORTHOLE_SECURITY_LEVEL`,
+  `PORTHOLE_SECURITY_FILE`; `shells.json` entries may carry `session` and `security`. Routes `GET/PUT /api/projects/profile`,
+  `POST /api/projects/profile/cve-checked`. `project security`, `project cve-checked`. Shells created without `session` behave
+  as before.
+
+- **1.11.0** — agents start trusted in the folder picked in Porthole (Claude `.claude.json` projects[dir].hasTrustDialogAccepted,
+  Codex `config.toml` [projects."dir"] trust_level, Antigravity/Gemini `trustedFolders.json`), written for the user the agent
+  runs as; `POST /api/shells` accepts `firstPrompt` (Claude/Codex as an argument via `PORTHOLE_FIRST_PROMPT`, Antigravity typed
+  in). Home gains "I wish for:". No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

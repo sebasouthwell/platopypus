@@ -59,6 +59,16 @@ a service and keep it current; run `live check` after editing. Never put secret 
 (`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
 from the phone; `live status` shows what Porthole sees.
 
+## Session type and security level
+
+Porthole tells you what kind of session this is. At the start of every session run `echo $PORTHOLE_SESSION
+$PORTHOLE_SECURITY_LEVEL` and, if `PORTHOLE_SECURITY_FILE` is set, **read that file first and follow it for the whole
+session**; it overrides your defaults on how much security work to do (from "build as fast as possible" for a
+throwaway project to boundary tests every iteration and a daily CVE check for professional work). A `control` session
+is box operations, not project work. For professional projects run `project security` at the start of each session and
+do the CVE check when it says it is due. Do not edit `.porthole/security.md` or `.porthole/project.json` yourself; the
+user changes the level on the phone.
+
 ## Running without root
 
 If `echo $PORTHOLE_RUN_AS` prints `agent`, you are the unprivileged agent user. You can work freely in this project,

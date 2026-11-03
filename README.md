@@ -44,6 +44,13 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   update strategy, operator actions, links, credentials). Services lists them first with Start/Stop, and each has a
   page where actions are buttons, credentials are tap-to-copy and Put on hostname sets up DNS, nginx and a Let's
   Encrypt certificate (a coming-up page shows until the service answers). Format: docs/LIVE.md.
+- **I wish for:** on Home — write what you want; Porthole proposes a new project folder named after it, asks the usual
+  agent, session and security questions, and starts the agent with your text as its first message. Agents start
+  already trusting the folder you picked, so there is no trust prompt.
+- **Session types and security levels** — starting an agent asks: project work or a control session (moving files,
+  recon). A new project is asked once how serious it is: throwaway (build fast), personal (just me, or shared with
+  friends), or professional (internal, public-facing, regulated data). The matching brief from `deploy/security/` is
+  given to the agent every session; professional projects get boundary tests every iteration and a daily CVE check.
 - **Agents without root** — start an agent as the unprivileged agent user (New shell → Run as). It works in its project
   and asks for root one command at a time with `elevate`; the phone shows a red banner with Allow once, Allow this
   shell for 30 minutes, or Deny. Its token only reaches the box CLIs' routes. Migration plan: docs/AGENT-USER.md.

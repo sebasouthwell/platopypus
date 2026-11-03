@@ -371,24 +371,36 @@ async function loadShells() {
 }
 function shellRow(s) {
     return `<button class="shell-row" data-name="${esc(s.name)}">
-        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}${s.runAs === 'agent' ? '<span class="tag">agent user</span>' : s.kind === 'agent' ? '<span class="tag dim" style="color:var(--flare)">root</span>' : ''}</div>
+        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}${s.runAs === 'agent' ? '<span class="tag">agent user</span>' : s.kind === 'agent' ? '<span class="tag dim" style="color:var(--flare)">root</span>' : ''}${s.security ? `<span class="tag dim">${esc(s.security === 'control' ? 'control' : s.security.replace('-', ' · '))}</span>` : ''}</div>
         ${s.preview?.length ? `<pre class="shell-preview">${esc(s.preview.join('\n'))}</pre>` : ''}
       </button>`;
 }
 $('#shell-new').addEventListener('click', () => newShellDialog(state.filesPath || projectsRel()));
+// Home → "I wish for:": a spec becomes the agent's first message, in a new project folder named after it.
+$('#home-wish').addEventListener('submit', e => {
+    e.preventDefault();
+    const text = $('#wish-text').value.trim(); if (!text) return $('#wish-text').focus();
+    const stop = new Set(['a', 'an', 'the', 'i', 'me', 'my', 'that', 'which', 'with', 'for', 'to', 'of', 'and', 'from', 'shows', 'show', 'app', 'want', 'wish']);
+    const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(w => w && !stop.has(w)).slice(0, 3);
+    const slug = (words.join('-') || `project-${Date.now().toString(36).slice(-4)}`).slice(0, 30);
+    newShellDialog(`${projectsRel()}/${slug}`, 'agent', slug, { firstPrompt: text, newFolder: true });
+});
+$('#wish-text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#home-wish').requestSubmit(); } });
 
 const AGENT_TITLES = { claude: 'Claude Code', codex: 'Codex CLI', antigravity: 'Antigravity CLI' };
 const agentTitle = k => AGENT_TITLES[k] || k || 'agent';
 let agentsCache = null;
 async function getAgents() { if (!agentsCache) agentsCache = await api('/api/agents'); return agentsCache; }
 
-function newShellDialog(folder = '', preferredKind = 'agent', presetName = null) {
+function newShellDialog(folder = '', preferredKind = 'agent', presetName = null, opts = {}) {
     if (preferredKind === 'claude') preferredKind = 'agent';
+    const { firstPrompt = '', newFolder = false } = opts;
     const suggested = presetName ?? (folder.split('/').filter(Boolean).pop() || 'home').toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 30);
     const { panel, close } = openDialog(`
-        <h2>New shell</h2>
+        <h2>${firstPrompt ? 'Start on your wish' : 'New shell'}</h2>
+        ${firstPrompt ? `<div class="field"><label for="ns-prompt">First message to the agent</label><textarea id="ns-prompt" rows="3">${esc(firstPrompt)}</textarea></div>` : ''}
         <div class="field"><label>Where</label>
-          <button type="button" class="row plain picker" data-pick><span class="ico brass">${icon('folder')}</span><div class="main"><div class="title mono">${esc(showPath(folder))}</div><div class="sub">Tap to choose a folder</div></div>${icon('chevron', 'i chev')}</button></div>
+          <button type="button" class="row plain picker" data-pick><span class="ico brass">${icon(newFolder ? 'folder-plus' : 'folder')}</span><div class="main"><div class="title mono">${esc(showPath(folder))}</div><div class="sub">${newFolder ? 'New project folder · tap to use an existing one instead' : 'Tap to choose a folder'}</div></div>${icon('chevron', 'i chev')}</button></div>
         <div class="field"><label>Kind</label><div class="choices" data-kind>
           <button type="button" data-k="agent" class="${preferredKind === 'agent' ? 'selected' : ''}">${icon('claude')}AI agent</button>
           <button type="button" data-k="shell" class="${preferredKind === 'shell' ? 'selected' : ''}">${icon('terminal')}Plain shell</button></div></div>
@@ -428,7 +440,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
             if (a && a.profiles) {
                 const sel = $('#ns-profile', panel);
                 sel.innerHTML = a.profiles.map(p => `<option value="${esc(p.name)}" ${p.name === profile ? 'selected' : ''}>${esc(p.name)}${p.signedIn ? '' : ' (not signed in)'}</option>`).join('') + `<option value="__new">New profile…</option>`;
-                sel.onchange = () => { if (sel.value === '__new') { sel.value = profile; const keep = $('#ns-name', panel).value.trim(); close(); newProfileDialog(() => newShellDialog(folder, 'agent', keep)); } else profile = sel.value; };
+                sel.onchange = () => { if (sel.value === '__new') { sel.value = profile; const keep = $('#ns-name', panel).value.trim(); close(); newProfileDialog(() => newShellDialog(folder, 'agent', keep, { ...opts, firstPrompt: $('#ns-prompt', panel)?.value ?? firstPrompt })); } else profile = sel.value; };
             }
         };
         $$('button[data-a]', box).forEach(b => b.onclick = () => { agent = b.dataset.a; localStorage.setItem('porthole.agent', agent); $$('button[data-a]', box).forEach(x => x.classList.toggle('selected', x === b)); refreshProfiles(); });
@@ -437,15 +449,75 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null)
     $('[data-pick]', panel).onclick = () => {
         const name = $('#ns-name', panel).value.trim();
         const keepName = name && name !== suggested ? name : null;
-        folderPicker(folder, picked => newShellDialog(picked, kind, keepName), () => newShellDialog(folder, kind, keepName));
+        const fp = $('#ns-prompt', panel)?.value ?? firstPrompt;
+        folderPicker(newFolder ? projectsRel() : folder, picked => newShellDialog(picked, kind, keepName, { firstPrompt: fp, newFolder: false }), () => newShellDialog(folder, kind, keepName, { ...opts, firstPrompt: fp }));
     };
     const go_ = async () => {
         const name = $('#ns-name', panel).value.trim();
         const finalName = scratch && name === suggested ? `scratch-${Math.random().toString(36).slice(2, 6)}` : name;
-        try { await api('/api/shells', { method: 'POST', body: { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch, runAs } }); close(); openTerminal(finalName, 'Shells'); }
+        const prompt = ($('#ns-prompt', panel)?.value ?? '').trim();
+        if (newFolder) {   // create the project folder first (Projects/<name>)
+            const parts = folder.split('/'); const leaf = parts.pop();
+            try { await api('/api/files/mkdir', { method: 'POST', body: { path: parts.join('/') || '.', name: leaf } }); } catch (ex) { if (ex.status !== 409) { toast(ex.message, true); return; } }
+        }
+        const body = { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch, runAs };
+        if (kind === 'agent' && prompt) body.firstPrompt = `${prompt}\n\n(From Porthole: you are in ${folder ? '/' + folder.replace(/^\/+/, '') : 'the home folder'}${newFolder ? ', a new empty project folder' : ''}. Restate the goal in one line, then get going.)`;
+        if (kind === 'agent') {
+            const session = await sessionTypeDialog(folder);
+            if (!session) return newShellDialog(folder, kind, finalName, { ...opts, firstPrompt: prompt || firstPrompt });
+            body.session = session;
+        }
+        try { await api('/api/shells', { method: 'POST', body }); close(); openTerminal(finalName, 'Shells'); }
         catch (ex) { toast(ex.message, true); }
     };
     $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
+}
+
+// Before an agent starts: control session or project session; a new project also gets its security level (once).
+function sessionTypeDialog(folder) {
+    return new Promise(resolve => {
+        const last = localStorage.getItem('porthole.sessionType') || 'project';
+        const { panel, close } = openDialog(`<h2>${icon('claude')}What is this session?</h2>
+            <div class="menu">
+              <button data-s="project" class="${last === 'project' ? 'selected' : ''}">${icon('folder')}<span>Project work<br><span class="sub">build or change this project · follows its security level</span></span></button>
+              <button data-s="control" class="${last === 'control' ? 'selected' : ''}">${icon('terminal')}<span>Control session<br><span class="sub">move files, quick recon, check logs, restart things · no project changes</span></span></button>
+            </div><div class="buttons"><button data-cancel>Back</button></div>`);
+        $('[data-cancel]', panel).onclick = () => { close(); resolve(null); };
+        $$('[data-s]', panel).forEach(b => b.onclick = async () => {
+            const s = b.dataset.s; localStorage.setItem('porthole.sessionType', s);
+            if (s === 'control') { close(); return resolve('control'); }
+            let g; try { g = await api(`/api/projects/profile?path=${encodeURIComponent(folder || '.')}`); } catch (ex) { toast(ex.message, true); close(); return resolve(null); }
+            if (!g.root || g.profile) { close(); return resolve('project'); }
+            close(); const ok = await securityLevelDialog(folder, g.name); resolve(ok ? 'project' : null);
+        });
+    });
+}
+function securityLevelDialog(folder, projectName) {
+    return new Promise(resolve => {
+        let level = null, audience = null, tier = null;
+        const { panel, close } = openDialog(`<h2>${icon('shield')}How serious is ${esc(projectName)}?</h2>
+            <p class="muted">Asked once per project. The agent gets a security brief to match, every session.</p>
+            <div class="menu" data-levels>
+              <button data-l="throwaway">${icon('zap')}<span>Throwaway<br><span class="sub">one-off, gone tomorrow · build as fast as possible, no security checks</span></span></button>
+              <button data-l="personal">${icon('user')}<span>Personal<br><span class="sub">yours · decent security, nobody can use your login or see your data</span></span></button>
+              <button data-l="professional">${icon('shield')}<span>Professional<br><span class="sub">work-grade · boundary tests every iteration, daily CVE checks</span></span></button>
+            </div>
+            <div data-sub hidden></div>
+            <div class="buttons"><button class="primary" data-ok disabled>Save and start</button><button data-cancel>Back</button></div>`);
+        const sub = $('[data-sub]', panel), ok = $('[data-ok]', panel);
+        const subMenu = (label, opts, pick) => { sub.hidden = false; sub.innerHTML = `<h3 class="section" style="margin-top:10px">${label}</h3><div class="menu">${opts.map(([k, t, d]) => `<button data-o="${k}">${icon(k === 'private' || k === 'internal' ? 'lock' : k === 'regulated' ? 'shield' : 'globe')}<span>${t}<br><span class="sub">${d}</span></span></button>`).join('')}</div>`; $$('[data-o]', sub).forEach(b => b.onclick = () => { pick(b.dataset.o); $$('[data-o]', sub).forEach(x => x.classList.toggle('selected', x === b)); ok.disabled = false; }); };
+        $$('[data-l]', panel).forEach(b => b.onclick = () => {
+            level = b.dataset.l; audience = tier = null; $$('[data-l]', panel).forEach(x => x.classList.toggle('selected', x === b));
+            if (level === 'throwaway') { sub.hidden = true; ok.disabled = false; }
+            if (level === 'personal') { ok.disabled = true; subMenu('Who uses it?', [['private', 'Just me', 'only my own data, e.g. a bus tracker with my live location'], ['shared', 'Shared with friends', 'a few people I know, e.g. a party game · cross-site and user boundaries matter']], v => { audience = v; }); }
+            if (level === 'professional') { ok.disabled = true; subMenu('Which tier?', [['internal', 'Internal tool', 'used inside a team or company'], ['public', 'Public-facing', 'strangers reach it over the internet'], ['regulated', 'Regulated data', 'GDPR personal data, payments or health data']], v => { tier = v; }); }
+        });
+        $('[data-cancel]', panel).onclick = () => { close(); resolve(false); };
+        ok.onclick = async () => {
+            try { const r = await api('/api/projects/profile', { method: 'PUT', body: { path: folder || '.', level, audience, tier } }); toast(`${projectName}: ${r.profile.key.replace('-', ' · ')}`); close(); resolve(true); }
+            catch (ex) { toast(ex.message, true); }
+        };
+    });
 }
 
 function newProfileDialog(done) {

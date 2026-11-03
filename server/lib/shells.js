@@ -12,6 +12,9 @@ import { envFor } from './vault.js';
 import * as agents from './agents.js';
 import crypto from 'node:crypto';
 import * as agentUser from './agentuser.js';
+import * as secProfile from './profile.js';
+import { trustFolder } from './trust.js';
+import { tmux as tmuxCmd } from './tmux.js';
 import { log } from './log.js';
 
 const metaFile = path.join(config.state, 'shells.json');
@@ -36,7 +39,7 @@ export async function list() {
             name: s.name,
             kind: m.kind === 'claude' ? 'agent' : (m.kind || 'shell'),
             agent: m.agent || (m.kind === 'claude' ? 'claude' : null),
-            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null, scratch: !!m.scratch, runAs: m.runAs || 'root',
+            yolo: !!m.yolo, resume: !!m.resume, profile: m.profile || null, scratch: !!m.scratch, runAs: m.runAs || 'root', session: m.session || null, security: m.security || null,
             cwd: m.cwd || config.root,
             created: m.created || s.created,
             attached: s.attached,
@@ -56,8 +59,10 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = 'root' }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = 'root', session = null, firstPrompt = null }) {
+    if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
+    if (session !== null && !['control', 'project'].includes(session)) throw httpError(400, 'session: control or project.');
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
     if (RESERVED_PREFIXES.some(p => name.startsWith(p))) throw httpError(400, `Names starting with ${RESERVED_PREFIXES.map(p => `"${p}"`).join(', ')} are reserved.`);
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
@@ -80,10 +85,25 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         const built = agents.command({ agent, yolo: !!yolo, resume: !!resume, profile, login: !!login });
         command = built.cmd; agentEnv = built.env;
         agentInfo = { agent, yolo: !!yolo, resume: !!resume, profile: profile || 'default' };
+        // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
+        // Antigravity gets it typed in once it is up.
+        if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
     }
     if (kind === 'remote-control') {
         command = 'claude remote-control';
         if (profile && profile !== 'default') agentEnv.CLAUDE_CONFIG_DIR = agents.profileDir(profile);
+    }
+
+    // Session type and security brief (agents read $PORTHOLE_SECURITY_FILE first; see deploy/AGENT.global.md).
+    let sessionEnv = {}, security = null;
+    if (kind === 'agent' && session) {
+        if (session === 'control') { security = 'control'; sessionEnv = { PORTHOLE_SESSION: 'control', PORTHOLE_SECURITY_LEVEL: 'control', PORTHOLE_SECURITY_FILE: secProfile.controlDoc() }; }
+        else {
+            const g = secProfile.get(dir);
+            if (g.root && !g.profile) { const e = httpError(428, `Choose a security level for ${g.name} first.`); e.needProfile = true; throw e; }
+            security = g.profile?.key || null;
+            sessionEnv = { PORTHOLE_SESSION: 'project', ...(g.profile ? { PORTHOLE_SECURITY_LEVEL: g.profile.key, PORTHOLE_SECURITY_FILE: g.securityFile, PORTHOLE_PROJECT_ROOT: g.root } : {}) };
+        }
     }
 
     // Agent user: no root, its own API token, project folder made group-writable.
@@ -97,11 +117,20 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (agentEnv.CLAUDE_CONFIG_DIR) delete agentEnv.CLAUDE_CONFIG_DIR; // root profiles are not readable; stage 2 moves them
         command = agentUser.wrap(command || '');
     }
+    // Skip each agent's "trust this folder?" prompt for the folder the user picked here.
+    if (kind === 'agent' || kind === 'remote-control') {
+        const a = runAs === 'agent' ? agentUser.info() : null;
+        trustFolder(kind === 'remote-control' ? 'claude' : agent, dir, { home: a ? a.home : config.home, configDir: runAs === 'agent' ? null : (agentEnv.CLAUDE_CONFIG_DIR || null), owner: a ? { uid: a.uid, gid: a.gid } : null });
+    }
     // General-scope vault tokens become environment variables; project credentials: `vault get` from the project folder.
     const secrets = await envFor(dir, { project: 'none' });
-    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...shellEnv });
+    await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...sessionEnv, ...shellEnv });
     if (Object.keys(secrets).length) log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`);
-    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, runAs, ...(tokenHash ? { tokenHash } : {}), ...(agentInfo || {}) };
+    if (agent === 'antigravity' && agentEnv.PORTHOLE_FIRST_PROMPT) {
+        const text = agentEnv.PORTHOLE_FIRST_PROMPT;
+        setTimeout(() => { tmuxCmd('send-keys', '-t', `${name}:`, '-l', text).then(() => tmuxCmd('send-keys', '-t', `${name}:`, 'Enter')).catch(() => {}); }, 9000);
+    }
+    meta[name] = { kind, cwd: dir, created: Date.now(), scratch: !!scratch, runAs, ...(session ? { session } : {}), ...(security ? { security } : {}), ...(tokenHash ? { tokenHash } : {}), ...(agentInfo || {}) };
     persist();
     log('shell', `created ${kind}${agentInfo ? ` (${agentInfo.agent}${agentInfo.yolo ? ', auto-approve' : ''}${agentInfo.resume ? ', resume' : ''}${agentInfo.profile !== 'default' ? ', profile ' + agentInfo.profile : ''})` : ''} "${name}" in ${dir}`);
     return { name, kind, cwd: dir, created: meta[name].created, runAs, ...(agentInfo || {}) };
