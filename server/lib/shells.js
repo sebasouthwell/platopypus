@@ -72,8 +72,10 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     // Scratch: a throwaway folder that is deleted when the shell ends.
     let dir;
     if (scratch) {
-        dir = path.join(scratchRoot, `${new Date().toISOString().slice(0, 10)}-${name}`);
+        const base = runAs === 'agent' && agentUser.info() ? path.join(agentUser.info().home, 'scratch') : scratchRoot;
+        dir = path.join(base, `${new Date().toISOString().slice(0, 10)}-${name}`);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        if (runAs === 'agent') { const a = agentUser.info(); fs.chownSync(base, a.uid, a.gid); fs.chownSync(dir, a.uid, a.gid); }
     } else {
         // No folder given → the home folder (not the files root, which may be "/").
         dir = !cwd || cwd === '.' ? config.home : resolveInRoot(cwd);
@@ -157,7 +159,8 @@ export async function kill(name, { deleteScratch = true } = {}) {
     persist();
     log('shell', `killed "${name}"`);
     // Scratch shells take their folder with them (only ever under ~/scratch).
-    if (m?.scratch && deleteScratch && m.cwd && m.cwd.startsWith(scratchRoot + path.sep)) {
+    const agentScratch = agentUser.info() ? path.join(agentUser.info().home, 'scratch') : null;
+    if (m?.scratch && deleteScratch && m.cwd && (m.cwd.startsWith(scratchRoot + path.sep) || (agentScratch && m.cwd.startsWith(agentScratch + path.sep)))) {
         fs.rmSync(m.cwd, { recursive: true, force: true });
         log('shell', `deleted scratch folder ${m.cwd}`);
     }

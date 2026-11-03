@@ -23,12 +23,18 @@ export function info() {
     } catch { return null; }
 }
 export const available = () => !!info();
+// Whether each agent has its own login for this user yet (they do not share root's; see docs/AGENT-USER.md stage 2).
+export function signIns() {
+    const a = info(); if (!a) return {};
+    const has = f => fs.existsSync(path.join(a.home, f));
+    return { claude: has('.claude/.credentials.json'), codex: has('.codex/auth.json'), antigravity: has('.gemini/oauth_creds.json') || has('.antigravity/oauth_creds.json') };
+}
 
 // Where an agent-user shell may start: projects, scratch folders, its own home.
 export function allowedFolder(dir) {
     const a = info(); if (!a) return false;
     const real = fs.realpathSync(dir);
-    const roots = [path.join(config.root, 'Projects'), path.join(config.home, 'scratch'), a.home].map(r => { try { return fs.realpathSync(r); } catch { return r; } });
+    const roots = [path.join(config.root, 'Projects'), a.home]   // root's ~/scratch is not reachable for this user.map(r => { try { return fs.realpathSync(r); } catch { return r; } });
     return roots.some(r => real === r || real.startsWith(r + path.sep));
 }
 

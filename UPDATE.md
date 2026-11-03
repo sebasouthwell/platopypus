@@ -207,6 +207,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   runs as; `POST /api/shells` accepts `firstPrompt` (Claude/Codex as an argument via `PORTHOLE_FIRST_PROMPT`, Antigravity typed
   in). Home gains "I wish for:". No state change.
 
+- **1.11.1** — New shell always defaults to Run as root (the agent-user choice is no longer remembered, it had switched
+  Claude to an unsigned-in user); the dialog warns when the agent has no login for the agent user; agent-user scratch folders
+  live in the agent's home; `GET /api/agent-user` adds `signedIn`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

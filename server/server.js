@@ -490,7 +490,7 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/elevate/pending' && method === 'GET') return send(res, 200, elevate.pending());
         if ((m = p.match(/^\/api\/elevate\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, elevate.decide(m[1], { allow: m[2] === 'allow', minutes: Number(b.minutes) || 0 })); }
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/elevation$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, { until: elevate.grant(decodeURIComponent(m[1]), b.minutes) }); }
-        if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home } : { available: false }); }
+        if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home, signedIn: agentUser.signIns() } : { available: false }); }
 
         // Live services (PORTHOLE.md)
         if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());
