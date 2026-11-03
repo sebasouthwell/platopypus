@@ -490,7 +490,12 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/elevate/pending' && method === 'GET') return send(res, 200, elevate.pending());
         if ((m = p.match(/^\/api\/elevate\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, elevate.decide(m[1], { allow: m[2] === 'allow', minutes: Number(b.minutes) || 0 })); }
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/elevation$/)) && method === 'POST') { const b = await readJson(req, 1024); return send(res, 200, { until: elevate.grant(decodeURIComponent(m[1]), b.minutes) }); }
-        if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home, signedIn: agentUser.signIns() } : { available: false }); }
+        if (p === '/api/agent-user' && method === 'GET') { const a = agentUser.info(); return send(res, 200, a ? { available: true, user: a.user, home: a.home, signedIn: agentUser.signIns(), loginsMoved: agentUser.loginsMoved(), rootLogins: agentUser.rootLogins() } : { available: false }); }
+        if ((m = p.match(/^\/api\/agent-user\/(move-logins|undo-move)$/)) && method === 'POST') {
+            const list = await shells.list();
+            const busy = list.filter(s => (s.kind === 'agent' || s.kind === 'remote-control') && (m[1] === 'move-logins' ? s.runAs !== 'agent' : s.runAs === 'agent')).map(s => s.name);
+            return send(res, 200, m[1] === 'move-logins' ? await agentUser.moveLogins({ busy }) : await agentUser.undoMoveLogins({ busy }));
+        }
 
         // Live services (PORTHOLE.md)
         if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());

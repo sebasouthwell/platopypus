@@ -386,6 +386,20 @@ $('#home-wish').addEventListener('submit', e => {
     newShellDialog(`${projectsRel()}/${slug}`, 'agent', slug, { firstPrompt: text, newFolder: true });
 });
 $('#wish-text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#home-wish').requestSubmit(); } });
+// Temp: "do this now" — a scratch folder, no root, no questions; the folder goes when the shell ends.
+$('#wish-now').addEventListener('click', async () => {
+    const text = $('#wish-text').value.trim(); if (!text) return $('#wish-text').focus();
+    const name = `temp-${Math.random().toString(36).slice(2, 6)}`;
+    const au = await api('/api/agent-user').catch(() => ({ available: false }));
+    const btn = $('#wish-now'); btn.disabled = true;
+    try {
+        await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: localStorage.getItem('porthole.agent') || 'claude', scratch: true, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}
+
+(From Porthole: temporary session in a scratch folder that is deleted when this shell ends. Just do it; keep anything worth keeping out of this folder.)` } });
+        $('#wish-text').value = ''; openTerminal(name, 'Home');
+    } catch (ex) { toast(ex.message, true); }
+    btn.disabled = false;
+});
 
 const AGENT_TITLES = { claude: 'Claude Code', codex: 'Codex CLI', antigravity: 'Antigravity CLI' };
 const agentTitle = k => AGENT_TITLES[k] || k || 'agent';
@@ -422,8 +436,8 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
     let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false, runAs = 'root';
     let agentSignIns = {};
     const runNote = () => { const noLogin = runAs === 'agent' && kind === 'agent' && agentSignIns[agent] === false; $('[data-runas-note]', panel).style.color = noLogin ? 'var(--flare)' : ''; $('[data-runas-note]', panel).textContent = noLogin ? `${agentTitle(agent)} is not signed in for the agent user yet: it starts as a fresh install and asks you to sign in (your root login is separate and untouched). ` + 'No root; root commands are asked for on this phone.' : runAs === 'agent' ? 'No root. Root commands are asked for on this phone (elevate). Project credentials via vault get from the project folder. Needs a folder under /Projects or a scratch folder; signs in as the agent user, separately from root logins.' : 'Full access to the whole box, as today.'; };
-    api('/api/agent-user').then(a => { if (!a.available) return; const f = $('[data-runas-field]', panel); f.hidden = false; runAs = 'root'; agentSignIns = a.signedIn || {}; $$('[data-runas] button', panel).forEach(b => { b.classList.toggle('selected', b.dataset.r === runAs); b.onclick = () => { runAs = b.dataset.r; $$('[data-runas] button', panel).forEach(x => x.classList.toggle('selected', x === b)); runNote(); }; }); runNote(); }).catch(() => {});
-    $$('[data-kind] button', panel).forEach(b => b.onclick = () => { kind = b.dataset.k; $$('[data-kind] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('[data-agent-opts]', panel).hidden = kind !== 'agent'; });
+    api('/api/agent-user').then(a => { if (!a.available) return; const f = $('[data-runas-field]', panel); f.hidden = false; runAs = kind === 'agent' ? 'agent' : 'root'; agentSignIns = a.signedIn || {}; $$('[data-runas] button', panel).forEach(b => { b.classList.toggle('selected', b.dataset.r === runAs); b.onclick = () => { runAs = b.dataset.r; $$('[data-runas] button', panel).forEach(x => x.classList.toggle('selected', x === b)); runNote(); }; }); runNote(); }).catch(() => {});
+    $$('[data-kind] button', panel).forEach(b => b.onclick = () => { kind = b.dataset.k; $$('[data-kind] button', panel).forEach(x => x.classList.toggle('selected', x === b)); $('[data-agent-opts]', panel).hidden = kind !== 'agent'; if (!$('[data-runas-field]', panel).hidden) { runAs = kind === 'agent' ? 'agent' : 'root'; $$('[data-runas] button', panel).forEach(x => x.classList.toggle('selected', x.dataset.r === runAs)); runNote(); } });
     $$('[data-opts] button', panel).forEach(b => b.onclick = () => {
         if (b.dataset.o === 'resume') resume = !resume; else if (b.dataset.o === 'yolo') yolo = !yolo; else scratch = !scratch;
         b.classList.toggle('selected', b.dataset.o === 'resume' ? resume : b.dataset.o === 'yolo' ? yolo : scratch);
@@ -1872,7 +1886,11 @@ async function updateAction(act, u) {
 async function loadAgents() {
     agentsCache = null;
     const list = await getAgents();
-    $('#agents-body').innerHTML = list.map(a => `
+    const au = await api('/api/agent-user').catch(() => ({ available: false }));
+    const moveCard = !au.available ? '' : au.loginsMoved
+        ? `<div class="list" style="margin-bottom:12px"><div class="row"><span class="ico kelp">${icon('shield')}</span><div class="main"><div class="title">Agents run without root</div><div class="sub">Logins live with the agent user since ${fmtAgo(au.loginsMoved.at)} · root commands are asked for on this phone</div></div><button class="pill ghost" data-undo-move>Undo</button></div></div>`
+        : au.rootLogins?.length ? `<div class="list" style="margin-bottom:12px"><div class="row"><span class="ico brass">${icon('shield')}</span><div class="main"><div class="title">Move logins to the agent user</div><div class="sub">Moves ${esc(au.rootLogins.join(', '))} (Claude with all profiles, Codex, Antigravity) so agents run without root and keep the same accounts. Backed up first; Undo puts them back.</div></div><button class="pill accent" data-move-logins>Move</button></div></div>` : '';
+    $('#agents-body').innerHTML = moveCard + list.map(a => `
         <h2 class="section">${esc(a.title)}<span class="meta">${esc(a.vendor)}</span></h2>
         <div class="list">
           <div class="row"><span class="dot ${a.installed ? (a.signedIn ? 'live' : 'warn') : 'off'}" style="margin:0 10px"></span><div class="main"><div class="title">${a.installed ? esc(a.version || 'installed') : 'Not installed'}</div><div class="sub">${a.installed ? (a.signedIn ? 'signed in' : 'not signed in') : esc(a.blurb)}</div></div></div>
@@ -1880,6 +1898,17 @@ async function loadAgents() {
           ${a.profiles ? a.profiles.map(p => `<div class="row"><span class="ico ${p.signedIn ? 'kelp' : ''}">${icon('user')}</span><div class="main"><div class="title">${esc(p.name)}<span class="tag dim">profile</span></div><div class="sub">${p.signedIn ? 'signed in' : 'not signed in'} · <span class="mono">${esc(shortPath(p.dir))}</span></div></div>${p.name !== 'default' ? `<button class="more" data-prof="${esc(p.name)}" aria-label="Profile actions">${icon('more_h')}</button>` : ''}</div>`).join('') + `<button class="row plain" data-new-profile><span class="ico">${icon('plus')}</span><div class="main"><div class="title" style="color:var(--brass)">New profile</div><div class="sub">Another account or organisation, or separate usage limits</div></div></button>` : ''}
         </div>`).join('');
     const body = $('#agents-body');
+    $('[data-move-logins]', body)?.addEventListener('click', async e => {
+        if (!(await confirmDialog({ title: 'Move AI logins to the agent user?', text: 'Claude (with every profile), Codex and Antigravity logins move from root to the agent user, so new agent shells run without root and keep the same accounts. A backup is made first; root agent shells must be ended. Undo is on this page.', action: 'Move logins', danger: false }))) return;
+        e.target.disabled = true;
+        try { const r = await api('/api/agent-user/move-logins', { method: 'POST', body: {} }); toast(`Moved: ${r.moved.join(', ')}`); } catch (ex) { toast(ex.message, true); }
+        loadAgents();
+    });
+    $('[data-undo-move]', body)?.addEventListener('click', async () => {
+        if (!(await confirmDialog({ title: 'Move logins back to root?', text: 'Agent-user shells must be ended first. New agents will run as root again.', action: 'Move back' }))) return;
+        try { await api('/api/agent-user/undo-move', { method: 'POST', body: {} }); toast('Logins are back with root'); } catch (ex) { toast(ex.message, true); }
+        loadAgents();
+    });
     $$('[data-login]', body).forEach(b => b.onclick = async () => {
         const key = b.dataset.login, a = list.find(x => x.key === key);
         const name = `${key}-home`;

@@ -59,7 +59,9 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = 'root', session = null, firstPrompt = null }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null }) {
+    // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
+    if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (session !== null && !['control', 'project'].includes(session)) throw httpError(400, 'session: control or project.');
@@ -77,8 +79,8 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         if (runAs === 'agent') { const a = agentUser.info(); fs.chownSync(base, a.uid, a.gid); fs.chownSync(dir, a.uid, a.gid); }
     } else {
-        // No folder given → the home folder (not the files root, which may be "/").
-        dir = !cwd || cwd === '.' ? config.home : resolveInRoot(cwd);
+        // No folder given → the home folder (not the files root, which may be "/"); the agent user's own home for it.
+        dir = !cwd || cwd === '.' ? (runAs === 'agent' && agentUser.info() ? agentUser.info().home : config.home) : resolveInRoot(cwd);
     }
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw httpError(400, 'That folder does not exist.');
 
@@ -103,26 +105,27 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         else {
             const g = secProfile.get(dir);
             if (g.root && !g.profile) { const e = httpError(428, `Choose a security level for ${g.name} first.`); e.needProfile = true; throw e; }
-            security = g.profile?.key || null;
-            sessionEnv = { PORTHOLE_SESSION: 'project', ...(g.profile ? { PORTHOLE_SECURITY_LEVEL: g.profile.key, PORTHOLE_SECURITY_FILE: g.securityFile, PORTHOLE_PROJECT_ROOT: g.root } : {}) };
+            security = g.profile?.key || (scratch ? 'throwaway' : null);
+            sessionEnv = { PORTHOLE_SESSION: 'project', ...(g.profile ? { PORTHOLE_SECURITY_LEVEL: g.profile.key, PORTHOLE_SECURITY_FILE: g.securityFile, PORTHOLE_PROJECT_ROOT: g.root } : scratch ? { PORTHOLE_SECURITY_LEVEL: 'throwaway', PORTHOLE_SECURITY_FILE: secProfile.docPath('throwaway') } : {}) };
         }
     }
 
     // Agent user: no root, its own API token, project folder made group-writable.
     let tokenHash = null, shellEnv = {};
     if (runAs === 'agent') {
-        if (kind === 'remote-control') throw httpError(400, 'Remote Control runs as root for now.');
         await agentUser.prepareFolder(dir);
         const token = crypto.randomBytes(24).toString('base64url');
         tokenHash = crypto.createHash('sha256').update(token).digest('hex');
         shellEnv = { PORTHOLE_TOKEN: token, PORTHOLE_RUN_AS: 'agent' };
-        if (agentEnv.CLAUDE_CONFIG_DIR) delete agentEnv.CLAUDE_CONFIG_DIR; // root profiles are not readable; stage 2 moves them
+        // A profile must live with the agent user (moved logins); root's profiles are unreadable to it.
+        if (agentEnv.CLAUDE_CONFIG_DIR && !agentEnv.CLAUDE_CONFIG_DIR.startsWith(agentUser.info().home + path.sep)) throw httpError(409, 'That Claude profile still lives with root. Move logins to the agent user (AI agents page) or run as root.');
         command = agentUser.wrap(command || '');
     }
     // Skip each agent's "trust this folder?" prompt for the folder the user picked here.
+    if (runAs === 'root' && agentEnv.CLAUDE_CONFIG_DIR && agentUser.loginsMoved()) throw httpError(409, 'Profiles live with the agent user now; run this agent as the agent user.');
     if (kind === 'agent' || kind === 'remote-control') {
         const a = runAs === 'agent' ? agentUser.info() : null;
-        trustFolder(kind === 'remote-control' ? 'claude' : agent, dir, { home: a ? a.home : config.home, configDir: runAs === 'agent' ? null : (agentEnv.CLAUDE_CONFIG_DIR || null), owner: a ? { uid: a.uid, gid: a.gid } : null });
+        trustFolder(kind === 'remote-control' ? 'claude' : agent, dir, { home: a ? a.home : config.home, configDir: agentEnv.CLAUDE_CONFIG_DIR || null, owner: a ? { uid: a.uid, gid: a.gid } : null });
     }
     // General-scope vault tokens become environment variables; project credentials: `vault get` from the project folder.
     const secrets = await envFor(dir, { project: 'none' });

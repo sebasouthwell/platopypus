@@ -315,6 +315,19 @@ if (r.body.available) {
     await call('/api/shells/smoke-agent', { method: 'DELETE' });
     await call(`/api/vault/${agVault}`, { method: 'DELETE' });
     sh('rm -rf /Projects/smoke-agent /tmp/elev-out /tmp/aj');
+    // Stage 2: move logins (fake credentials) to the agent user and back.
+    sh('mkdir -p /root/.claude /root/.agent-profiles/claude/alt && echo "{}" > /root/.claude/.credentials.json && echo "{}" > /root/.agent-profiles/claude/alt/.credentials.json');
+    r = await call('/api/agent-user/move-logins', { method: 'POST', body: {} });
+    check('logins move to the agent user', r.status === 200 && r.body.moved.includes('.claude') && r.body.moved.includes('.agent-profiles'), JSON.stringify(r.body).slice(0, 160));
+    check('moved logins belong to the agent user', sh('stat -c %U /home/agent/.claude/.credentials.json /home/agent/.agent-profiles/claude/alt/.credentials.json').trim().split('\n').every(u => u === 'agent') && !sh('ls -a /root').split('\n').includes('.claude'));
+    r = await call('/api/agents'); const cl = r.body.find(a => a.key === 'claude');
+    check('agents page sees the moved login and profile', cl?.signedIn === true && cl.profiles.some(p => p.name === 'alt' && p.signedIn), JSON.stringify(cl && { s: cl.signedIn, p: cl.profiles }));
+    r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-default', kind: 'agent', agent: 'claude', cwd: 'Projects', profile: 'alt' } });
+    check('agents default to the agent user once logins moved (with profiles)', r.status === 201 && r.body.runAs === 'agent', `${r.status} ${JSON.stringify(r.body).slice(0, 140)}`);
+    await call('/api/shells/smoke-default', { method: 'DELETE' }).catch(() => {});
+    r = await call('/api/agent-user/undo-move', { method: 'POST', body: {} });
+    check('undo puts the logins back with root', r.status === 200 && sh('stat -c %U /root/.claude/.credentials.json').trim() === 'root', JSON.stringify(r.body));
+    sh('rm -f /root/.claude/.credentials.json; rm -rf /root/.agent-profiles/claude/alt');
 } else check('agent user present in the test image', false, 'install.sh did not create it');
 
 // 6j. Session type and security level.

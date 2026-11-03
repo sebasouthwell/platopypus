@@ -33,7 +33,7 @@ in three stages. Each stage is safe to update into and to roll back from.
 
 Rollback: none needed; root shells work exactly as before.
 
-## Stage 2 — move logins and folders, one tap each (1.10.0)
+## Stage 2 — move logins and folders, one tap each (1.12.0: logins done)
 
 - **AI agents → Move logins to the agent user** copies `/root/.claude`, `/root/.claude.json`, `/root/.agent-profiles`,
   `/root/.codex`, `/root/.gemini` / `/root/.antigravity` and the gh config into `/home/agent`, fixes ownership and

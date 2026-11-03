@@ -98,3 +98,61 @@ export function isDescendant(pid, ancestor) {
     }
     return false;
 }
+
+// ---- stage 2: move AI logins from root to the agent user (docs/AGENT-USER.md) ----
+// Moved, never copied: two copies of one OAuth login refresh independently and can sign each other out.
+// mv, not fs.rename: overlay filesystems (containers) refuse directory renames across layers, and /root and /home
+// may be different filesystems.
+const mv = (from, to) => run('mv', ['-T', from, to], { timeout: 300_000 });
+const LOGIN_ITEMS = ['.claude', '.claude.json', '.agent-profiles', '.codex', '.gemini', '.antigravity'];
+const markerFile = () => path.join(config.state, 'logins-moved.json');
+export function loginsMoved() { try { return JSON.parse(fs.readFileSync(markerFile(), 'utf8')); } catch { return null; } }
+// The home whose AI logins Porthole uses: the agent user's once moved, otherwise root's.
+export function loginHome() { const a = info(); return a && loginsMoved() ? a.home : config.home; }
+
+export function rootLogins() { return LOGIN_ITEMS.filter(i => fs.existsSync(path.join(config.home, i))); }
+
+export async function moveLogins({ busy = [] } = {}) {
+    const a = info(); if (!a) throw httpError(412, 'The agent user does not exist on this box yet.');
+    if (loginsMoved()) throw httpError(409, 'Logins were already moved.');
+    if (busy.length) throw httpError(409, `End these root agent shells first (they hold the login open): ${busy.join(', ')}`);
+    const items = rootLogins();
+    if (!items.length) throw httpError(404, 'Root has no AI logins to move.');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const migrate = path.join(config.state, 'migrate');
+    fs.mkdirSync(migrate, { recursive: true, mode: 0o700 });
+    const backup = path.join(migrate, `logins-${stamp}.tar.gz`);
+    // Backup of both sides first (contains credentials: root-only file).
+    const args = ['-czf', backup, '-C', '/', ...items.map(i => path.relative('/', path.join(config.home, i))), ...LOGIN_ITEMS.filter(i => fs.existsSync(path.join(a.home, i))).map(i => path.relative('/', path.join(a.home, i)))];
+    await run('tar', args, { timeout: 300_000 });
+    fs.chmodSync(backup, 0o600);
+    const moved = [];
+    for (const i of items) {
+        const src = path.join(config.home, i), dst = path.join(a.home, i);
+        if (fs.existsSync(dst)) await mv(dst, `${dst}.porthole-pre-move-${stamp}`);
+        await mv(src, dst);
+        await run('chown', ['-R', `${a.uid}:${a.gid}`, dst], { timeout: 120_000 });
+        moved.push(i);
+    }
+    fs.writeFileSync(markerFile(), JSON.stringify({ at: Date.now(), stamp, items: moved, backup }, null, 2), { mode: 0o600 });
+    log('agentuser', `MOVED AI logins to ${a.user}: ${moved.join(', ')} (backup ${backup})`);
+    return { moved, backup };
+}
+
+export async function undoMoveLogins({ busy = [] } = {}) {
+    const a = info(); const m = loginsMoved();
+    if (!a || !m) throw httpError(409, 'Nothing to undo.');
+    if (busy.length) throw httpError(409, `End these agent-user shells first: ${busy.join(', ')}`);
+    for (const i of m.items) {
+        const src = path.join(a.home, i), dst = path.join(config.home, i);
+        if (!fs.existsSync(src)) continue;
+        if (fs.existsSync(dst)) await mv(dst, `${dst}.porthole-undo-${m.stamp}`);
+        await mv(src, dst);
+        await run('chown', ['-R', '0:0', dst], { timeout: 120_000 });
+        const pre = `${src}.porthole-pre-move-${m.stamp}`;
+        if (fs.existsSync(pre)) await mv(pre, src);
+    }
+    fs.rmSync(markerFile(), { force: true });
+    log('agentuser', `UNDID login move (${m.items.join(', ')})`);
+    return { restored: m.items };
+}

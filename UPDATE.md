@@ -211,6 +211,14 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   Claude to an unsigned-in user); the dialog warns when the agent has no login for the agent user; agent-user scratch folders
   live in the agent's home; `GET /api/agent-user` adds `signedIn`.
 
+- **1.12.0** — stage 2 of docs/AGENT-USER.md: AI agents → Move logins moves (not copies) root's `.claude`, `.claude.json`,
+  `.agent-profiles`, `.codex`, `.gemini`, `.antigravity` to the agent user after a tar backup in `~/.porthole/migrate/`; marker
+  `~/.porthole/logins-moved.json`; Undo moves them back. Once moved, agent and Remote Control shells default to the agent user
+  (plain shells stay root), profiles resolve under the agent's home, and `/api/agents` reports sign-in from there. New
+  routes `POST /api/agent-user/move-logins|undo-move`; `/api/agent-user` adds `loginsMoved`, `rootLogins`. New shell defaults to
+  the agent user for AI agents. Home "I wish for:" gains Temp (scratch folder, agent user, throwaway brief, first message, no
+  questions).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.

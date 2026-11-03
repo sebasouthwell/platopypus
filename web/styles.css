@@ -257,6 +257,7 @@ button.row:active { background: var(--hull-2); }
 .dialog-panel .live { color: var(--kelp); }
 .wish { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin: 14px 0 4px; padding: 12px; border: 1px solid var(--rail); border-radius: 14px; background: var(--hull); }
 .wish label { grid-column: 1 / -1; font-size: 13px; font-weight: 600; color: var(--brass); }
+.wish-btns { display: flex; gap: 6px; }
 .wish textarea { width: 100%; resize: none; min-height: 44px; font: inherit; }
 .elev-bar { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 60; display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(244,106,92,.5); background: #2a1416; color: var(--foam); font: inherit; font-size: 14px; text-align: left; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 .elev-bar svg.i { color: var(--flare); flex: none; }
