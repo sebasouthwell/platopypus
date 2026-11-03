@@ -189,7 +189,7 @@ export async function clone(repo, destRel) {
     const spec = String(repo || '').trim();
     await ensureGitConfig();
     if (!/^(https:\/\/github\.com\/[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*(\.git)?|git@github\.com:[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*(\.git)?|[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*)$/.test(spec)) throw httpError(400, 'Repository: owner/name or a GitHub URL.');
-    const parent = resolveInRoot(destRel || path.relative(config.root, path.join(config.home, 'Projects')));
+    const parent = resolveInRoot(destRel || path.relative(config.root, path.join(config.root, 'Projects')));
     await fsp.mkdir(parent, { recursive: true });
     const folder = safeName(spec.replace(/\.git$/, '').split(/[/:]/).pop());
     const target = path.join(parent, folder);

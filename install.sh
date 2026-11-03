@@ -98,6 +98,14 @@ git config --global --add safe.directory "*"
 git config --global credential.helper "!gh auth git-credential"
 ' || true
 
+# One projects folder. With the files root at / that is /Projects; keep ~/Projects as a link to it (1.9.1 merged the two).
+if [ "$PORTHOLE_USER" = root ]; then   # files root is / for a root install (see the systemd unit)
+    install -d -m 0755 /Projects
+    if [ ! -e "$HOME_DIR/Projects" ]; then ln -s /Projects "$HOME_DIR/Projects"
+    elif [ -d "$HOME_DIR/Projects" ] && [ ! -L "$HOME_DIR/Projects" ] && [ -z "$(ls -A "$HOME_DIR/Projects")" ]; then rmdir "$HOME_DIR/Projects" && ln -s /Projects "$HOME_DIR/Projects"
+    elif [ -d "$HOME_DIR/Projects" ] && [ ! -L "$HOME_DIR/Projects" ]; then echo "note: $HOME_DIR/Projects and /Projects both hold projects; merge them (Porthole lists /Projects)"; fi
+fi
+
 # ---------- agent user (docs/AGENT-USER.md stage 1): AI agents can run without root ----------
 AGENT_USER="${PORTHOLE_AGENT_USER:-agent}"
 getent group porthole-dev >/dev/null || groupadd --system porthole-dev

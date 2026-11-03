@@ -305,7 +305,7 @@ async function loadHome() {
     $('[data-new-project]').onclick = newProjectDialog;
 }
 $('#home-all-folders').addEventListener('click', () => { state.filesPath = ''; go('files'); });
-const projectsRel = () => join(homeRel, 'Projects');
+const projectsRel = () => 'Projects'; // one projects folder: <files root>/Projects (same as the server's projectsDir)
 $('#home-new').addEventListener('click', () => newShellDialog(state.filesPath || projectsRel()));
 $$('#tab-home .tile').forEach(t => t.addEventListener('click', async () => {
     const act = t.dataset.act;
@@ -756,6 +756,8 @@ function connect() {
     ws.onclose = ev => { if (termSheet.hidden || ev.code === 1008 || ev.code === 1000) return; term.write('\r\n\x1b[90m[reconnecting…]\x1b[0m\r\n'); reconnectTimer = setTimeout(connect, 1500); };
 }
 function sendInput(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data })); }
+// Stop: Ctrl+C to whatever runs in the terminal (interrupts an agent mid-task, or a running command).
+$('#composer-stop').addEventListener('click', () => { if (scrollMode) setScrollMode(false); sendInput(''); try { navigator.vibrate?.(30); } catch { /* ignore */ } toast('Sent Ctrl+C'); term?.focus(); });
 function sendResize() { if (!term || !fit) return; fit.fit(); if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); }
 function closeTerminal() {
     if (scrollMode) setScrollMode(false);
@@ -1493,7 +1495,7 @@ $('#github-clone').addEventListener('click', () => cloneDialog(''));
 function cloneDialog(repo) {
     const { panel, close } = openDialog(`<h2>${icon('cloud-down')}Clone a repository</h2>
         <div class="field"><label for="cl-repo">Repository</label><input id="cl-repo" type="text" class="mono" value="${esc(repo)}" placeholder="owner/name or https://github.com/…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-        <div class="field"><label for="cl-dest">Into folder</label><input id="cl-dest" type="text" class="mono" value="${esc(join(homeRel, 'Projects'))}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+        <div class="field"><label for="cl-dest">Into folder</label><input id="cl-dest" type="text" class="mono" value="${esc(projectsRel())}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
         <div class="buttons"><button class="primary" data-ok>Clone</button><button data-close>Cancel</button></div>`);
     const go_ = async () => {
         const btn = $('[data-ok]', panel); btn.disabled = true; btn.textContent = 'Cloning…';

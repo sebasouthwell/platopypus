@@ -191,6 +191,9 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   `POST /api/elevate/<id>/allow|deny`, `POST /api/shells/<name>/elevation`, `GET /api/agent-user`; CLI `elevate`.
   `services.json` items may carry `owner` (agent-user shell). Agent-user folders get group `porthole-dev` + setgid.
 
+- **1.9.1** — one projects folder: clone and New shell default to `<files root>/Projects` (was `~/Projects`, which on a
+  root-at-/ box made a second folder); install.sh links `~/Projects` → `/Projects` when it is missing or empty. Red Stop button beside Send in the terminal sends Ctrl+C; live service page shows the running dot in green. UI only.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; note state changes in this file.
