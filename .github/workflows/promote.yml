@@ -1,0 +1,72 @@
+# Promote: move the `stable` update channel (what boxes install by default) to a commit, only if CI passes on it,
+# then tag and release it. Run from the Actions tab, or: gh workflow run promote.yml -f ref=master
+name: Promote to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to promote
+        default: master
+        required: true
+      allow_rewind:
+        description: Allow stable to move to a commit that does not contain the current stable (rollback)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.r.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: r
+        run: |
+          SHA=$(git rev-parse --verify "origin/${{ inputs.ref }}^{commit}" 2>/dev/null || git rev-parse --verify "${{ inputs.ref }}^{commit}")
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Promoting ${{ inputs.ref }} = $SHA"
+
+  ci:
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  move:
+    needs: [resolve, ci]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move stable
+        run: |
+          set -euo pipefail
+          SHA=${{ needs.resolve.outputs.sha }}
+          git fetch -q origin stable || true
+          if git rev-parse -q --verify origin/stable >/dev/null; then
+            if ! git merge-base --is-ancestor origin/stable "$SHA"; then
+              if [ "${{ inputs.allow_rewind }}" != "true" ]; then echo "::error::$SHA does not contain the current stable ($(git rev-parse --short origin/stable)). Re-run with allow_rewind to roll stable back."; exit 1; fi
+              echo "Rolling stable back from $(git rev-parse --short origin/stable)"
+            fi
+          fi
+          git push -f origin "$SHA:refs/heads/stable"
+          echo "stable -> $(echo $SHA | cut -c1-7)" >> "$GITHUB_STEP_SUMMARY"
+
+  # A push made with the workflow token does not start release.yml by itself, so call it directly.
+  release:
+    needs: [resolve, move]
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      tested: true

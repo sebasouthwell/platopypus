@@ -1,0 +1,90 @@
+# CI: every push to master, every pull request, and (via workflow_call) every promotion to stable.
+#   static  - version/changelog contract, version bump, syntax of every JS and shell file, use-before-define lint
+#   e2e     - build the same Ubuntu image the box uses (install.sh), run the smoke suite in a throwaway container,
+#             then load the app in headless Chromium and render every tab
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to test
+        type: string
+        required: true
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ inputs.ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: server
+      - name: Release contract and syntax
+        run: |
+          SINCE=""
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ]; then SINCE="--since ${{ github.event.before }}"; fi
+          node scripts/ci-check.mjs $SINCE
+      - name: Lint (use-before-define across the browser module and the server)
+        run: npm run lint
+        working-directory: server
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Build the box image (install.sh on Ubuntu 24.04)
+        run: docker build -t porthole:ci .
+      - name: Start a throwaway Porthole
+        run: |
+          docker run -d --name porthole-ci --init -p 127.0.0.1:7332:7331 \
+            -e PORTHOLE_TOKEN=porthole-test -e PORTHOLE_ALLOW_PASSWORD_ONLY=1 \
+            -v "$PWD/test:/opt/test:ro" porthole:ci
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:7332/ && break; sleep 1; done
+          curl -fsS -o /dev/null http://127.0.0.1:7332/ || { docker logs porthole-ci; exit 1; }
+      - name: Smoke suite
+        run: |
+          set -o pipefail
+          docker exec -e TUNNEL=0 porthole-ci bash -lc 'cd /opt/porthole/server && node /opt/test/smoke.mjs' | tee smoke.txt
+          grep -q '^all checks passed' smoke.txt
+      - name: Browser probe (headless Chromium)
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i --no-audit --no-fund playwright@1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          cp "$GITHUB_WORKSPACE/test/browser.mjs" /tmp/pw/browser.mjs
+          BASE=http://127.0.0.1:7332 SHOT="$GITHUB_WORKSPACE/browser-probe.png" node /tmp/pw/browser.mjs
+      - name: Server log on failure
+        if: failure()
+        run: docker logs porthole-ci 2>&1 | tail -200
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-${{ inputs.ref || github.sha }}
+          path: |
+            smoke.txt
+            browser-probe.png
+          if-no-files-found: ignore
+          retention-days: 14

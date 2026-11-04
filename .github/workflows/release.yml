@@ -1,0 +1,69 @@
+# Release: whenever `stable` moves (promote.yml, or a manual push), the commit is tested again and, if green,
+# tagged v<server/package.json version> with a GitHub release whose notes come from UPDATE.md.
+# A version that is already tagged on a different commit fails the run: bump the version for every promotion.
+name: Release
+
+on:
+  push:
+    branches: [stable]
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tested:
+        description: The caller already ran CI on this commit
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    if: ${{ !inputs.tested }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+
+  publish:
+    needs: ci
+    if: ${{ always() && (needs.ci.result == 'success' || (needs.ci.result == 'skipped' && inputs.tested)) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          VERSION=$(node -p "require('./server/package.json').version")
+          TAG="v$VERSION"
+          git fetch --tags --force -q
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            if [ "$(git rev-list -n1 "$TAG")" = "$SHA" ]; then echo "$TAG already marks $SHA; nothing to do."; exit 0; fi
+            echo "::error::$TAG already exists on $(git rev-list -n1 "$TAG" | cut -c1-7); this commit ($(echo $SHA | cut -c1-7)) needs a new version in server/package.json and UPDATE.md."
+            exit 1
+          fi
+          PREV=$(git tag --list 'v*' --sort=-v:refname | head -1 || true)
+          node scripts/release-notes.mjs "$VERSION" "${PREV#v}" > notes.md
+          echo "--- notes ---"; cat notes.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Porthole $VERSION" "$SHA"
+          git push origin "$TAG"
+          gh release create "$TAG" --title "Porthole $VERSION" --notes-file notes.md --verify-tag --latest
+          echo "### Released $TAG" >> "$GITHUB_STEP_SUMMARY"
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
