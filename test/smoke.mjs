@@ -811,6 +811,49 @@ check('update status reports installed version', r.status === 200 && typeof r.bo
     sh('rm -rf /Projects/smoke-proto /Projects/smoke-proto-v2');
 }
 
+// 8x. .portholerun: plan shows every command and the account; running needs the planned hash; it runs as the
+//     project's account, keeps the file out of git, and stops/restarts like any registered server.
+{
+    const { execFileSync } = await import('node:child_process');
+    const fsr = await import('node:fs');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh(`rm -rf /Projects/smoke-run && mkdir -p /Projects/smoke-run/site && echo hello-run > /Projects/smoke-run/site/index.html && cd /Projects/smoke-run && git init -q . && cat > .portholerun <<'EOF'
+name: smoke-run
+before: echo prepared > before.txt
+run: python3 -m http.server 8152 --bind 127.0.0.1
+cwd: site
+port: 8152
+share: none
+env:
+  MODE: demo
+EOF`);
+    const F = '/Projects/smoke-run/.portholerun';
+    let r = await call(`/api/portholerun?abs=${encodeURIComponent(F)}`);
+    const pl = r.body;
+    check('.portholerun plan lists the commands, folder and account', r.status === 200 && !pl.errors.length && pl.commands.map(c => c.step).join(',') === 'before,run' && pl.runAs === 'service' && pl.account === 'ps-smoke-run' && pl.port === 8152 && pl.share === 'none' && pl.env.includes('MODE'), JSON.stringify(pl).slice(0, 240));
+    r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: 'not-the-plan' } });
+    check('running needs the hash of the plan that was shown', r.status === 409, `${r.status} ${r.body.error}`);
+    r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: pl.hash } });
+    check('.portholerun starts it', r.status === 200 && r.body.started && r.body.server?.slug === 'run-smoke-run', `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    let body = null; for (let i = 0; i < 25 && body === null; i++) { await sleep(300); try { body = await (await fetch('http://127.0.0.1:8152/')).text(); } catch { body = null; } }
+    check('it serves from its cwd after the before step', /hello-run/.test(body || '') && fsr.existsSync('/Projects/smoke-run/site/before.txt'), String(body).slice(0, 80));
+    const owner = sh(`ps -eo user:20,args | grep '[h]ttp.server 8152' | grep -v bash | awk '{print $1}' | sort -u`).trim();
+    check('it runs as the project account, not root', owner === 'ps-smoke-run', owner);
+    check('.portholerun is added to the project .gitignore', /\.portholerun/.test(fsr.readFileSync('/Projects/smoke-run/.gitignore', 'utf8')));
+    check('it appears as a registered server', (await call('/api/servers')).body.some(x => x.slug === 'run-smoke-run' && x.alive));
+    r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: (await call(`/api/portholerun?abs=${encodeURIComponent(F)}`)).body.hash, restart: true } });
+    check('.portholerun restarts', r.status === 200 && r.body.started, `${r.status} ${r.body.error || ''}`);
+    r = await call('/api/portholerun/stop', { method: 'POST', body: { abs: F } });
+    check('.portholerun stops', r.status === 200 && !(await call('/api/servers')).body.some(x => x.slug === 'run-smoke-run' && x.alive), `${r.status}`);
+    sh(`printf 'run: node x.js\nenv:\n  API_KEY: abc123\n' > ${F}`);
+    r = await call(`/api/portholerun?abs=${encodeURIComponent(F)}`);
+    check('a literal secret in .portholerun is refused', r.status === 200 && r.body.errors.some(e => /Vault/.test(e)), JSON.stringify(r.body.errors));
+    sh(`mkdir -p /root/elsewhere && echo 'run: id' > /root/elsewhere/.portholerun`);
+    r = await call(`/api/portholerun?abs=${encodeURIComponent('/root/elsewhere/.portholerun')}`);
+    check('.portholerun only runs inside /Projects', r.status === 403, String(r.status));
+    sh('rm -rf /Projects/smoke-run /root/elsewhere');
+}
+
 // 8z. Upgrade migrations: archive first, restore on failure, record on success, nothing pending afterwards.
 {
     const { execFileSync } = await import('node:child_process');

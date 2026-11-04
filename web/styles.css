@@ -263,6 +263,7 @@ button.row:active { background: var(--hull-2); }
 .split > .pill.caret { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 9px 8px; margin-left: 1px; }
 .split > .pill.caret svg.i { transform: rotate(90deg); }
 .wish textarea { width: 100%; resize: none; min-height: 44px; font: inherit; }
+@media (max-width: 560px) { .wish { grid-template-columns: 1fr; } .wish-btns { justify-content: flex-end; } }
 .elev-bar { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 60; display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(244,106,92,.5); background: #2a1416; color: var(--foam); font: inherit; font-size: 14px; text-align: left; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 .elev-bar svg.i { color: var(--flare); flex: none; }
 .helper-pane { background: var(--hull); border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
@@ -356,12 +357,121 @@ details.sys .bullet { background: var(--mist); opacity: .5; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabs-h) + var(--sab) + 24px); background: var(--foam); color: var(--sea); padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 500; z-index: 40; box-shadow: 0 6px 24px rgba(0,0,0,.4); max-width: calc(100% - 32px); }
 .toast.bad { background: var(--flare); color: #fff; }
 
+/* ---------- larger screens ----------
+   Phone (<720): bottom tabs, sheets and dialogs from the bottom — unchanged.
+   Tablet (720+): the tabs become an icon rail on the left; the hamburger opens it as a drawer with labels, the
+   More pages and the open shells. Terminal and editor sit beside the rail. Dialogs are centred.
+   Desktop (1024+): the full sidebar (collapsible to the rail), wider content with two-column Home and a shell grid,
+   dialogs as a side panel on the right (small confirmations stay centred), on-screen keys behind a Keys toggle. */
+.nav-head, .nav-group, .nav-backdrop, .desk-only { display: none; }
+.tabs > button > span { display: block; }
+
 @media (min-width: 720px) {
-  .tab { max-width: 720px; margin: 0 auto; width: 100%; }
-  .tab.page { left: 50%; right: auto; width: 100%; max-width: 720px; transform: translateX(-50%); }
-  .tabs { left: 50%; right: auto; transform: translateX(-50%); width: 480px; }
+  :root { --side: 76px; }
+  #app { padding-left: var(--side); }
+  .tabs {
+    left: 0; right: auto; top: 0; bottom: 0; transform: none; width: var(--side); height: auto;
+    display: flex; flex-direction: column; gap: 2px; padding: calc(12px + var(--sat)) 12px 16px;
+    border: 0; border-right: 1px solid var(--rail); border-radius: 0; box-shadow: none;
+    background: rgba(12, 20, 35, .97); backdrop-filter: none; -webkit-backdrop-filter: none; overflow-x: clip; overflow-y: auto; scrollbar-width: none; z-index: 25;
+  }
+  @media (prefers-reduced-motion: no-preference) { .tabs { transition: width .2s ease, box-shadow .2s ease; } }
+  .nav-head { display: flex; align-items: center; gap: 10px; min-height: 46px; margin-bottom: 12px; flex: none; }
+  .nav-burger { width: 52px; height: 46px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; color: var(--foam); flex: none; }
+  .nav-head .ring.small, .nav-brand { display: none; }
+  .nav-brand { font-weight: 600; font-size: 16px; letter-spacing: -.01em; white-space: nowrap; }
+  .tabs > button, .nav-group button {
+    flex: none; width: 100%; height: 46px; padding: 0 15px; border-radius: 12px; display: flex; flex-direction: row;
+    align-items: center; justify-content: flex-start; gap: 14px; font-size: 14.5px; font-weight: 500; color: var(--mist); white-space: nowrap;
+  }
+  .tabs > button > span, .nav-group button > span:not(.dot) { display: none; overflow: hidden; text-overflow: ellipsis; }
+  .tabs button.active { color: var(--brass); background: rgba(240,184,64,.14); }
+  .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 24; background: rgba(3,8,16,.5); }
+  .nav-backdrop[hidden] { display: none; }
+
+  /* Expanded: the desktop sidebar, or the drawer opened from the rail on a tablet. */
+  body.nav-expanded .tabs { width: 248px; }
+  body.navopen .tabs { box-shadow: 18px 0 50px rgba(0,0,0,.5); }
+  body.nav-expanded .nav-head .ring.small, body.nav-expanded .nav-brand { display: inline-flex; }
+  body.nav-expanded .nav-burger { width: 46px; }
+  body.nav-expanded .tabs > button > span, body.nav-expanded .nav-group button > span:not(.dot) { display: block; }
+  body.nav-expanded .nav-group { display: block; margin-top: 18px; }
+  body.nav-expanded .nav-group[hidden] { display: none; }
+  .nav-label { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding: 0 8px 6px 15px; display: flex; align-items: center; white-space: nowrap; }
+  .nav-add { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--brass); }
+  .nav-add svg.i { width: 15px; height: 15px; }
+  .nav-group button { height: 38px; font-size: 13.5px; gap: 12px; }
+  .nav-group button svg.i { width: 18px; height: 18px; }
+  .nav-shells button { font-family: var(--mono); font-size: 12.5px; }
+  .nav-shells button .dot { margin: 0 5px; }
+  .nav-group button.active { color: var(--foam); background: var(--hull-2); }
+
+  /* Content beside the rail. */
+  .tab { padding: 8px clamp(20px, 3.2vw, 44px) 48px; }
+  .tab > * { max-width: var(--content, 760px); margin-left: auto; margin-right: auto; }
+  .tab.page { left: var(--side); }
+  .sheet { left: var(--side); }
+  .toast { left: calc(var(--side) + (100% - var(--side)) / 2); bottom: 28px; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+  .expand { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
   .dialog { align-items: center; }
-  .dialog-panel { border-radius: 22px; }
+  .dialog-panel { border-radius: 22px; padding: 22px 22px 20px; max-height: 86vh; }
+  .desk-only { display: inline-flex; }
+  /* Real keyboards: the on-screen key bar starts collapsed (Keys in the terminal header brings it back). */
+  @media (pointer: fine) { body:not(.keys-on) #term-sheet .keys { display: none; } }
+  @media (pointer: coarse) { .desk-only { display: none; } }
+  /* The sidebar lists the open shells, so the chip row above the terminal is only needed on the rail. */
+  body.nav-expanded:not(.navopen) #term-chips { display: none; }
+  .sheet .topbar { padding: 10px 16px 8px; }
+  .term-wrap, .editor { margin: 0 16px; }
+  .keys, .quick { padding-left: 16px; padding-right: 16px; }
+  .composer { padding: 10px 16px 14px; }
+}
+
+@media (min-width: 1024px) {
+  body:not(.rail) { --side: 248px; }
+  .tab { padding-top: 16px; }
+  #tab-home { --content: 1180px; }
+  #tab-shells { --content: 1180px; }
+  #tab-services, #tab-files { --content: 1000px; }
+  #tab-more, .tab.page { --content: 880px; }
+  h1 { font-size: 32px; margin: 4px 0 16px; }
+  .topbar .brand { display: none; }
+  #tab-home .topbar { justify-content: flex-end; }
+
+  /* Home: what to do now on the left, where things are on the right. */
+  .home-cols { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, 1fr); gap: 28px; align-items: start; }
+  .home-side > .section:first-child { margin-top: 2px; }
+  .home-side .tiles { grid-template-columns: repeat(2, 1fr); }
+  .home-side .tile { flex-direction: row; justify-content: flex-start; text-align: left; padding: 12px; font-size: 13.5px; gap: 12px; }
+  .wish { margin-top: 16px; }
+  .wish textarea { min-height: 64px; }
+  .pickup pre { max-height: 150px; font-size: 12.5px; }
+
+  /* Shells: one card per folder in a grid, with a longer look at each screen. */
+  #shell-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 6px 22px; align-items: start; }
+  .shell-preview { max-height: 132px; font-size: 12px; }
+
+  /* Dialogs open as a panel on the right, so the page they came from stays in view. */
+  .dialog:not(.small) { justify-content: flex-end; align-items: stretch; }
+  .dialog:not(.small) .dialog-backdrop { background: rgba(3,8,16,.38); }
+  .dialog:not(.small) .dialog-panel { width: min(540px, 46vw); max-height: none; height: 100%; border-radius: 22px 0 0 22px; border-right: 0; padding: calc(24px + var(--sat)) 26px 24px; box-shadow: -18px 0 60px rgba(0,0,0,.45); }
+  @media (prefers-reduced-motion: no-preference) {
+    .dialog:not(.small) .dialog-panel { animation: drawer .22s ease-out; }
+    @keyframes drawer { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  }
+  .dialog.small .dialog-panel { width: min(440px, 92vw); }
+}
+
+/* Pointers that hover: show what is clickable. */
+@media (hover: hover) and (pointer: fine) {
+  button.row:hover, a.row:hover, .shell-row:hover { background: var(--hull-2); }
+  .tile:hover { background: var(--hull-2); border-color: #33476a; }
+  .pill:hover, .chip:hover { filter: brightness(1.12); }
+  .tabs button:not(.active):hover, .nav-burger:hover, .nav-add:hover { color: var(--foam); background: var(--hull); }
+  .row .more:hover { color: var(--foam); background: var(--hull-2); }
+  .dialog-panel .menu button:hover { background: var(--hull-2); border-radius: 10px; }
+  .crumbs button:hover { color: var(--foam); }
 }
 
 /* live service: root warning, run-as tag, action input form */
@@ -397,3 +507,9 @@ details.group .list { margin: 0; border: 0; border-radius: 0; }
 .link-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--kelp); min-width: 0; }
 .link-line svg.i { width: 12px; height: 12px; flex: none; }
 .link-line a { color: var(--kelp); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A folder that has a .portholerun file: the run card at the top of its file list. */
+.row.run-card { background: linear-gradient(90deg, rgba(63,211,154,.10), rgba(63,211,154,0) 70%); }
+.row.run-card .title { color: var(--kelp); }
+.row.run-card .chev { color: var(--kelp); }
+.warn { color: var(--brass); }

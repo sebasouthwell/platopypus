@@ -223,7 +223,7 @@ export function revokeRoot(project, key) {
     return { ok: true };
 }
 // The project's own account, with access to this project folder only (ACL); agent shells keep porthole-dev access.
-async function prepareAccount(p) {
+export async function prepareAccount(p) {
     try { await agentUser.prepareFolder(p.root); } catch (e) { log('live', `could not make ${p.root} group-writable: ${e.message}`); }
     await svcUser.retireShared();
     const a = await svcUser.ensure(p.name, p.root);

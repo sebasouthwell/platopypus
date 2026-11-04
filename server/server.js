@@ -33,6 +33,7 @@ import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
+import * as portholerun from './lib/portholerun.js';
 import * as agentUser from './lib/agentuser.js';
 import * as elevate from './lib/elevate.js';
 import * as profile from './lib/profile.js';
@@ -518,6 +519,9 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
 
         // Project security profile (level chosen on the phone; brief injected into agent sessions)
+        if (p === '/api/portholerun' && method === 'GET') return send(res, 200, await portholerun.plan(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '')));
+        if (p === '/api/portholerun/run' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await portholerun.run(b.abs || files.resolveInRoot(b.path || ''), String(b.hash || ''), { restart: !!b.restart })); }
+        if (p === '/api/portholerun/stop' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await portholerun.stop(b.abs || files.resolveInRoot(b.path || ''))); }
         if (p === '/api/projects/upgrade' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 201, await upgrade.upgrade({ from: b.abs || files.resolveInRoot(b.path || ''), name: b.name, level: b.level, audience: b.audience, tier: b.tier })); }
         if (p === '/api/projects/links' && method === 'GET') return send(res, 200, upgrade.linksFor(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')) || {});
         if (p === '/api/projects/profile' && method === 'GET') { const abs = url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.'); return send(res, 200, { ...profile.get(abs), levels: profile.LEVELS }); }

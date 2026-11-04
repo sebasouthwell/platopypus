@@ -89,6 +89,7 @@ jobs:
           path: |
             smoke.txt
             browser-probe.png
+            browser-probe-desktop.png
           if-no-files-found: ignore
           retention-days: 14
 

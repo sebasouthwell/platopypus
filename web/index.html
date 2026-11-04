@@ -72,6 +72,7 @@
       </div>
     </header>
     <h1>Home</h1>
+    <div class="home-cols"><div class="home-main">
     <div class="stats" id="home-stats"></div>
     <form class="wish" id="home-wish">
       <label for="wish-text">I wish for:</label>
@@ -79,6 +80,7 @@
       <div class="wish-btns"><span class="split"><button type="button" class="pill" id="wish-now" title="Do it now: temporary folder, no root, no questions"><svg class="i"><use href="/sprite.svg#i-history"/></svg><span id="wish-now-label">Temp</span></button><button type="button" class="pill caret" id="wish-now-menu" aria-label="Temp options"><svg class="i"><use href="/sprite.svg#i-chevron"/></svg></button></span><button type="submit" class="pill accent"><svg class="i"><use href="/sprite.svg#i-send"/></svg>Start</button></div>
     </form>
     <div id="home-pickup"></div>
+    </div><div class="home-side">
     <h2 class="section">Projects<button class="act" id="home-all-folders">All folders</button></h2>
     <div id="home-projects" class="list"></div>
     <h2 class="section">Quick actions</h2>
@@ -88,6 +90,7 @@
       <button class="tile" data-act="scratch"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-zap"/></svg></span>Quick task</button>
       <button class="tile" data-act="shell"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</button>
     </div>
+    </div></div>
   </section>
 
   <!-- SHELLS -->
@@ -202,12 +205,29 @@
   </section>
 
   <nav class="tabs" aria-label="Sections">
-    <button data-go="home" class="active"><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</button>
-    <button data-go="shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</button>
-    <button data-go="services"><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</button>
-    <button data-go="files"><svg class="i"><use href="/sprite.svg#i-files"/></svg>Files</button>
-    <button data-go="more"><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</button>
+    <div class="nav-head">
+      <button class="nav-burger" id="nav-burger" aria-label="Collapse the menu" aria-expanded="true" title="Menu"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <span class="ring small"><span></span></span><span class="nav-brand">porthole</span>
+    </div>
+    <button data-go="home" class="active" title="Home"><svg class="i"><use href="/sprite.svg#i-home"/></svg><span>Home</span></button>
+    <button data-go="shells" title="Shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg><span>Shells</span></button>
+    <button data-go="services" title="Services"><svg class="i"><use href="/sprite.svg#i-services"/></svg><span>Services</span></button>
+    <button data-go="files" title="Files"><svg class="i"><use href="/sprite.svg#i-files"/></svg><span>Files</span></button>
+    <button data-go="more" title="More"><svg class="i"><use href="/sprite.svg#i-more"/></svg><span>More</span></button>
+    <div class="nav-group" id="nav-pages">
+      <div class="nav-label">Box</div>
+      <button data-nav-page="vault" title="Vault"><svg class="i"><use href="/sprite.svg#i-key"/></svg><span>Vault</span></button>
+      <button data-nav-page="creds" title="Shared credentials"><svg class="i"><use href="/sprite.svg#i-link"/></svg><span>Shared credentials</span></button>
+      <button data-nav-page="security" title="Security"><svg class="i"><use href="/sprite.svg#i-shield"/></svg><span>Security</span></button>
+      <button data-nav-page="agents" title="AI agents"><svg class="i"><use href="/sprite.svg#i-claude"/></svg><span>AI agents</span></button>
+      <button data-nav-page="github" title="GitHub"><svg class="i"><use href="/sprite.svg#i-branch"/></svg><span>GitHub</span></button>
+    </div>
+    <div class="nav-group nav-shells" id="nav-shells-wrap" hidden>
+      <div class="nav-label">Open shells<button class="nav-add" id="nav-shell-new" aria-label="New shell" title="New shell"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button></div>
+      <div id="nav-shells"></div>
+    </div>
   </nav>
+  <div class="nav-backdrop" id="nav-backdrop" hidden></div>
 </main>
 
 <!-- Terminal sheet -->
@@ -215,6 +235,7 @@
   <header class="topbar compact">
     <button class="text-btn back" id="term-back"><svg class="i"><use href="/sprite.svg#i-back"/></svg><span id="term-back-label">Shells</span></button>
     <div class="term-head"><div id="term-title"></div><div id="term-subtitle" class="sub"></div></div>
+    <button class="pill desk-only" id="term-keys-toggle" aria-pressed="false" title="Show the on-screen keys"><svg class="i"><use href="/sprite.svg#i-keyboard"/></svg>Keys</button>
     <button class="pill danger" id="term-kill">End</button>
   </header>
   <div class="chips" id="term-chips"></div>

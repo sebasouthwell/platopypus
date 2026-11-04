@@ -93,6 +93,28 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 | **Dev and live** | Live runs from its own checkout under `~/live/<project>` pinned to a commit; development continues in `~/Projects/<project>`. When dev is ahead, the service page says so and offers Update. A second agent can be started in the live checkout for hot fixes. |
 | **Update strategy** | Per service, asked on the phone the first time: **full** (stop, replace the checkout, reset data, start, for stateless apps), **preserve-data** (stop, update code, keep data, run the migration action if there is one, start), **patch** (run the service's `patch` command, no reset). A backup before updating is offered when the project has data. |
 
+## Quick runs: `.portholerun`
+
+Lighter than PORTHOLE.md, for "start this the way it usually runs" without an agent. One file in a project folder:
+
+```yaml
+run: npm start              # required
+port: 3000                  # what it listens on
+before: npm ci              # optional, runs first in the same session
+cwd: web                    # optional folder inside this one
+env: { NODE_ENV: production }   # plain settings only
+needs: [STRIPE_KEY]         # Vault names, project scope then general
+share: quick                # quick (default with a port) | domain (with hostname) | none
+hostname: app.example.com
+open: /?k=abc               # added to the link the Open button uses
+run_as: service             # service (project account, default) | agent | root
+```
+
+Files shows a **Run** card at the top of that folder (and the file itself is always listed, even with hidden files
+off). Tapping it shows every command, the folder, the account, what gets shared and which Vault names are needed;
+Run only proceeds with the hash of the plan you saw, so an edit in between is refused. It runs as the registered
+server `run-<name>` (stop, restart, logs in Services), and `.portholerun` is added to the project's `.gitignore`.
+
 ## Rules for agents
 
 - Create or update `PORTHOLE.md` whenever you add a service, change how it starts, or add a command an operator will

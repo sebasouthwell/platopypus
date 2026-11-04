@@ -105,9 +105,9 @@ function showCopySheet(text, title = 'Copy') {
     $('[data-retry]', panel).onclick = async () => { selectAll(); try { if (document.execCommand('copy')) { toast('Copied'); $('.dialog-backdrop').click(); } else toast('Hold the text and choose Copy', true); } catch { toast('Hold the text and choose Copy', true); } };
 }
 
-function openDialog(html) {
+function openDialog(html, { size = null } = {}) {
     const dlg = $('#dialog'), panel = $('.dialog-panel', dlg);
-    panel.innerHTML = html; dlg.hidden = false;
+    panel.innerHTML = html; dlg.hidden = false; dlg.classList.toggle('small', size === 'small');
     const close = () => { dlg.hidden = true; panel.innerHTML = ''; };
     $('.dialog-backdrop', dlg).onclick = close;
     $$('[data-close]', panel).forEach(b => (b.onclick = close));
@@ -117,7 +117,7 @@ function openDialog(html) {
 }
 function confirmDialog({ title, text, action, danger = true }) {
     return new Promise(resolve => {
-        const { panel, close } = openDialog(`<h2>${esc(title)}</h2><p class="muted">${esc(text)}</p><div class="buttons"><button class="${danger ? 'danger' : 'primary'}" data-ok>${esc(action)}</button><button data-close>Cancel</button></div>`);
+        const { panel, close } = openDialog(`<h2>${esc(title)}</h2><p class="muted">${esc(text)}</p><div class="buttons"><button class="${danger ? 'danger' : 'primary'}" data-ok>${esc(action)}</button><button data-close>Cancel</button></div>`, { size: 'small' });
         $('[data-ok]', panel).onclick = () => { close(); resolve(true); };
         $('.dialog-backdrop').addEventListener('click', () => resolve(false), { once: true });
         $('[data-close]', panel).addEventListener('click', () => resolve(false), { once: true });
@@ -225,23 +225,73 @@ const state = {
     expanded: null,
 };
 
-$$('.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
+$$('.tabs [data-go]').forEach(b => b.addEventListener('click', () => { if (leaveSheets()) return; navOverlay(false); go(b.dataset.go); }));
+$$('.tabs [data-nav-page]').forEach(b => b.addEventListener('click', () => { if (leaveSheets()) return; navOverlay(false); go('more'); push(b.dataset.navPage); }));
 function go(tab) {
     state.tab = tab; localStorage.setItem('porthole.tab', tab);
-    $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.go === tab));
+    $$('.tabs [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === tab));
+    $$('.tabs [data-nav-page]').forEach(b => b.classList.remove('active'));
     $$('.tab:not(.page)').forEach(t => (t.hidden = t.dataset.tab !== tab));
     $$('.tab.page').forEach(p => (p.hidden = true));
     refresh();
 }
 function push(page) {
     $$('.tab.page').forEach(p => (p.hidden = p.id !== `page-${page}`));
+    $$('.tabs [data-nav-page]').forEach(b => b.classList.toggle('active', b.dataset.navPage === page));
     if (page === 'vault') loadVault().catch(e => toast(e.message, true));
     if (page === 'creds') loadCredsPage().catch(e => toast(e.message, true));
     if (page === 'security') loadSecurity().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
-$$('[data-back]').forEach(b => b.addEventListener('click', () => { $$('.tab.page').forEach(p => (p.hidden = true)); refresh(); }));
+$$('[data-back]').forEach(b => b.addEventListener('click', () => { $$('.tab.page').forEach(p => (p.hidden = true)); $$('.tabs [data-nav-page]').forEach(x => x.classList.remove('active')); refresh(); }));
+
+// ---------- desktop layout ----------
+// Phone: bottom tabs. Tablet (720+): an icon rail; the hamburger opens it as a drawer with labels. Desktop (1024+):
+// a full sidebar with the More pages and the open shells; the hamburger collapses it to the rail (remembered).
+const wideMq = matchMedia('(min-width: 1024px)'), railMq = matchMedia('(min-width: 720px)');
+const isWide = () => wideMq.matches;
+document.body.classList.toggle('rail', localStorage.getItem('porthole.rail') === '1');
+document.body.classList.toggle('keys-on', localStorage.getItem('porthole.keys') === '1');
+const relayout = () => setTimeout(() => window.dispatchEvent(new Event('resize')), 230);   // the terminal refits
+function syncNav() { document.body.classList.toggle('nav-expanded', (isWide() && !document.body.classList.contains('rail')) || document.body.classList.contains('navopen')); }
+function navOverlay(open) {
+    document.body.classList.toggle('navopen', !!open); syncNav();
+    $('#nav-backdrop').hidden = !open;
+    $('#nav-burger').setAttribute('aria-expanded', String(isWide() ? !document.body.classList.contains('rail') : !!open));
+}
+$('#nav-burger').addEventListener('click', () => {
+    if (isWide()) { const r = !document.body.classList.contains('rail'); document.body.classList.toggle('rail', r); localStorage.setItem('porthole.rail', r ? '1' : '0'); $('#nav-burger').setAttribute('aria-expanded', String(!r)); syncNav(); relayout(); }
+    else navOverlay(!document.body.classList.contains('navopen'));
+});
+$('#nav-backdrop').addEventListener('click', () => navOverlay(false));
+syncNav();
+wideMq.addEventListener('change', () => { navOverlay(false); relayout(); });
+railMq.addEventListener('change', relayout);
+$('#nav-shell-new').addEventListener('click', () => { navOverlay(false); newShellDialog(state.filesPath || projectsRel()); });
+// Leaving the terminal or editor when the sidebar is used. Returns true when navigation should wait (unsaved edits).
+function leaveSheets() {
+    if (!editorSheet.hidden) { $('#editor-back').click(); return !editorSheet.hidden; }
+    if (!termSheet.hidden) closeTerminal();
+    return false;
+}
+// Open shells in the sidebar: one click to switch, the current one marked.
+function renderNavShells(list) {
+    const wrap = $('#nav-shells-wrap'); if (!wrap) return;
+    wrap.hidden = !list.length;
+    const cur = termSheet.hidden ? null : termName;
+    $('#nav-shells').innerHTML = list.map(x => `<button data-nav-shell="${esc(x.name)}" class="${x.name === cur ? 'active' : ''}" title="${esc(x.name)} · ${esc(shortPath(x.cwd))}"><span class="dot ${x.name === cur || x.attached ? 'live' : ''}"></span><span>${esc(x.name)}</span></button>`).join('');
+    $$('#nav-shells [data-nav-shell]').forEach(b => b.onclick = () => { navOverlay(false); if (!editorSheet.hidden && leaveSheets()) return; if (b.dataset.navShell !== termName || termSheet.hidden) openTerminal(b.dataset.navShell, state.tab === 'home' ? 'Home' : 'Shells'); });
+}
+setInterval(() => { if (railMq.matches && !$('#app').hidden && document.visibilityState === 'visible') api('/api/shells').then(renderNavShells).catch(() => {}); }, 20_000);
+$('#term-keys-toggle').addEventListener('click', () => { const on = !document.body.classList.contains('keys-on'); document.body.classList.toggle('keys-on', on); localStorage.setItem('porthole.keys', on ? '1' : '0'); $('#term-keys-toggle').setAttribute('aria-pressed', String(on)); relayout(); });
+$('#term-keys-toggle').setAttribute('aria-pressed', String(document.body.classList.contains('keys-on')));
+// Escape closes a dialog or the drawer menu (keyboards).
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('#dialog').hidden) { $('#dialog .dialog-backdrop').click(); e.preventDefault(); }
+    else if (document.body.classList.contains('navopen')) navOverlay(false);
+});
 $$('[data-page]').forEach(b => b.addEventListener('click', () => push(b.dataset.page)));
 
 async function refresh() {
@@ -360,13 +410,13 @@ $('#home-search').addEventListener('click', async () => {
 
 async function loadShells() {
     const shells = await api('/api/shells');
-    state.shells = shells;
+    state.shells = shells; renderNavShells(shells);
     $('#shell-empty').hidden = shells.length > 0;
     const groups = new Map();
     for (const s of shells) { const k = s.cwd; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
-    $('#shell-groups').innerHTML = [...groups.entries()].map(([cwd, list]) => `
+    $('#shell-groups').innerHTML = [...groups.entries()].map(([cwd, list]) => `<div class="shell-group">
         <div class="group-title">${icon('folder')}${esc(shortPath(cwd))}</div>
-        <div class="list">${list.map(shellRow).join('')}</div>`).join('');
+        <div class="list">${list.map(shellRow).join('')}</div></div>`).join('');
     $$('#shell-groups .shell-row').forEach(row => row.addEventListener('click', () => openTerminal(row.dataset.name, 'Shells')));
 }
 function shellRow(s) {
@@ -583,6 +633,48 @@ async function upgradeRepoDialog(rel, name) {
             newShellDialog(r.folder, 'agent', `upgrade-${r.name}`.slice(0, 40), { firstPrompt: r.prompt });
         } catch (ex) { toast(ex.message, true); ok.disabled = false; ok.textContent = 'Plan upgraded project'; }
     };
+}
+
+// .portholerun: show exactly what will run (as whom, where, what gets shared, which Vault names), then run it.
+async function portholerunDialog(rel) {
+    let pl; try { pl = await api(`/api/portholerun?path=${encodeURIComponent(rel)}`); } catch (ex) { return toast(ex.message, true); }
+    const who = pl.runAs === 'root' ? '<span class="tag danger">root</span> full control of the box' : pl.runAs === 'agent' ? `the agent user <span class="mono">${esc(pl.account)}</span>` : `<span class="mono">${esc(pl.account)}</span>, this project's own account (no logins, no Porthole access)`;
+    const share = !pl.port ? 'nothing (no port)' : pl.share === 'none' ? `nothing; stays local on :${pl.port}` : pl.share === 'domain' ? `<span class="mono">${esc(pl.hostname || '')}</span> (your domain, public)` : `a public quick link to :${pl.port} (closes after 4 h)`;
+    const missing = pl.needs.filter(n => !n.present).map(n => n.name);
+    const blocked = pl.errors.length || missing.length;
+    const { panel, close } = openDialog(`<h2>${icon('rocket')}Run ${esc(pl.name)}</h2>
+        <p class="muted"><span class="mono">${esc(showPath(pl.folder))}/.portholerun</span>${pl.running ? ' · <span class="live">● running</span>' : ''}</p>
+        ${pl.errors.length ? `<div class="banner danger">${pl.errors.map(esc).join('<br>')}</div>` : `
+        <div class="${pl.runAs === 'root' ? 'banner danger' : 'note'}" style="margin:0 0 10px">This will run these commands in <span class="mono">${esc(showPath(pl.cwd || pl.folder))}</span> as ${who}:</div>
+        <pre style="white-space:pre-wrap;max-height:30vh">${pl.commands.map(c => `${c.step === 'before' ? '# first\n' : ''}${esc(c.cmd)}`).join('\n')}</pre>
+        <div class="list" style="margin-top:10px">
+          <div class="row plain"><span class="ico ${pl.share === 'none' || !pl.port ? 'dim' : 'kelp'}">${icon('link')}</span><div class="main"><div class="title">Shares</div><div class="sub" style="white-space:normal">${share}</div></div></div>
+          ${pl.needs.length ? `<div class="row plain"><span class="ico brass">${icon('key')}</span><div class="main"><div class="title">Vault</div><div class="sub" style="white-space:normal">${pl.needs.map(n => `<span class="mono">${esc(n.name)}</span>${n.present ? '' : ' <span class="warn">missing</span>'}`).join(', ')}</div></div></div>` : ''}
+          ${pl.env.length ? `<div class="row plain"><span class="ico">${icon('settings')}</span><div class="main"><div class="title">Settings</div><div class="sub mono" style="white-space:normal">${pl.env.map(esc).join(' ')}</div></div></div>` : ''}
+        </div>
+        ${missing.length ? `<p class="sub warn" style="margin-top:8px">Add ${missing.map(esc).join(', ')} to the Vault first.</p>` : ''}
+        ${pl.gitignored ? '' : '<p class="sub" style="margin-top:8px">Porthole adds <span class="mono">.portholerun</span> to the project\'s .gitignore when it runs.</p>'}
+        ${pl.link?.url ? `<p class="sub" style="margin-top:8px">Link: <a href="${esc(pl.link.url + (pl.open || ''))}" target="_blank" rel="noopener">${esc(pl.link.url.replace(/^https:\/\//, ''))}</a></p>` : ''}`}
+        <div class="buttons">
+          ${blocked ? '' : pl.running ? `<button class="primary" data-pr="restart">${icon('restart')}Restart</button><button data-pr="stop">${icon('stop')}Stop</button>` : `<button class="${pl.runAs === 'root' ? 'danger' : 'primary'}" data-pr="run">${icon('play')}Run${pl.runAs === 'root' ? ' as root' : ''}</button>`}
+          <button data-pr="edit">${icon('pencil')}Edit .portholerun</button><button data-close>Close</button></div>`);
+    $$('[data-pr]', panel).forEach(b => b.onclick = async () => {
+        const a = b.dataset.pr;
+        if (a === 'edit') { close(); return openEditor(rel, '.portholerun'); }
+        b.disabled = true;
+        try {
+            if (a === 'stop') { await api('/api/portholerun/stop', { method: 'POST', body: { path: rel } }); close(); toast(`${pl.name} stopped`); return; }
+            b.textContent = a === 'restart' ? 'Restarting…' : 'Starting…';
+            const r = await api('/api/portholerun/run', { method: 'POST', body: { path: rel, hash: pl.hash, restart: a === 'restart' } });
+            close();
+            if (r.link?.url) {
+                const d = openDialog(`<h2>${icon('rocket')}${esc(r.name)} is ${a === 'restart' ? 'restarted' : 'running'}</h2><p class="muted">${r.port ? `:${r.port} · ` : ''}as ${esc(r.account)}${r.addedToGitignore ? ' · added to .gitignore' : ''}</p>
+                    <div class="buttons"><a class="primary" href="${esc(r.link.url)}" target="_blank" rel="noopener">${icon('external')}Open ${esc(r.link.url.replace(/^https:\/\//, '').split('/')[0])}</a><button data-copy-link>${icon('copy')}Copy link</button><button data-go-svc>${icon('services')}Services</button><button data-close>Close</button></div>`, { size: 'small' });
+                $('[data-copy-link]', d.panel).onclick = () => copyText(r.link.url, 'Link copied');
+                $('[data-go-svc]', d.panel).onclick = () => { d.close(); go('services'); };
+            } else toast(r.link?.error ? `Running; the link failed: ${r.link.error}` : `${r.name} is running${r.port ? ` on :${r.port}` : ''}`, !!r.link?.error);
+        } catch (ex) { toast(ex.message, true); b.disabled = false; }
+    });
 }
 
 function newProfileDialog(done) {
@@ -835,7 +927,7 @@ async function openTerminal(name, backLabel = 'Shells') {
     seenCreds = []; credTail = ''; renderCreds();
     api(`/api/shells/${encodeURIComponent(name)}/creds`).then(list => { if (list.length) { seenCreds = list; renderCreds(); } }).catch(() => {});
     api(`/api/shells/${encodeURIComponent(name)}/mouse`).then(r => $('#key-mouse').classList.toggle('armed', !!r.mouse)).catch(() => {});
-    termSheet.hidden = false;
+    termSheet.hidden = false; renderNavShells(shells);
 
     if (term) { term.dispose(); term = null; }
     term = new Terminal({
@@ -903,6 +995,7 @@ function closeTerminal() {
     if (term) { term.dispose(); term = null; }
     setCtrl(false); setAlt(false); $('#copy-chip').hidden = true;
     state.shells = [];
+    $$('#nav-shells [data-nav-shell]').forEach(b => b.classList.remove('active'));
     if (['home', 'shells', 'files'].includes(termBackTab)) go(termBackTab); else refresh();
 }
 $('#term-back').addEventListener('click', closeTerminal);
@@ -1590,23 +1683,27 @@ async function loadFiles(path = null) {
     fsRoot = data.root || '/'; homeRel = data.home || '';
     state.filesPath = data.path; localStorage.setItem('porthole.path', data.path);
     renderCrumbs(data.path);
-    const items = data.items.filter(i => !i.hidden || showHidden);
+    const items = data.items.filter(i => !i.hidden || showHidden || i.name === '.portholerun');
+    const runFile = data.items.find(i => i.name === '.portholerun' && i.type === 'file');
     $('#files-empty').hidden = items.length > 0;
     $('#files-title').textContent = data.path ? basename(data.path) : (fsRoot === '/' ? 'Root' : 'Files');
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
-    $('#file-list').innerHTML = up + items.map(i => `
+    const runCard = runFile ? `<button class="row run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · tap to see what it starts</div></div>${icon('play', 'i chev')}</button>` : '';
+    $('#file-list').innerHTML = up + runCard + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}">
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
           <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
           <span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
     $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
+    $('#file-list [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
     $$('#file-list .row[data-name]').forEach(row => {
         const name = row.dataset.name, type = row.dataset.type, size = Number(row.dataset.size), rel = join(state.filesPath, name);
         row.addEventListener('click', e => {
             if (e.target.closest('[data-more]')) return toggleExpand(row, rel, name, type, size);
             if (type === 'dir') return loadFiles(rel).catch(ex => toast(ex.message, true));
+            if (name === '.portholerun' && type === 'file') return portholerunDialog(rel);
             if (isTextName(name, size)) return openEditor(rel, name);
             previewFile(rel, name);
         });

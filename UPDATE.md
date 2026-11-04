@@ -299,6 +299,18 @@ phone's Update button. Mechanism:
   (session type, security level) are now highlighted. New state: `project-links.json`, `logos/` (additive, no
   migration).
 
+- **1.17.0** — **Desktop layout.** At 720 px and wider the bottom tabs become a left rail; a hamburger opens it as a
+  drawer with labels on tablets. From 1024 px it is a full sidebar (collapsible to the rail, remembered) with the
+  More pages and the open shells for one-click switching; terminal and editor sit beside it, Home has two columns,
+  shells are a grid with longer previews, dialogs open as a side panel (confirmations stay centred), Escape closes
+  them, rows show hover states, and the terminal's on-screen keys sit behind a Keys toggle for real keyboards.
+  The phone layout is unchanged except that the "I wish for" buttons now wrap under the text on narrow screens.
+  **`.portholerun`:** a small YAML file in a project folder (`run`, `port`, `before`, `cwd`, `env`, `needs`,
+  `share`, `hostname`, `open`, `run_as`). Files shows a Run card for that folder; tapping shows every command, the
+  account (the project's own by default), what gets shared and which Vault names, and runs it only with the hash of
+  what was shown. It runs as a registered server (`run-<name>`), opens its link, and Porthole adds it to the
+  project's .gitignore. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
