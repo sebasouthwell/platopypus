@@ -42,7 +42,7 @@ say "base packages"
 apt-get -o DPkg::Lock::Timeout=600 update -q
 apt-get -o DPkg::Lock::Timeout=600 install -y -q --no-install-recommends \
     ca-certificates curl gnupg git tmux jq unzip zip ripgrep iproute2 procps less nano \
-    build-essential python3 python3-pip python3-venv sudo locales openssl ncurses-term rsync
+    build-essential python3 python3-pip python3-venv sudo locales openssl ncurses-term rsync acl iptables
 locale-gen en_GB.UTF-8 en_US.UTF-8 >/dev/null 2>&1 || true
 
 # ---------- node 22 ----------
@@ -112,9 +112,11 @@ getent group porthole-dev >/dev/null || groupadd --system porthole-dev
 id "$AGENT_USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --user-group "$AGENT_USER"
 usermod -aG porthole-dev "$AGENT_USER"; usermod -aG porthole-dev "$PORTHOLE_USER" 2>/dev/null || true
 passwd -l "$AGENT_USER" >/dev/null 2>&1 || true
-# Live services run as porthole-svc: no shell, no logins, only porthole-dev project folders (server/lib/svcuser.js).
-id porthole-svc >/dev/null 2>&1 || useradd --system --home-dir /var/lib/porthole-svc --create-home --shell /usr/sbin/nologin --user-group --groups porthole-dev porthole-svc
-chmod 750 /var/lib/porthole-svc 2>/dev/null || true
+# Live services run as one account per project (ps-<project>, primary group porthole-svcs), created by Porthole on
+# first start with an ACL on that project only (server/lib/svcuser.js). The 1.14.0 shared account loses its access.
+getent group porthole-svcs >/dev/null || groupadd --system porthole-svcs
+install -d -m 0755 /var/lib/porthole-svc
+id porthole-svc >/dev/null 2>&1 && gpasswd -d porthole-svc porthole-dev >/dev/null 2>&1 || true
 AGENT_HOME="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
 if ! sudo -u "$AGENT_USER" -H bash -lc 'test -x ~/.local/bin/claude' >/dev/null 2>&1; then
     say "claude code for the agent user"

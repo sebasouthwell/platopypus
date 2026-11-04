@@ -96,12 +96,20 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 
 - Create or update `PORTHOLE.md` whenever you add a service, change how it starts, or add a command an operator will
   want again. Keep `actions` small and useful; they become buttons.
-- **Who runs what.** The service and its actions run as `porthole-svc`: no login shell, no sudo, no AI logins, no
-  Porthole token, only project folders shared with the `porthole-dev` group (Porthole makes the project agent-ready on
-  first start). Its environment is only what the manifest and the Vault give it. Porthole stays root and is the
-  controller: it starts the process, keeps the log, and stops or kills the whole process group. `run_as: root` is for
-  the rare app that needs it (low port, Docker socket); the phone must approve it, and the approval is pinned to the
-  exact start, patch and action commands, so an edit to PORTHOLE.md asks again.
+- **Who runs what.** Each project's services and actions run as that project's own account, `ps-<project>`: no
+  login shell, no sudo, no AI logins, no Porthole token. It reaches exactly one folder, its project, through an ACL;
+  it is not in `porthole-dev`, and project folders give nothing to "other", so a compromised app cannot read another
+  project, the agent's home or Porthole's state. The firewall refuses these accounts the EC2 metadata service (the
+  box's AWS role) and Porthole's API. Its environment is only the manifest's `env` plus the Vault names listed under
+  `needs:`, nothing else from the Vault. Porthole stays root and is the controller: it starts the process, keeps the
+  log, and stops or kills the whole process group.
+- **Root.** `run_as: root` is for the rare app that needs it (low port, Docker socket). The phone must approve it, and
+  the approval is pinned to the start, patch and action commands **and the project's code**: with git, every tracked
+  and not-ignored file as it is on disk; without git, every file except `node_modules`, `.git` and `backup.paths`.
+  Any change asks again, so keep data in ignored or backup folders.
+- **What isolation does not cover.** An app still holds the secrets it needs (its `needs:`), its own data, and network
+  access to the internet and to other local ports (other services, databases). Treat the box as a personal
+  development host: hosting untrusted public code calls for a host of its own (see "own host" below).
 - **Inputs.** An action may declare typed `inputs`; values arrive only as `INPUT_<NAME>` environment variables, never
   substituted into the command text, so quote them (`"$INPUT_COUNT"`) and they cannot inject shell. Types: string
   (one line, 500 characters unless `max_length`; `pattern` is a full-match regular expression), integer, number

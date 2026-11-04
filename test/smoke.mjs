@@ -273,7 +273,7 @@ EOF`);
     sh('rm -rf /Projects/smoke-live');
 }
 
-// 6h2. Live services run as porthole-svc; Porthole controls them. Typed inputs, stop_first, take-over, restart, root approval.
+// 6h2. Live services run as their project's own account (ps-<project>); Porthole controls them. Typed inputs, stop_first, take-over, restart, root approval.
 {
     const { execFileSync } = await import('node:child_process');
     const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -315,7 +315,10 @@ services:
         restart: true
 ---
 EOF
-chown -R agent:agent /Projects/smoke-count`);
+chown -R agent:agent /Projects/smoke-count
+rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-project-secret > /Projects/smoke-other/secret.txt && chmod 755 /Projects/smoke-other && chmod 644 /Projects/smoke-other/secret.txt`);
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke general secret', prefix: 'SMOKE_GENERAL_X', scope: '', fields: { token: 'general-secret-1' }, envMap: { token: 'SMOKE_GENERAL_SECRET' } } });
+    const generalVaultId = r.body.id;
     const get = async (p) => { try { return await (await fetch(`http://127.0.0.1:8141${p}`)).text(); } catch { return null; } };
     const waitUp = async () => { for (let i = 0; i < 20; i++) { if (await get('/') !== null) return true; await sleep(300); } return false; };
     // An agent's test copy already holds the port; the live start takes it over.
@@ -325,16 +328,27 @@ chown -R agent:agent /Projects/smoke-count`);
     r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke count dup', port: 8141, cwd: '/Projects/smoke-count', cmd: ['node', 'app.js'] } });
     check('a second server on a taken port is refused with who holds it', r.status === 409 && /smoke count test/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
     r = await call('/api/live/smoke-count/web/start', { method: 'POST' });
-    check('live start takes over the port from the same-folder server', r.status === 200 && r.body.tookOver === 'smoke count test' && r.body.runAs === 'service', `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    check('live start takes over the port from the same-folder server', r.status === 200 && r.body.tookOver === 'smoke count test' && r.body.runAs === 'service' && r.body.account === 'ps-smoke-count', `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     check('the test copy is gone from the registry', !(await call('/api/servers')).body.some(x => x.slug === 'smoke-count-test'));
     await waitUp();
     const owner = sh(`ps -eo user:20,args | grep '[n]ode app.js' | grep -v bash | awk '{print $1}' | sort -u`).trim();
-    check('the live service process runs as porthole-svc', owner === 'porthole-svc', owner);
+    check('the live service runs as its project account', owner === 'ps-smoke-count', owner);
+    const svcSh = (cmd) => { try { return sh(`/usr/sbin/runuser -u ps-smoke-count -- bash -c ${JSON.stringify(cmd)} 2>&1; echo "rc=$?"`); } catch (e) { return String(e.stdout || e.message); } };
+    check('the account cannot read another project (even world-readable files)', /rc=[1-9]/.test(svcSh('cat /Projects/smoke-other/secret.txt')) && !/other-project-secret/.test(svcSh('cat /Projects/smoke-other/secret.txt')), svcSh('cat /Projects/smoke-other/secret.txt').slice(0, 120));
+    check('the account cannot read the agent home or Porthole state', /rc=[1-9]/.test(svcSh('ls /home/agent')) && /rc=[1-9]/.test(svcSh('ls /root/.porthole')));
+    check('the account is not in porthole-dev', !/porthole-dev/.test(sh('id ps-smoke-count')), sh('id ps-smoke-count').trim());
+    check('the account can write its own project', /rc=0/.test(svcSh('touch /Projects/smoke-count/data/probe && echo ok')));
+    const fw = (await call('/api/live')).body.find(p => p.project === 'smoke-count')?.services[0]?.firewall;
+    if (fw?.ok) {
+        check('the account cannot reach Porthole\'s API', /rc=[1-9]/.test(svcSh('curl -s -m 3 -o /dev/null http://127.0.0.1:7331/api/me')));
+        check('the account cannot reach the metadata service', /rc=[1-9]/.test(svcSh('curl -s -m 3 -o /dev/null http://169.254.169.254/')));
+    } else console.log(`SKIP  firewall checks — ${fw?.detail || 'no state'} (run the container with --cap-add NET_ADMIN)`);
     const envKeys = JSON.parse(await get('/env') || '[]');
     check('the service sees no Porthole environment', !envKeys.some(k => /^PORTHOLE_(TOKEN|STATE|PORT)$|^TMUX|^SSH_/.test(k)) && envKeys.includes('PORTHOLE_SERVICE'), envKeys.join(' '));
+    check('the service gets no Vault value it did not list under needs', !envKeys.includes('SMOKE_GENERAL_SECRET'), envKeys.join(' '));
     check('Porthole (root) still has the log', /./.test(sh('cat /root/.porthole/services/live-smoke-count-web.log; echo x')));
     r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
-    check('actions run as porthole-svc without Porthole secrets', r.status === 200 && /^porthole-svc/.test(r.body.output) && !/PORTHOLE_TOKEN|TMUX/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 200));
+    check('actions run as the project account without Porthole secrets', r.status === 200 && /^ps-smoke-count/.test(r.body.output) && !/SMOKE_GENERAL_SECRET/.test(r.body.output) && !/PORTHOLE_TOKEN|TMUX/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 200));
     for (let i = 0; i < 5; i++) await get('/click');
     await sleep(500);
     r = await call('/api/live/smoke-count/web/actions/1', { method: 'POST' });
@@ -371,8 +385,14 @@ chown -R agent:agent /Projects/smoke-count`);
     sh(`sed -i 's/run: id -un;/run: id -un; echo changed;/' /Projects/smoke-count/PORTHOLE.md`);
     r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
     check('editing a command voids the root approval', r.status === 403, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+    r = await call('/api/live/smoke-count/web/root', { method: 'POST' });
+    r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' }); check('re-approved after the edit', r.status === 200, String(r.status));
+    sh(`echo '// changed' >> /Projects/smoke-count/app.js`);
+    r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
+    check('changing the app code (not the commands) voids the root approval too', r.status === 403 && /code/.test(r.body.error || ''), `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
     await call('/api/live/smoke-count/web/root', { method: 'DELETE' });
     await call('/api/servers/live-smoke-count-web', { method: 'DELETE' }).catch(() => {});
+    await call(`/api/vault/${generalVaultId}`, { method: 'DELETE' });
     // An app that dies at once is reported with its log.
     r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke dies', cwd: '/Projects/smoke-count', cmd: ['bash', '-c', 'echo boom-at-start; exit 3'] } });
     check('a server that dies straight away is reported with its log', r.status === 500 && /boom-at-start/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
@@ -382,7 +402,7 @@ chown -R agent:agent /Projects/smoke-count`);
     r = await call('/api/agent-ready?path=Projects/smoke-old'); check('an old project reports not agent-ready', r.status === 200 && r.body.eligible && r.body.ready === false, JSON.stringify(r.body));
     r = await call('/api/agent-ready', { method: 'POST', body: { path: 'Projects/smoke-old' } }); check('Make agent-ready fixes the whole tree', r.status === 200 && r.body.ready === true, JSON.stringify(r.body));
     check('agent can now write deep in it', sh(`/usr/sbin/runuser -u agent -- bash -c 'touch /Projects/smoke-old/sub/g && echo ok'`).trim() === 'ok');
-    sh('rm -rf /Projects/smoke-count /Projects/smoke-old');
+    sh('rm -rf /Projects/smoke-count /Projects/smoke-old /Projects/smoke-other');
 }
 
 // 6i. Agent user: no root, restricted API, vault get by real folder, elevate with phone approval.
@@ -719,6 +739,44 @@ if (r.body.installed) {
 // 8g. Self-update status (no network assumptions).
 r = await call('/api/update');
 check('update status reports installed version', r.status === 200 && typeof r.body.installed?.version === 'string' && r.body.inProgress === false, JSON.stringify(r.body.installed));
+
+// 8z. Upgrade migrations: archive first, restore on failure, record on success, nothing pending afterwards.
+{
+    const { execFileSync } = await import('node:child_process');
+    const fsm = await import('node:fs');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const M = '/opt/porthole/server/lib/migrate.js';
+    sh(`rm -rf /tmp/mig && mkdir -p /tmp/mig/state /tmp/mig/m && echo '{"keep":"original"}' > /tmp/mig/state/data.json && echo '{"type":"module"}' > /tmp/mig/m/package.json
+cat > /tmp/mig/m/manifest.json <<'EOF'
+{ "migrations": [
+  { "id": "0.0.1-good", "version": "0.0.1", "title": "good", "detail": "adds a field" },
+  { "id": "0.0.2-bad", "version": "0.0.2", "title": "bad", "detail": "changes data then fails" } ] }
+EOF
+cat > /tmp/mig/m/0.0.1-good.js <<'EOF'
+import fs from 'node:fs';
+export async function up({ state }) { const f = state + '/data.json'; const d = JSON.parse(fs.readFileSync(f, 'utf8')); d.added = true; fs.writeFileSync(f, JSON.stringify(d)); }
+EOF
+cat > /tmp/mig/m/0.0.2-bad.js <<'EOF'
+import fs from 'node:fs';
+export async function up({ state }) { fs.writeFileSync(state + '/data.json', 'CORRUPTED'); fs.writeFileSync(state + '/junk.json', '{}'); throw new Error('boom'); }
+EOF`);
+    const plan = JSON.parse(sh(`node ${M} plan --state /tmp/mig/state --dir /tmp/mig/m`));
+    check('migration plan lists pending steps in order', plan.pending.map(m => m.id).join(',') === '0.0.1-good,0.0.2-bad', JSON.stringify(plan.pending.map(m => m.id)));
+    let failed = false; try { sh(`node ${M} apply --state /tmp/mig/state --dir /tmp/mig/m`); } catch { failed = true; }
+    const after = fsm.readFileSync('/tmp/mig/state/data.json', 'utf8');
+    check('a failing migration fails the run', failed);
+    check('a failing migration restores the state exactly (earlier steps undone too)', after === '{"keep":"original"}\n' && !fsm.existsSync('/tmp/mig/state/junk.json'), after);
+    check('a failed run records nothing', !fsm.existsSync('/tmp/mig/state/schema.json'));
+    check('the pre-migration archive is kept', fsm.readdirSync('/tmp/mig/state/migrate').some(f => /^pre-.*\.tar\.gz$/.test(f)));
+    sh(`node -e "const f='/tmp/mig/m/manifest.json';const m=JSON.parse(require('fs').readFileSync(f));m.migrations=m.migrations.filter(x=>x.id!=='0.0.2-bad');require('fs').writeFileSync(f,JSON.stringify(m))" && rm /tmp/mig/m/0.0.2-bad.js`);
+    sh(`node ${M} apply --state /tmp/mig/state --dir /tmp/mig/m`);
+    const sc = JSON.parse(fsm.readFileSync('/tmp/mig/state/schema.json', 'utf8'));
+    check('a good migration applies and is recorded', JSON.parse(fsm.readFileSync('/tmp/mig/state/data.json', 'utf8')).added === true && sc.applied.some(a => a.id === '0.0.1-good') && !!sc.lastBackup, JSON.stringify(sc).slice(0, 160));
+    check('nothing is pending after a successful run', JSON.parse(sh(`node ${M} plan --state /tmp/mig/state --dir /tmp/mig/m`)).pending.length === 0);
+    const live = JSON.parse(sh(`node ${M} status`));
+    check('this box has applied every shipped migration', live.pending.length === 0 && live.version === live.code, JSON.stringify(live).slice(0, 200));
+    sh('rm -rf /tmp/mig');
+}
 
 // 9. Status + cleanup + logout.
 r = await call('/api/status');

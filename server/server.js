@@ -35,6 +35,14 @@ import * as agentUser from './lib/agentuser.js';
 import * as elevate from './lib/elevate.js';
 import * as profile from './lib/profile.js';
 import { log } from './lib/log.js';
+import * as migrate from './lib/migrate.js';
+
+// Upgrade migrations run before anything else reads the state. A failure has already restored the state archive;
+// exit so nothing runs on it (systemd retries; the updater's health check rolls the code back).
+try {
+    const r = await migrate.boot(config.state, m => log('migrate', m));
+    if (r.applied.length) log('migrate', `applied ${r.applied.map(a => a.id).join(', ')}; backup ${r.backup}`);
+} catch (e) { log('migrate', e.message); process.exit(78); }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(here, '..', 'web');
@@ -619,8 +627,11 @@ setInterval(() => zoned.ensure().catch(e => console.error(e)), 60_000);
 // Daily update check against the public repo (first one a minute after boot).
 update.schedule();
 
+function groupExists(name) { try { return fs.readFileSync('/etc/group', 'utf8').split('\n').some(l => l.startsWith(name + ':')); } catch { return false; } }
 server.listen(config.port, config.bind, () => {
     log('porthole', `listening on http://${config.bind}:${config.port}  root=${config.root}  state=${config.state}`);
+    // iptables rules do not survive a reboot: put the service-account limits back before any live service starts.
+    import('./lib/svcuser.js').then(m => { try { if (groupExists(m.GROUP)) m.applyFirewall(); } catch { /* no group yet */ } });
     if (config.bind !== '127.0.0.1' && config.bind !== '::1') {
         log('porthole', `WARNING: bound to ${config.bind}. Make sure only your private network can reach this port.`);
     }

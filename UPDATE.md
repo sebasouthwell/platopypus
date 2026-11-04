@@ -59,6 +59,9 @@ with mode 0600. Formats as of version 1.0:
 | `projects.json` | projects.js | `{ repos: { "<abs folder>": { flag: private\|public, set } } }` — publishing flags (1.4.0); a folder absent from the map is local only |
 | `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline?, owner?, live?: { project, key, title }, runAs?: agent\|service\|root } } }` — registered servers (1.3.0); logs in `services/<slug>.log`, or `/home/agent/.porthole/services/<slug>.log` for agent-started servers (1.14.0); missing `runAs` = root |
 | `live-approvals.json` | live.js | `{ "<live slug>": "<sha256 of start, cwd, patch and action commands>" }` — services allowed to run as root (1.14.0); a changed manifest no longer matches, so it asks again |
+| `schema.json` | migrate.js | `{ version, applied: [{ id, version, at, ms, result? }], updatedAt, lastBackup, lastRun: { from, to, at, ids } }` — upgrade migrations (1.15.0); absent = none applied yet |
+| `migrate/pre-<version>-<stamp>.tar.gz` | migrate.js | state archive taken before migrations (5 kept); also login-move backups (1.12.0) |
+| `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
@@ -107,13 +110,32 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 8. **Docker and code-server containers are user data.** Never remove or recreate them in an update; name
    schemes (`app-<key>`, `code-<slug>`) are stable.
 
-## When a migration is unavoidable (MAJOR)
+## Upgrade plan: migrations (every release, 1.15.0+)
 
-- Add `server/lib/migrate.js` with numbered steps keyed by a `schema` field written to `~/.porthole/schema.json`.
-- Each step backs up the file it changes to `<file>.bak-<schema>` before writing, is re-runnable, and logs.
-- Run migrations at server start *before* any route is served; if a step fails, refuse to start and log how to
-  roll back (`/opt/porthole.prev` + the `.bak` file).
-- Document the step here and in the release commit message, including the manual rollback.
+Every release must upgrade any box on the previous stable release with its data intact, by itself, from the
+phone's Update button. Mechanism:
+
+- **Migrations** live in `server/migrations/`: one entry per step in `manifest.json` (`id` = `<version>-<what>`,
+  `version`, `title`, `detail` shown on the phone, `touches`) and `<id>.js` exporting `async up({ state, from, to, log })`.
+  Write one whenever a release changes anything on disk outside the app folder: a state file's shape, accounts,
+  permissions, system config, project folders. Purely additive changes (new optional fields, new files) need none.
+- **Rules for a step:** idempotent (it may run on any older box, including one that never recorded a schema); keeps
+  the user's data (transform, never drop; if something must go, move it under `~/.porthole/migrate/`); never needs
+  the network; fast (seconds), or it is not a migration but a job.
+- **Running:** `server/lib/migrate.js` runs every pending step at server start, before any route. It archives the
+  whole state folder to `~/.porthole/migrate/pre-<version>-<stamp>.tar.gz` first (5 kept), records applied steps in
+  `~/.porthole/schema.json`, and on any failure restores the archive and exits, so the old code comes back on the old
+  data. `node server/lib/migrate.js plan|apply|status|restore` does the same by hand.
+- **Updater:** after fetching, the installed updater hands over to the new release's `bin/porthole-update` (once),
+  which writes the plan to `~/.porthole/update-plan.json` and the log, installs, and health-checks (including that the
+  migrations were recorded). On failure it restores the state archive from this update along with the previous code.
+  The phone's update check reads the new release's `manifest.json` and lists the steps before you confirm.
+- **Proof:** CI's `upgrade` job installs the current `stable`, fills it with data (password, Vault entries, project
+  files, a shell with scrollback, a running server), updates it to the candidate with that box's own updater, checks
+  every item survived and every migration ran, then runs the full smoke suite on the upgraded box. Promotion to
+  stable requires it.
+- **MAJOR** releases are the ones where old code cannot read the migrated state; CI refuses a `x.0.0` without a
+  migration for `x`. Their rollback is the state archive.
 
 ## Change log of state and API additions
 
@@ -241,11 +263,28 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   server, so shells, servers, live services and tunnels survive updates as `tmux.js` always intended. Before this, each
   update ended every session on the box. No state change.
 
+- **1.15.0** — live services run as one account **per project**, `ps-<project>` (primary group `porthole-svcs`,
+  home `/var/lib/porthole-svc/<project>`), with a POSIX ACL on that project only (plus default ACLs, and `o::---`;
+  marker `<project>/.porthole/acl.json`); top-level project folders lose all "other" permissions; agent shells use
+  `umask 007`. The 1.14.0 shared `porthole-svc` account is removed from `porthole-dev`. iptables/ip6tables `OUTPUT`
+  rules (re-applied at every start) reject `porthole-svcs` traffic to the EC2 metadata service and Porthole's port; the
+  live list reports `firewall: { ok, detail }`, `account`, `vaultNames`. **Behaviour change:** a service now receives
+  only the Vault names in its `needs:` (before: every general and project value). Root approvals also pin the
+  project's code, so 1.14.0 approvals ask once more. `install.sh` adds `acl` and `iptables`. CI (`.github/workflows`):
+  contract + syntax + lint, smoke suite and headless browser probe on every push; **Promote to stable** gates on CI,
+  then tags `v<version>` and publishes a GitHub release from this changelog. Upgrade migrations (`server/migrations/`, `server/lib/migrate.js`, `~/.porthole/schema.json`,
+  `~/.porthole/migrate/pre-*.tar.gz`, `~/.porthole/update-plan.json`); the updater hands over to the new release's
+  updater and restores the state archive on rollback; `/api/update` status gains `plan`. First migration:
+  `1.15.0-isolate-services`. CI gains the upgrade-from-stable job.
+
 ## Release checklist
 
-1. Bump `server/package.json` version; note state changes in this file.
-2. `npm run lint` in `server/` (use-before-define over the browser module and the server), then `docker compose up -d --build`
-   and run `test/smoke.mjs` in a throwaway container — all checks pass. **Then load the app in a browser**: the smoke
-   suite is API-only and cannot see a front-end that fails to start.
-3. Release with `scripts/release.ps1 -Message "<version>: …" -Push` (public tree only: no infra, no personal data).
-4. On a box: More → Updates → Check → Update, confirm `update-result.json` says `ok: true`.
+1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
+2. Locally: `node scripts/ci-check.mjs`, `npm run lint` in `server/`, the smoke suite in a throwaway container, and
+   `test/browser.mjs` against it (`CHANNEL=chrome` uses the installed Chrome).
+3. `scripts/release.ps1 -Message "<version>: …" -Push` (runs ci-check first; public tree only). GitHub CI then runs
+   static checks, the smoke suite, the browser probe and the upgrade-from-stable test on the pushed commit.
+4. Soak on the live box (`PORTHOLE_UPDATE_BRANCH=master porthole update`).
+5. `scripts/promote.ps1` (or Actions → Promote to stable): CI again on that exact commit, then stable moves, the
+   commit is tagged `v<version>` and a GitHub release is published with these changelog entries. A version that is
+   already tagged on another commit is refused.

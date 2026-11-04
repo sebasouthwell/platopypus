@@ -18,6 +18,28 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) say(`server/package.json version "${versio
 const update = fs.readFileSync(path.join(root, 'UPDATE.md'), 'utf8');
 if (!update.includes(`- **${version}**`)) say(`UPDATE.md has no changelog entry "- **${version}** — …" for the current version`);
 
+// Migrations: every manifest entry has its module, ids are unique, none is newer than the code. A MAJOR release
+// (x.0.0) must ship at least one migration for that major: it is by definition a state change (UPDATE.md).
+{
+    const dir = path.join(root, 'server', 'migrations');
+    let man = { migrations: [] };
+    try { man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); } catch (e) { say(`server/migrations/manifest.json: ${e.message}`); }
+    const seen = new Set();
+    const vcmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+    for (const m of man.migrations || []) {
+        if (!m.id || !/^\d+\.\d+\.\d+-[a-z0-9-]+$/.test(m.id)) say(`migration id "${m.id}" must look like 1.15.0-what-it-does`);
+        if (seen.has(m.id)) say(`migration id "${m.id}" is listed twice`); seen.add(m.id);
+        if (!m.version || !m.id?.startsWith(m.version + '-')) say(`migration ${m.id}: version must match the id prefix`);
+        else if (vcmp(m.version, version) > 0) say(`migration ${m.id} is for ${m.version}, newer than the code (${version})`);
+        if (!m.title || !m.detail) say(`migration ${m.id}: needs a title and a detail (shown on the phone before updating)`);
+        if (!fs.existsSync(path.join(dir, `${m.id}.js`))) say(`migration ${m.id}: server/migrations/${m.id}.js is missing`);
+        else if (!/export\s+async\s+function\s+up\s*\(/.test(fs.readFileSync(path.join(dir, `${m.id}.js`), 'utf8'))) say(`migration ${m.id}: must export async function up(ctx)`);
+    }
+    for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) if (f.endsWith('.js') && !seen.has(f.slice(0, -3))) say(`server/migrations/${f} is not listed in manifest.json`);
+    const major = version.split('.')[0];
+    if (/^\d+\.0\.0$/.test(version) && major !== '1' && !(man.migrations || []).some(m => m.version.split('.')[0] === major)) say(`${version} is a MAJOR release but ships no migration for ${major}.x`);
+}
+
 // Version bump check against a previous commit (CI passes the commit before the push).
 const since = process.argv.includes('--since') ? process.argv[process.argv.indexOf('--since') + 1] : null;
 if (since && !/^0+$/.test(since)) {

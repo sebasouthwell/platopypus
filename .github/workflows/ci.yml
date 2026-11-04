@@ -2,6 +2,9 @@
 #   static  - version/changelog contract, version bump, syntax of every JS and shell file, use-before-define lint
 #   e2e     - build the same Ubuntu image the box uses (install.sh), run the smoke suite in a throwaway container,
 #             then load the app in headless Chromium and render every tab
+#   upgrade - install the current stable release, fill it with data (vault, project files, a shell, a server),
+#             update it to this commit with its own updater, and check nothing was lost and every migration ran;
+#             then run the smoke suite on the upgraded box
 name: CI
 
 on:
@@ -28,11 +31,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -53,14 +56,14 @@ jobs:
     timeout-minutes: 40
     needs: static
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.sha }}
       - name: Build the box image (install.sh on Ubuntu 24.04)
         run: docker build -t porthole:ci .
       - name: Start a throwaway Porthole
         run: |
-          docker run -d --name porthole-ci --init -p 127.0.0.1:7332:7331 \
+          docker run -d --name porthole-ci --init --cap-add NET_ADMIN -p 127.0.0.1:7332:7331 \
             -e PORTHOLE_TOKEN=porthole-test -e PORTHOLE_ALLOW_PASSWORD_ONLY=1 \
             -v "$PWD/test:/opt/test:ro" porthole:ci
           for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:7332/ && break; sleep 1; done
@@ -79,7 +82,7 @@ jobs:
       - name: Server log on failure
         if: failure()
         run: docker logs porthole-ci 2>&1 | tail -200
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: e2e-${{ inputs.ref || github.sha }}
@@ -88,3 +91,53 @@ jobs:
             browser-probe.png
           if-no-files-found: ignore
           retention-days: 14
+
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    needs: static
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - name: Previous stable release
+        id: prev
+        run: |
+          git fetch -q origin stable || true
+          if ! git rev-parse -q --verify origin/stable >/dev/null; then echo "No stable branch yet; nothing to upgrade from."; echo "none=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "version=$(git show origin/stable:server/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')" >> "$GITHUB_OUTPUT"
+          echo "new=$(node -p "require('./server/package.json').version")" >> "$GITHUB_OUTPUT"
+          git worktree add -f /tmp/prev origin/stable
+          git branch -f ci-upgrade HEAD
+      - name: Build the previous stable image
+        if: steps.prev.outputs.none != '1'
+        run: docker build -t porthole:prev /tmp/prev
+      - name: Start the previous stable release
+        if: steps.prev.outputs.none != '1'
+        run: |
+          docker run -d --name up --cap-add NET_ADMIN -e PORTHOLE_TOKEN=porthole-test -e PORTHOLE_ALLOW_PASSWORD_ONLY=1             -v "$PWD:/new-src:ro" -v "$PWD/test:/opt/test:ro" porthole:prev bash /opt/test/supervise.sh
+          for i in $(seq 1 60); do docker exec up curl -fsS -o /dev/null http://127.0.0.1:7331/ && break; sleep 1; done
+      - name: Fill it with data (${{ steps.prev.outputs.version }})
+        if: steps.prev.outputs.none != '1'
+        run: docker exec up node /opt/test/upgrade.mjs seed
+      - name: Update ${{ steps.prev.outputs.version }} → ${{ steps.prev.outputs.new }} with the box's own updater
+        if: steps.prev.outputs.none != '1'
+        run: |
+          docker exec up bash -lc '
+            git config --global --add safe.directory "*"
+            git config --global url."/new-src".insteadOf "https://github.com/${{ github.repository }}"
+            export HOME=/root PORTHOLE_UPDATE_REPO=${{ github.repository }} PORTHOLE_UPDATE_BRANCH=ci-upgrade
+            porthole update'
+      - name: Verify nothing was lost
+        if: steps.prev.outputs.none != '1'
+        run: docker exec -e NEW_VERSION=${{ steps.prev.outputs.new }} up node /opt/test/upgrade.mjs verify
+      - name: Smoke suite on the upgraded box
+        if: steps.prev.outputs.none != '1'
+        run: |
+          set -o pipefail
+          docker exec -e TUNNEL=0 up bash -lc 'cd /opt/porthole/server && node /opt/test/smoke.mjs' | tee upgrade-smoke.txt
+          grep -q '^all checks passed' upgrade-smoke.txt
+      - name: Update log on failure
+        if: failure() && steps.prev.outputs.none != '1'
+        run: docker exec up bash -c 'tail -150 /root/.porthole/update.log; cat /root/.porthole/schema.json 2>/dev/null' || true

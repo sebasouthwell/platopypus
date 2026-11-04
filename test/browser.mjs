@@ -10,13 +10,13 @@ const problems = [];
 let checks = 0;
 const check = (name, ok, extra = '') => { checks++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  — ' + extra : ''}`); if (!ok) problems.push(name); };
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.CHANNEL ? { channel: process.env.CHANNEL } : {});
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const errors = [];
 page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
 page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource: the server responded with a status of 401/.test(m.text())) errors.push(`console: ${m.text()}`); });
 
-await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+await page.goto(BASE + '/', { waitUntil: 'load' }); await page.waitForTimeout(1500);
 const version = await page.getAttribute('meta[name="porthole-version"]', 'content');
 check('page carries a version stamp', /^\d+\.\d+\.\d+$/.test(version || ''), version);
 const stamped = await page.$$eval('script[src], link[rel=stylesheet]', els => els.map(e => e.getAttribute('src') || e.getAttribute('href')).filter(u => /app\.js|styles\.css/.test(u)));
@@ -30,10 +30,10 @@ const login = await page.evaluate(async (password) => {
     return r.status;
 }, PASSWORD);
 check('password sign-in works from the browser', login === 200, String(login));
-await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+await page.goto(BASE + '/', { waitUntil: 'load' }); await page.waitForTimeout(1500);
 for (const tab of ['home', 'shells', 'services', 'files', 'more']) {
     const before = errors.length;
-    await page.click(`.tabs [data-tab="${tab}"]`);
+    await page.click(`.tabs [data-go="${tab}"]`);
     await page.waitForTimeout(1200);
     const visible = await page.isVisible(`#tab-${tab}`);
     const text = (await page.textContent(`#tab-${tab}`) || '').trim();

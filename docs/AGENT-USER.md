@@ -46,8 +46,9 @@ Rollback: AI agents → Undo move restores the renamed root copies; the agent-us
 
 ## Stage 2b — services off root (1.14.0, done)
 
-- Live services and their actions run as `porthole-svc` (no logins, no secrets, porthole-dev group only); `run_as: root`
-  needs a phone approval pinned to the exact commands. Porthole stays the root controller (log, stop, kill).
+- Live services and their actions run as one account per project (`ps-<project>`, ACL on that project only, no
+  porthole-dev, firewall: no metadata service, no Porthole API, Vault limited to `needs:`); `run_as: root` needs a
+  phone approval pinned to the commands and the project's code (1.15.0). Porthole stays the root controller.
 - **Files → Make agent-ready** for projects created before stage 1.
 
 ## Stage 3 — root by grant only (2.0.0, MAJOR)

@@ -83,8 +83,8 @@ export function wrap(cmd) {
     const a = info(); if (!a) throw httpError(412, 'The agent user does not exist on this box yet.');
     const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     const pathVar = `${a.home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin`;
-    // umask 002 so files the agent creates stay group-writable for root shells in the same project.
-    const inner = cmd ? `umask 002; ${cmd}` : 'umask 002; exec bash -l';
+    // 007: group-writable for root shells in the same project, nothing for other accounts (live services).
+    const inner = cmd ? `umask 007; ${cmd}` : 'umask 007; exec bash -l';
     // Absolute path: runuser lives in sbin, which the service's PATH may not include.
     const runuser = ['/usr/sbin/runuser', '/sbin/runuser', '/usr/bin/runuser'].find(f => fs.existsSync(f)) || 'runuser';
     return `exec ${runuser} -u ${USER} -- env PATH=${q(pathVar)} PORTHOLE_RUN_AS=agent bash -l -c ${q(inner)}`;

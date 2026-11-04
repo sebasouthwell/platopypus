@@ -27,7 +27,7 @@ jobs:
     outputs:
       sha: ${{ steps.r.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - id: r
@@ -46,7 +46,7 @@ jobs:
     needs: [resolve, ci]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Move stable

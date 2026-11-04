@@ -1205,8 +1205,8 @@ async function livePage(p, key) {
     const { panel, close } = openDialog(`<h2>${icon(v.worker ? 'cpu' : 'globe')}${esc(v.title)}</h2>
         <p class="muted">${esc(p.name)}${p.summary ? ` · ${esc(p.summary)}` : ''}</p>
         <p class="sub">${v.running ? '<span class="live">● running</span>' : 'stopped'}${v.port ? ` · <span class="mono">:${v.port}</span>` : ' · worker'}${p.commit ? ` · <span class="mono">${esc(p.commit)}</span>` : ''}${v.update ? ` · updates: ${esc(v.update)}` : ''}</p>
-        <p class="sub">${v.runAs === 'root' ? '<span class="tag danger">runs as root</span> approved for these exact commands · <button class="linkish" data-a="unroot">Revoke</button>' : v.runAs === 'blocked' ? '' : 'Runs as <span class="mono">porthole-svc</span>: no logins, no secrets, only this project folder. Porthole controls it as root.'}</p>
-        ${v.runAs === 'blocked' ? `<div class="banner danger" style="margin:10px 0"><b>This service asks to run as root.</b> PORTHOLE.md says <span class="mono">run_as: root</span>. Root can read every secret on the box, so only allow it if the app really needs it (binding a low port, Docker). The approval covers the start command and every action as written now; if PORTHOLE.md changes them, it asks again.<div class="buttons"><button class="danger" data-a="root">Allow as root</button></div></div>` : ''}
+        <p class="sub">${v.runAs === 'root' ? '<span class="tag danger">runs as root</span> approved for these exact commands · <button class="linkish" data-a="unroot">Revoke</button>' : v.runAs === 'blocked' ? '' : `Runs as <span class="mono">${esc(v.account || 'its own account')}</span>, an account for this project only: no logins, no Porthole access, no other project. ${v.vaultNames.length ? `Vault: only ${v.vaultNames.map(esc).join(', ')}.` : 'No Vault values.'} Porthole controls it as root.${v.firewall && v.firewall.ok === false ? `<br><span class="warn">${esc(v.firewall.detail)}</span>` : ''}`}</p>
+        ${v.runAs === 'blocked' ? `<div class="banner danger" style="margin:10px 0"><b>This service asks to run as root.</b> PORTHOLE.md says <span class="mono">run_as: root</span>. Root can read every secret on the box, so only allow it if the app really needs it (binding a low port, Docker). The approval covers the start command, every action and the project's code as they are now; if any of them changes, it asks again.<div class="buttons"><button class="danger" data-a="root">Allow as root</button></div></div>` : ''}
         <div class="menu">
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
           ${v.host ? `<a class="row" href="${esc(v.host.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
@@ -1225,7 +1225,7 @@ async function livePage(p, key) {
         const a = b.dataset.a;
         try {
             if (a === 'start' || a === 'stop' || a === 'restart') { b.disabled = true; const r = await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : a === 'restart' ? 'Restarted' : 'Started'); return refresh_(); }
-            if (a === 'root') { if (!(await confirmDialog({ title: `Run ${v.title} as root?`, text: 'Its start command and every action run with full control of the box until PORTHOLE.md changes them.', action: 'Allow as root' }))) return; await api(url('root'), { method: 'POST' }); toast('Allowed as root'); return refresh_(); }
+            if (a === 'root') { if (!(await confirmDialog({ title: `Run ${v.title} as root?`, text: 'Its start command and every action run with full control of the box, until they or the project’s code change.', action: 'Allow as root' }))) return; await api(url('root'), { method: 'POST' }); toast('Allowed as root'); return refresh_(); }
             if (a === 'unroot') { await api(url('root'), { method: 'DELETE' }); toast('Root revoked; restart it to run as porthole-svc'); return refresh_(); }
             if (a === 'hostname') { b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…'; await api(url('hostname'), { method: 'POST' }); toast(`${v.hostname} is set up`); return refresh_(); }
             if (a === 'share') { close(); return shareDialog(v.port, v.title); }
@@ -1289,6 +1289,20 @@ function actionInputsDialog(act, title) {
             close(); resolve(values);
         };
         $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
+    });
+}
+
+// Before an update: what will change on this box. Plan = migrations of the new release not yet applied here.
+function updatePlanDialog(u) {
+    return new Promise(resolve => {
+        const plan = Array.isArray(u.plan) ? u.plan : null;
+        const steps = plan === null ? '<p class="sub">The upgrade plan could not be read; the updater still works it out and logs it before changing anything.</p>'
+            : plan.length ? `<p class="muted">This update changes data on the box in ${plan.length} step${plan.length === 1 ? '' : 's'}. Porthole archives its state first and puts it back if any step or the new version fails.</p><div class="list">${plan.map(m => `<div class="row plain"><span class="ico brass">${icon('shield')}</span><div class="main"><div class="title">${esc(m.title)} <span class="tag dim">${esc(m.version)}</span></div><div class="sub">${esc(m.detail || '')}</div></div></div>`).join('')}</div>`
+            : '<p class="muted">No data changes: only the app is replaced.</p>';
+        const { panel, close } = openDialog(`<h2>${icon('refresh')}Update to ${esc(u.latestVersion)}?</h2>${steps}<p class="sub" style="margin-top:10px">Porthole restarts once. Shells, servers, tunnels, containers, files and the Vault stay as they are; if the new version does not come up healthy, the previous version and its data come back automatically.</p><div class="buttons"><button class="primary" data-ok>Update now</button><button data-close>Cancel</button></div>`);
+        $('[data-ok]', panel).onclick = () => { close(); resolve(true); };
+        $('.dialog-backdrop').addEventListener('click', () => resolve(false), { once: true });
+        $('[data-close]', panel).addEventListener('click', () => resolve(false), { once: true });
     });
 }
 
@@ -1946,7 +1960,7 @@ async function updateAction(act, u) {
     try {
         if (act === 'check') { toast('Checking…'); await api('/api/update/check', { method: 'POST' }); return loadUpdate(); }
         if (act === 'apply') {
-            const ok = await confirmDialog({ title: `Update to ${u.latestVersion}?`, text: 'Porthole shuts down for approximately 5 minutes and restarts itself after the update. Shells, tunnels, containers, files and the vault are untouched; if the service does not come back it rolls back automatically.', action: 'Update now', danger: false });
+            const ok = await updatePlanDialog(u);
             if (!ok) return;
             await api('/api/update/apply', { method: 'POST' });
             showUpdateOverlay();

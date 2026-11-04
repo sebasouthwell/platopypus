@@ -6,7 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import { config } from './config.js';
@@ -162,21 +162,44 @@ export function inputEnv(inputs, values = {}) {
     return env;
 }
 
-// ---- running as root: only with an approval pinned to the exact commands ----
-function rootFingerprint(s) {
-    const what = { start: s.start, cwd: s.cwd || '.', patch: s.patch || null, actions: (Array.isArray(s.actions) ? s.actions : []).map(a => a?.run || '') };
+// ---- running as root: only with an approval pinned to the exact commands AND the code they run ----
+// The code part hashes every file the project ships: with git, every tracked and untracked-but-not-ignored file
+// as it is on disk now (so uncommitted edits count); without git, every file except node_modules, .git and the
+// manifest's backup paths. Ignored and data folders are left out so the app's own writes do not void it.
+const CODE_LIMIT = { files: 20000, bytes: 200 * 1024 * 1024 };
+function codeFingerprint(root, data = []) {
+    let list = null;
+    try { list = execFileSync('git', ['-C', root, 'ls-files', '-z', '-c', '-o', '--exclude-standard'], { encoding: 'utf8', timeout: 20_000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean); } catch { /* not a git repo */ }
+    if (!list) {
+        list = [];
+        const skip = new Set(['node_modules', '.git', ...data.map(d => String(d).replace(/\/+$/, ''))]);
+        const walk = (dir, rel) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (skip.has(r) || skip.has(e.name) && e.isDirectory()) continue; if (e.isDirectory()) walk(path.join(dir, e.name), r); else if (e.isFile()) list.push(r); if (list.length > CODE_LIMIT.files) throw httpError(413, 'Too many files to fingerprint for a root approval.'); } };
+        walk(root, '');
+    }
+    list = [...new Set(list)].filter(f => !f.startsWith('.porthole/')).sort();
+    if (list.length > CODE_LIMIT.files) throw httpError(413, 'Too many files to fingerprint for a root approval.');
+    const h = crypto.createHash('sha256'); let bytes = 0;
+    for (const f of list) {
+        let buf; try { buf = fs.readFileSync(path.join(root, f)); } catch { continue; }
+        bytes += buf.length; if (bytes > CODE_LIMIT.bytes) throw httpError(413, 'The project is too large to fingerprint for a root approval.');
+        h.update(f).update('\0').update(crypto.createHash('sha256').update(buf).digest()).update('\0');
+    }
+    return { hash: h.digest('hex'), files: list.length };
+}
+function rootFingerprint(p, s) {
+    const what = { start: s.start, cwd: s.cwd || '.', patch: s.patch || null, actions: (Array.isArray(s.actions) ? s.actions : []).map(a => a?.run || ''), code: codeFingerprint(p.root, p.data?.backup?.paths || []).hash };
     return crypto.createHash('sha256').update(JSON.stringify(what)).digest('hex');
 }
 function loadApprovals() { try { return JSON.parse(fs.readFileSync(approvalsFile, 'utf8')); } catch { return {}; } }
-function rootState(project, key, s) {
-    if (s.run_as !== 'root') return { runAs: 'service', wantsRoot: false, rootApproved: false };
-    const ok = loadApprovals()[slugOf(project, key)] === rootFingerprint(s);
-    return { runAs: ok ? 'root' : 'blocked', wantsRoot: true, rootApproved: ok };
+function rootState(p, key, s) {
+    if (s.run_as !== 'root') return { runAs: 'service', account: svcUser.userFor(p.name), wantsRoot: false, rootApproved: false };
+    let ok = false; try { ok = loadApprovals()[slugOf(p.name, key)] === rootFingerprint(p, s); } catch { ok = false; }
+    return { runAs: ok ? 'root' : 'blocked', account: ok ? 'root' : null, wantsRoot: true, rootApproved: ok };
 }
 export function approveRoot(project, key) {
-    const { s } = findService(project, key);
+    const { p, s } = findService(project, key);
     if (s.run_as !== 'root') throw httpError(400, 'This service does not ask to run as root.');
-    const a = loadApprovals(); a[slugOf(project, key)] = rootFingerprint(s);
+    const a = loadApprovals(); a[slugOf(project, key)] = rootFingerprint(p, s);
     const tmp = approvalsFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(a, null, 2), { mode: 0o600 }); fs.renameSync(tmp, approvalsFile);
     log('live', `approved ${project}/${key} to run as root (fingerprint ${a[slugOf(project, key)].slice(0, 12)})`);
     return { ok: true };
@@ -187,18 +210,21 @@ export function revokeRoot(project, key) {
     log('live', `revoked root for ${project}/${key}`);
     return { ok: true };
 }
-// The service account reaches the project through the porthole-dev group (same change as "Make agent-ready").
-async function readyFolder(root) {
-    try { await agentUser.prepareFolder(root); } catch (e) { log('live', `could not make ${root} group-writable: ${e.message}`); }
+// The project's own account, with access to this project folder only (ACL); agent shells keep porthole-dev access.
+async function prepareAccount(p) {
+    try { await agentUser.prepareFolder(p.root); } catch (e) { log('live', `could not make ${p.root} group-writable: ${e.message}`); }
+    await svcUser.retireShared();
+    const a = await svcUser.ensure(p.name, p.root);
+    return a.user;
 }
 // Porthole's own environment minus anything secret: an action never sees the box token or Porthole's settings.
 function actionBaseEnv() {
     const keep = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TERM'];
     return Object.fromEntries(keep.filter(k => process.env[k]).map(k => [k, process.env[k]]));
 }
-function mustRun(project, key, s) {
-    const st = rootState(project, key, s);
-    if (st.runAs === 'blocked') throw httpError(403, `This service asks to run as root (run_as: root). Approve it on its page first; the approval covers these exact commands and lapses when PORTHOLE.md changes them.`);
+function mustRun(p, key, s) {
+    const st = rootState(p, key, s);
+    if (st.runAs === 'blocked') throw httpError(403, `This service asks to run as root (run_as: root). Approve it on its page first; the approval covers its commands and the project's code as they are now, and lapses when either changes.`);
     return st.runAs;
 }
 
@@ -218,7 +244,9 @@ export async function list() {
                 hostname: s.hostname ? String(s.hostname).toLowerCase() : null,
                 host: host ? { hostname: host.hostname, url: host.url, live: !!host.connected, mode: host.mode, slug: host.slug } : null,
                 update: s.update || null,
-                ...rootState(p.name, key, s),
+                ...rootState(p, key, s),
+                firewall: svcUser.firewallState(),
+                vaultNames: Array.isArray(s.needs) ? s.needs.map(String) : [],
                 actions: (Array.isArray(s.actions) ? s.actions : []).map((a, i) => ({ i, label: String(a.label), confirm: !!a.confirm, restarts: !!(a.restart || a.stop_first), inputs: (Array.isArray(a.inputs) ? a.inputs : []).map(inputView) })),
                 links: (Array.isArray(s.links) ? s.links : []).map(l => ({ label: String(l.label || l.path), path: String(l.path || '/') })),
                 credentials: (Array.isArray(s.credentials) ? s.credentials : []).map(credView),
@@ -231,16 +259,19 @@ export async function list() {
     return out;
 }
 
+// Least privilege: a service gets only the Vault names it lists under needs:, never the rest of the Vault.
 async function envForService(p, s) {
     const vaultEnv = await envFor(p.root, { project: 'exact' });
-    const missing = (Array.isArray(s.needs) ? s.needs : []).filter(n => !(n in vaultEnv));
+    const needs = (Array.isArray(s.needs) ? s.needs : []).map(String);
+    const missing = needs.filter(n => !(n in vaultEnv));
+    const granted = Object.fromEntries(needs.filter(n => n in vaultEnv).map(n => [n, vaultEnv[n]]));
     const fixed = Object.fromEntries(Object.entries(s.env || {}).map(([k, v]) => [String(k), String(v)]));
-    return { env: { ...vaultEnv, ...fixed, PORTHOLE_PROJECT: p.name, ...(s.__key ? { PORTHOLE_SERVICE: slugOf(p.name, s.__key) } : {}) }, missing };
+    return { env: { ...granted, ...fixed, PORTHOLE_PROJECT: p.name, ...(s.__key ? { PORTHOLE_SERVICE: slugOf(p.name, s.__key) } : {}) }, missing };
 }
 
 export async function start(project, key) {
     const { p, s } = findService(project, key);
-    mustRun(p.name, key, s);
+    mustRun(p, key, s);
     const { env, missing } = await envForService(p, s);
     if (missing.length) throw httpError(412, `Add ${missing.join(', ')} to the Vault (project ${project} or general) first.`);
     const cwd = path.resolve(p.root, s.cwd || '.');
@@ -256,9 +287,9 @@ export async function start(project, key) {
         else if (h?.slug) throw httpError(409, `Port ${port} is used by the server "${h.name}". Stop it first.`);
         else if (h) throw httpError(409, `Port ${port} is already in use${h.cmdline ? ` by ${h.cmdline}` : ''}.`);
     }
-    const runAs = mustRun(p.name, key, s);
-    if (runAs === 'service') await readyFolder(p.root);
-    const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd: ['bash', '-lc', s.start], project: p.name, env, runAs, live: { project: p.name, key, title: s.title || key } });
+    const runAs = mustRun(p, key, s);
+    const account = runAs === 'service' ? await prepareAccount(p) : null;
+    const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd: ['bash', '-lc', s.start], project: p.name, env, runAs, account, live: { project: p.name, key, title: s.title || key } });
     log('live', `started ${project}/${key}`);
     return tookOver ? { ...reg, tookOver } : reg;
 }
@@ -293,8 +324,8 @@ export async function action(project, key, index, values = {}) {
     const { p, s } = findService(project, key);
     const a = (Array.isArray(s.actions) ? s.actions : [])[Number(index)];
     if (!a) throw httpError(404, 'No such action.');
-    const runAs = mustRun(p.name, key, s);
-    if (runAs === 'service') { await svcUser.ensure(); await readyFolder(p.root); }
+    const runAs = mustRun(p, key, s);
+    const account = runAs === 'service' ? await prepareAccount(p) : null;
     const inputs = inputEnv(a.inputs, values && typeof values === 'object' ? values : {});
     const { env: baseEnv } = await envForService(p, s);
     const env = { ...baseEnv, ...inputs };
@@ -307,7 +338,7 @@ export async function action(project, key, index, values = {}) {
     if (a.stop_first && wasRunning) { await servicesMgr.stop(slug, { keepTunnel: true }); out += '[stopped the service]\n'; }
     try {
         // As porthole-svc unless root was approved: the command text comes from a file agents can edit.
-        const [bin, args] = runAs === 'service' ? svcUser.argv(String(a.run), env) : ['bash', ['-lc', String(a.run)]];
+        const [bin, args] = runAs === 'service' ? svcUser.argv(account, String(a.run), env) : ['bash', ['-lc', String(a.run)]];
         const r = await run(bin, args, { cwd, env: { ...actionBaseEnv(), ...env }, timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
         out += (r.stdout || '') + (r.stderr ? `\n${r.stderr}` : '');
     } catch (e) {
@@ -317,7 +348,7 @@ export async function action(project, key, index, values = {}) {
         try { await (a.stop_first ? start(project, key) : restart(project, key)); out += `\n[${a.stop_first ? 'started' : 'restarted'} the service]`; }
         catch (e) { code = code || 1; out += `\n[could not start the service: ${e.message}]`; }
     } else if (a.restart) out += '\n[not restarted: the command failed]';
-    log('live', `action "${a.label}" on ${project}/${key} as ${runAs}${Object.keys(inputs).length ? ` with ${Object.keys(inputs).join(', ')}` : ''} → exit ${code}`);
+    log('live', `action "${a.label}" on ${project}/${key} as ${account || runAs}${Object.keys(inputs).length ? ` with ${Object.keys(inputs).join(', ')}` : ''} → exit ${code}`);
     // Keep a record in the service log when there is one.
     try { const reg = await servicesMgr.get(slugOf(project, key)); if (reg.log) fs.appendFileSync(reg.log, `\n[action ${new Date().toISOString()}] ${a.label} → exit ${code}\n${out.slice(-20000)}\n`); } catch { /* not running yet */ }
     return { label: a.label, code, ms: Date.now() - started, output: out.slice(-60000) };

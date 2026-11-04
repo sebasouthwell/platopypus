@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { log } from './log.js';
+import * as migrate from './migrate.js';
 
 const run = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -55,11 +56,21 @@ export async function check(trigger = 'manual') {
         if (!pkgRes.ok) throw httpError(502, `package.json fetch ${pkgRes.status}`);
         const latestVersion = (await pkgRes.json()).version;
         const latestSha = commits[0]?.sha?.slice(0, 7) || null;
+        // Upgrade plan: the new release's migrations this box has not applied yet (shown before Update).
+        let plan = null;
+        try {
+            const mr = await fetch(`https://raw.githubusercontent.com/${REPO}/${BRANCH}/server/migrations/manifest.json`, { signal: AbortSignal.timeout(15_000) });
+            if (mr.ok) {
+                const done = new Set((migrate.schema(config.state).applied || []).map(a => a.id));
+                plan = ((await mr.json()).migrations || []).filter(m => !done.has(m.id) && cmpVersion(m.version, latestVersion) <= 0)
+                    .sort((x, y) => cmpVersion(x.version, y.version)).map(m => ({ id: m.id, version: m.version, title: m.title, detail: m.detail, touches: m.touches || [] }));
+            } else if (mr.status === 404) plan = [];
+        } catch { /* plan stays unknown */ }
         const newerVersion = cmpVersion(latestVersion, me.version) > 0;
         const newerSha = !!(me.sha && latestSha && me.sha !== latestSha);
         const available = newerVersion || (!me.sha ? false : newerSha);
         Object.assign(s, {
-            checkedAt: Date.now(), trigger, error: null, latestVersion, latestSha, available,
+            checkedAt: Date.now(), trigger, error: null, latestVersion, latestSha, available, plan,
             latestDate: commits[0]?.commit?.committer?.date || null,
             notes: commits.map(c => ({ sha: c.sha.slice(0, 7), message: c.commit.message.split('\n')[0].slice(0, 120), date: c.commit.committer?.date })),
         });

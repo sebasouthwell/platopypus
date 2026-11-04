@@ -1,0 +1,12 @@
+{
+  "about": "Upgrade migrations, applied in version order by server/lib/migrate.js. Each id has <id>.js exporting async up(ctx). Every migration must be idempotent and keep the user's data; see UPDATE.md, Upgrade plan.",
+  "migrations": [
+    {
+      "id": "1.15.0-isolate-services",
+      "version": "1.15.0",
+      "title": "Give live services their own accounts",
+      "detail": "Removes the shared porthole-svc account from the project group, closes project folders to other accounts, and clears root approvals made before code fingerprints (they are asked for again). Project files and data are not changed.",
+      "touches": ["accounts", "permissions", "live-approvals.json"]
+    }
+  ]
+}
