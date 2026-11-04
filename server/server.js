@@ -379,6 +379,10 @@ const server = http.createServer(async (req, res) => {
             const b = await readJson(req);
             return send(res, 200, await files.rename(b.path, b.name));
         }
+        if (p === '/api/files/move' && method === 'POST') {
+            const b = await readJson(req);
+            return send(res, 200, await files.move(b.path, b.to));
+        }
         if (p === '/api/files/trash' && method === 'POST') {
             const b = await readJson(req);
             return send(res, 200, await files.trash(b.path));

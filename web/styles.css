@@ -513,3 +513,10 @@ details.group .list { margin: 0; border: 0; border-radius: 0; }
 .row.run-card .title { color: var(--kelp); }
 .row.run-card .chev { color: var(--kelp); }
 .warn { color: var(--brass); }
+
+/* Drag and drop in Files. */
+.row.drop-on, #crumbs button.drop-on { outline: 2px dashed var(--brass); outline-offset: -3px; background: rgba(240,184,64,.10); }
+#tab-files.dropping #file-list { outline: 2px dashed var(--brass); outline-offset: 3px; }
+.row.dragging { opacity: .45; }
+.drop-hint { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 35; background: var(--brass); color: var(--brass-ink); font-weight: 600; font-size: 14px; padding: 10px 16px; border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.45); pointer-events: none; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 720px) { .drop-hint { left: calc(var(--side) + (100% - var(--side)) / 2); } }

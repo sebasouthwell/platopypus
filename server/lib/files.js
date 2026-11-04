@@ -135,6 +135,27 @@ export async function rename(rel, newName) {
     return { path: relative(to) };
 }
 
+// Move a file or folder into another folder, keeping its name (drag and drop in Files).
+export async function move(rel, toRel) {
+    const from = resolveInRoot(rel);
+    const destDir = resolveInRoot(toRel || '.');
+    if (from === rootReal) throw httpError(400, 'Cannot move the root folder.');
+    const st = await fsp.stat(destDir).catch(() => { throw httpError(404, 'Folder not found.'); });
+    if (!st.isDirectory()) throw httpError(400, 'Drop onto a folder.');
+    if (path.dirname(from) === destDir) return { path: relative(from), unchanged: true };
+    if (destDir === from || destDir.startsWith(from + path.sep)) throw httpError(400, 'A folder cannot go inside itself.');
+    const to = path.join(destDir, path.basename(from));
+    if (fs.existsSync(to)) throw httpError(409, `"${path.basename(from)}" already exists there.`);
+    try { await fsp.rename(from, to); }
+    catch (e) {
+        if (e.code !== 'EXDEV') throw e;
+        await fsp.cp(from, to, { recursive: true, errorOnExist: true, preserveTimestamps: true });   // across disks
+        await fsp.rm(from, { recursive: true, force: true });
+    }
+    log('files', `move ${relative(from)} -> ${relative(to)}`);
+    return { path: relative(to) };
+}
+
 export async function trash(rel) {
     const target = resolveInRoot(rel);
     if (target === rootReal) throw httpError(400, 'Cannot delete the root folder.');

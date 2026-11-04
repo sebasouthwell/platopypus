@@ -1690,7 +1690,7 @@ async function loadFiles(path = null) {
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
     const runCard = runFile ? `<button class="row run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · tap to see what it starts</div></div>${icon('play', 'i chev')}</button>` : '';
     $('#file-list').innerHTML = up + runCard + items.map(i => `
-        <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}">
+        <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}"${finePointer() ? ' draggable="true"' : ''}>
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
           <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
           <span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
@@ -1953,18 +1953,110 @@ $('#files-newfile').addEventListener('click', () => {
 $('#files-upload').addEventListener('click', () => $('#files-input').click());
 $('#files-input').addEventListener('change', async e => {
     const files = [...e.target.files]; e.target.value = '';
-    if (!files.length) return;
+    if (files.length) await uploadMany(files.map(file => ({ file, sub: '' })), state.filesPath);
+});
+// Uploads [{ file, sub }] into dir, creating sub-folders first (a dropped folder keeps its structure).
+async function uploadMany(list, dir) {
+    if (!list.length) return;
     const box = $('#upload-progress'), bar = $('.upbar > div', box), nameEl = $('.upname', box), stateEl = $('.upstate', box);
     box.hidden = false;
+    const made = new Set();
+    for (const sub of [...new Set(list.map(x => x.sub).filter(Boolean))].sort()) {
+        let acc = '';
+        for (const part of sub.split('/')) {
+            const parent = join(dir, acc); acc = acc ? `${acc}/${part}` : part;
+            if (made.has(acc)) continue; made.add(acc);
+            try { await api('/api/files/mkdir', { method: 'POST', body: { path: parent || '.', name: part } }); } catch (ex) { if (ex.status !== 409) { toast(`${acc}: ${ex.message}`, true); } }
+        }
+    }
     let done = 0;
-    for (const f of files) {
-        nameEl.textContent = f.name; stateEl.textContent = files.length > 1 ? `${done + 1} of ${files.length}` : 'uploading'; bar.style.width = '0%';
-        try { await uploadOne(f, state.filesPath, pct => (bar.style.width = pct + '%')); done++; }
-        catch (ex) { toast(`${f.name}: ${ex.message}`, true); }
+    for (const [n, x] of list.entries()) {
+        nameEl.textContent = x.sub ? `${x.sub}/${x.file.name}` : x.file.name; stateEl.textContent = list.length > 1 ? `${n + 1} of ${list.length}` : 'uploading'; bar.style.width = '0%';
+        try { await uploadOne(x.file, join(dir, x.sub), pct => (bar.style.width = pct + '%')); done++; }
+        catch (ex) { if (ex.message !== 'Skipped') toast(`${x.file.name}: ${ex.message}`, true); }
     }
     box.hidden = true;
-    if (done) toast(done === 1 ? 'Uploaded' : `Uploaded ${done} files`);
-    loadFiles(state.filesPath);
+    if (done) toast(done === 1 ? `Uploaded to ${basename(dir) || 'the root'}` : `Uploaded ${done} files to ${basename(dir) || 'the root'}`);
+    if (state.tab === 'files') loadFiles(state.filesPath);
+}
+
+// ---------- drag and drop (mouse) ----------
+// From the computer: files or whole folders onto the list (this folder) or onto a folder row / breadcrumb.
+// Inside Files: drag a row onto a folder row, the ".." row or a breadcrumb to move it. Out of the browser: drag a
+// file to the desktop to download it (Chrome and Edge).
+function finePointer() { return matchMedia('(pointer: fine)').matches; }
+const DRAG_TYPE = 'application/x-porthole-path';
+let dragFrom = null;
+function dropTargetOf(el) {
+    const row = el.closest?.('#file-list .row[data-name]');
+    if (row && row.dataset.type === 'dir') return { el: row, dir: join(state.filesPath, row.dataset.name), label: row.dataset.name };
+    const up = el.closest?.('#file-list [data-up]');
+    if (up) return { el: up, dir: parentOf(state.filesPath), label: basename(parentOf(state.filesPath)) || 'the parent folder' };
+    const cr = el.closest?.('#crumbs button[data-path]');
+    if (cr) return { el: cr, dir: cr.dataset.path, label: cr.textContent.trim() };
+    if (el.closest?.('#tab-files')) return { el: $('#file-list'), dir: state.filesPath, label: basename(state.filesPath) || 'this folder', here: true };
+    return null;
+}
+function clearDrop() { $$('.drop-on').forEach(x => x.classList.remove('drop-on')); $('#tab-files').classList.remove('dropping'); $('#drop-hint').hidden = true; }
+document.addEventListener('dragstart', e => {
+    const row = e.target.closest?.('#file-list .row[data-name]'); if (!row) return;
+    const rel = join(state.filesPath, row.dataset.name);
+    dragFrom = rel;
+    e.dataTransfer.setData(DRAG_TYPE, rel);
+    e.dataTransfer.setData('text/plain', '/' + rel.replace(/^\/+/, ''));
+    if (row.dataset.type === 'file') e.dataTransfer.setData('DownloadURL', `application/octet-stream:${row.dataset.name}:${location.origin}/api/files/download?path=${encodeURIComponent(rel)}`);
+    e.dataTransfer.effectAllowed = 'copyMove';
+    row.classList.add('dragging');
+});
+document.addEventListener('dragend', () => { dragFrom = null; $$('.dragging').forEach(x => x.classList.remove('dragging')); clearDrop(); });
+document.addEventListener('dragover', e => {
+    if (state.tab !== 'files' || $('#tab-files').hidden) return;
+    const types = [...(e.dataTransfer?.types || [])];
+    const internal = types.includes(DRAG_TYPE), external = types.includes('Files');
+    if (!internal && !external) return;
+    const t = dropTargetOf(e.target);
+    if (!t || (internal && (t.here || t.dir === dragFrom || t.dir === parentOf(dragFrom || '')))) { if (internal) { e.dataTransfer.dropEffect = 'none'; e.preventDefault(); } clearDrop(); return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = internal ? 'move' : 'copy';
+    if (!t.el.classList.contains('drop-on')) { clearDrop(); t.el.classList.add('drop-on'); }
+    if (t.here) $('#tab-files').classList.add('dropping');
+    const hint = $('#drop-hint'); hint.hidden = false; hint.textContent = internal ? `Move ${basename(dragFrom)} into ${t.label}` : `Drop to upload into ${t.label}`;
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget || !document.documentElement.contains(e.relatedTarget)) clearDrop(); });
+document.addEventListener('drop', async e => {
+    if (state.tab !== 'files' || $('#tab-files').hidden) return;
+    const types = [...(e.dataTransfer?.types || [])];
+    const t = dropTargetOf(e.target); clearDrop();
+    if (types.includes(DRAG_TYPE)) {
+        e.preventDefault();
+        const from = e.dataTransfer.getData(DRAG_TYPE);
+        if (!t || t.here || !from) return;
+        try { const r = await api('/api/files/move', { method: 'POST', body: { path: from, to: t.dir || '.' } }); if (!r.unchanged) toast(`Moved ${basename(from)} to ${t.label}`); }
+        catch (ex) { toast(ex.message, true); }
+        return loadFiles(state.filesPath);
+    }
+    if (!types.includes('Files') || !t) return;
+    e.preventDefault();
+    // Read the entries now: the drop's data is gone after the first await.
+    const entries = [...e.dataTransfer.items].filter(i => i.kind === 'file').map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+    const plain = entries.length ? [] : [...e.dataTransfer.files].map(file => ({ file, sub: '' }));
+    const list = [...plain];
+    const walk = async (entry, sub) => {
+        if (entry.isFile) { const file = await new Promise((res, rej) => entry.file(res, rej)).catch(() => null); if (file) list.push({ file, sub }); return; }
+        if (!entry.isDirectory) return;
+        const reader = entry.createReader(), here = sub ? `${sub}/${entry.name}` : entry.name;
+        for (;;) {
+            const batch = await new Promise((res, rej) => reader.readEntries(res, rej)).catch(() => []);
+            if (!batch.length) break;
+            for (const child of batch) await walk(child, here);
+        }
+    };
+    for (const en of entries) await walk(en, '');
+    const skip = list.filter(x => /(^|\/)(node_modules|\.git)(\/|$)/.test(x.sub));
+    let todo = list;
+    if (skip.length && await confirmDialog({ title: `Skip ${skip.length} files in node_modules / .git?`, text: 'They are usually rebuilt on the box (npm install, git clone) rather than uploaded.', action: 'Skip them', danger: false })) todo = list.filter(x => !skip.includes(x));
+    if (todo.length > 200 && !(await confirmDialog({ title: `Upload ${todo.length} files?`, text: `Into ${t.label}. Folders are created as needed.`, action: 'Upload', danger: false }))) return;
+    await uploadMany(todo, t.dir);
 });
 function uploadOne(file, dir, onProgress, overwrite = false) {
     return new Promise((resolve, reject) => {

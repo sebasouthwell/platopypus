@@ -311,6 +311,12 @@ phone's Update button. Mechanism:
   what was shown. It runs as a registered server (`run-<name>`), opens its link, and Porthole adds it to the
   project's .gitignore. No state change.
 
+- **1.17.1** — **Drag and drop in Files** (mouse): drop files or whole folders from the computer onto the list
+  (this folder), a folder row or a breadcrumb to upload there, keeping the folder structure (offers to skip
+  node_modules/.git, asks above 200 files); drag a row onto a folder, the ".." row or a breadcrumb to move it
+  (`POST /api/files/move`, refuses a folder into itself and name clashes); drag a file out to the desktop to
+  download it (Chrome/Edge). No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

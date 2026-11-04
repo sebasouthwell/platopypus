@@ -116,6 +116,19 @@ r = await call(`/api/files/upload?path=smoke-dir&name=note.txt`, { method: 'PUT'
 check('duplicate upload is 409', r.status === 409);
 r = await call('/api/files?path=smoke-dir');
 check('list shows uploaded file', r.status === 200 && r.body.items.some(i => i.name === 'note.txt'));
+{   // Move (drag and drop): into a folder, refusing a folder into itself and a name clash.
+    await call('/api/files/mkdir', { method: 'POST', body: { path: 'smoke-dir', name: 'inner' } });
+    await call(`/api/files/upload?path=smoke-dir&name=movable.txt`, { method: 'PUT', body: payload, headers: { 'Content-Type': 'application/octet-stream' } });
+    let m = await call('/api/files/move', { method: 'POST', body: { path: 'smoke-dir/movable.txt', to: 'smoke-dir/inner' } });
+    check('move puts a file into a folder', m.status === 200 && m.body.path === 'smoke-dir/inner/movable.txt', JSON.stringify(m.body));
+    m = await call('/api/files/move', { method: 'POST', body: { path: 'smoke-dir/inner', to: 'smoke-dir/inner' } });
+    check('a folder cannot be moved into itself', m.status === 400, String(m.status));
+    await call(`/api/files/upload?path=smoke-dir&name=movable.txt`, { method: 'PUT', body: payload, headers: { 'Content-Type': 'application/octet-stream' } });
+    m = await call('/api/files/move', { method: 'POST', body: { path: 'smoke-dir/movable.txt', to: 'smoke-dir/inner' } });
+    check('move refuses to overwrite', m.status === 409, String(m.status));
+    m = await call('/api/files/move', { method: 'POST', body: { path: 'smoke-dir/inner/movable.txt', to: 'smoke-dir' } });
+    check('move back out (name clash is reported, nothing lost)', m.status === 409, String(m.status));
+}
 r = await call('/api/files/download?path=smoke-dir/note.txt', { raw: true });
 check('download returns bytes', r.status === 200 && (await r.text()).includes(marker));
 r = await call('/api/files?path=../../etc');

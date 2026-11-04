@@ -67,6 +67,28 @@ await page.screenshot({ path: process.env.SHOT || 'browser-probe.png', fullPage:
     check('desktop: dialogs open as a side panel', dp.right === 0 && dp.h >= 880, JSON.stringify(dp));
     await desk.keyboard.press('Escape'); await desk.waitForTimeout(200);
     check('desktop: Escape closes the panel', await desk.isHidden('#dialog'));
+    // Drag and drop: a row onto a folder moves it; files dropped from the computer upload into the folder shown.
+    await desk.evaluate(async () => {
+        const h = { 'X-Porthole': '1', 'Content-Type': 'application/json' };
+        await fetch('/api/files/mkdir', { method: 'POST', headers: h, body: JSON.stringify({ path: '.', name: 'drag-probe' }) });
+        await fetch('/api/files/mkdir', { method: 'POST', headers: h, body: JSON.stringify({ path: 'drag-probe', name: 'into' }) });
+        await fetch('/api/files/upload?path=drag-probe&name=moveme.txt', { method: 'PUT', headers: { 'X-Porthole': '1', 'Content-Type': 'application/octet-stream' }, body: 'x' });
+        localStorage.setItem('porthole.path', 'drag-probe');
+    });
+    await desk.goto(BASE + '/', { waitUntil: 'load' }); await desk.waitForTimeout(1200);   // opens Files in drag-probe
+    await desk.click('.tabs [data-go="files"]'); await desk.waitForTimeout(900);
+    await desk.dragAndDrop('#file-list .row[data-name="moveme.txt"]', '#file-list .row[data-name="into"]', { timeout: 8000 }).catch(e => errors.push(`drag: ${e.message.split(String.fromCharCode(10))[0]}`));
+    await desk.waitForTimeout(900);
+    const moved = await desk.evaluate(async () => (await (await fetch('/api/files?path=drag-probe/into', { headers: { 'X-Porthole': '1' } })).json()).items.map(i => i.name));
+    check('desktop: dragging a row onto a folder moves it', moved.includes('moveme.txt'), JSON.stringify(moved));
+    await desk.evaluate(() => {
+        const dt = new DataTransfer(); dt.items.add(new File(['dropped'], 'dropped.txt', { type: 'text/plain' }));
+        const target = document.querySelector('#file-list');
+        for (const type of ['dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+    });
+    await desk.waitForTimeout(1500);
+    const up = await desk.evaluate(async () => (await (await fetch('/api/files?path=drag-probe', { headers: { 'X-Porthole': '1' } })).json()).items.map(i => i.name));
+    check('desktop: files dropped from the computer upload into the open folder', up.includes('dropped.txt'), JSON.stringify(up));
     await desk.screenshot({ path: (process.env.SHOT || 'browser-probe.png').replace(/\.png$/, '-desktop.png') });
 }
 check('no uncaught errors overall', errors.length === 0, errors.join(' | ').slice(0, 500));
