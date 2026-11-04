@@ -345,6 +345,10 @@ phone's Update button. Mechanism:
 - **1.18.1** — The SSH port (22, also when systemd holds the socket) counts as a system port, so it no longer shows up
   as a stray port inside a project. No state change.
 
+- **1.18.2** — VS Code on project cards keeps every control: Share (password-protected, timed), Open and Unshare
+  with the time left, Start/Stop for the Box editor, and the editor menu; a project without an editor offers "Open
+  in VS Code" from its menu. An editor's share link is never the project's Open button. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

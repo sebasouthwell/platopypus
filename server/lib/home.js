@@ -118,13 +118,16 @@ async function projectsView({ liveList, servers, containers, devservers, links, 
         const ed = editors.get(c.name);
         const folder = ed?.folder || c.workdir || null;
         const port = c.ports[0]?.host || null;
-        put(folder, withLink({ type: ed ? 'editor' : 'container', id: `ctr:${c.name}`, name: c.name, title: ed ? 'VS Code' : c.title, image: c.image, compose: c.compose, port, ports: c.ports.map(x => x.host), running: c.state === 'running', status: c.status, app: c.app }));
+        const part = { type: ed ? 'editor' : 'container', id: `ctr:${c.name}`, name: c.name, title: ed ? 'VS Code' : c.title, image: c.image, compose: c.compose, port, ports: c.ports.map(x => x.host), running: c.state === 'running', status: c.status, app: c.app };
+        // An editor keeps its own share (password-protected, timed); its link is never the project's Open.
+        if (ed) { Object.assign(part, { shared: !!ed.shared, shareUrl: ed.url || null, expires: ed.expires || null, passwordHint: ed.passwordHint || null }); if (ed.shared) used.add(port); put(folder, part); }
+        else put(folder, withLink(part));
     }
     for (const d of devservers) {
         const sh = d.shell ? shellList.find(x => x.name === d.shell) : null;
         put(sh?.cwd || null, withLink({ type: 'port', id: `port:${d.port}`, title: d.process, port: d.port, running: true, shell: d.shell || null }));
     }
-    if (cs?.installed) box.parts.unshift({ type: 'box-editor', id: 'box-editor', title: 'Box editor', port: cs.port, running: !!cs.running, url: cs.shared ? cs.url : null });
+    if (cs?.installed) { box.parts.unshift({ type: 'box-editor', id: 'box-editor', title: 'Box editor', port: cs.port, running: !!cs.running, shared: !!cs.shared, shareUrl: cs.shared ? cs.url : null, expires: cs.expires || null, passwordHint: cs.passwordHint || null, folder: cs.folder || null }); if (cs.shared) used.add(cs.port); }
     for (const t of links) if (!used.has(t.port)) box.parts.push({ type: 'link', id: `link:${t.port}`, title: t.name || t.target || `port ${t.port}`, port: t.port, running: true, link: { url: t.url || null, kind: t.kind || 'quick', expires: t.expires || null, connected: t.connected ?? null, port: t.port } });
 
     // Merge a compose project's containers into one part ("3 containers"), keeping the details for the panel.
@@ -132,12 +135,14 @@ async function projectsView({ liveList, servers, containers, devservers, links, 
     for (const f of folders.values()) {
         if (!f.parts.length && !fsSync.existsSync(path.join(f.abs, '.portholerun')) && !fsSync.existsSync(path.join(f.abs, 'PORTHOLE.md'))) continue;
         const running = f.parts.some(x => x.running);
-        const primary = f.parts.find(x => x.running && x.url) || f.parts.find(x => x.running && x.link?.url) || null;
+        const app = f.parts.filter(x => x.type !== 'editor');
+        const primary = app.find(x => x.running && x.url) || app.find(x => x.running && x.link?.url) || null;
         let icon = null; try { const st = fsSync.statSync(f.abs); const ic = await folderIcon(f.abs, st.mtimeMs); if (ic) icon = rel(path.join(f.abs, ic)); } catch { /* none */ }
         out.push({
             name: f.name, path: f.path, icon, running, parts: f.parts,
             open: primary ? (primary.url || primary.link.url) : null,
             canRun: fsSync.existsSync(path.join(f.abs, '.portholerun')),
+            hasEditor: f.parts.some(x => x.type === 'editor'),
             summary: { running: f.parts.filter(x => x.running).length, total: f.parts.length },
         });
     }

@@ -694,6 +694,7 @@ function partIcon(x) {
     return `<span class="ico ${x.running ? (x.type === 'live' || x.type === 'run' || x.type === 'link' ? 'kelp' : 'brass') : 'dim'}">${icon(ic)}</span>`;
 }
 function partLink(x) {
+    if (x.type === 'editor' || x.type === 'box-editor') return x.shared && x.shareUrl ? ` · <a href="${esc(x.shareUrl)}" target="_blank" rel="noopener" class="kelp-link">shared</a>, password-protected${x.expires ? ` · closes in ${fmtIn(x.expires)}` : ''}` : x.running ? ' · not shared' : '';
     const url = x.url || x.link?.url;
     if (!url) return x.gone ? ' · <span class="warn">folder gone</span>' : x.running && x.port ? ' · local' : '';
     const host = url.replace(/^https:\/\//, '').split('/')[0];
@@ -705,8 +706,14 @@ function partControls(x, credChip) {
     if (x.type === 'live') return cred + (x.worker && !x.port ? '' : '') + (x.running ? `<button class="pill sm" data-live="stop" data-p="${esc(x.project)}" data-k="${esc(x.key)}">${icon('stop')}Stop</button>` : `<button class="pill sm" data-live="start" data-p="${esc(x.project)}" data-k="${esc(x.key)}">${icon('play')}Start</button>`) + more(`data-live-page="${esc(x.project)}" data-k="${esc(x.key)}"`);
     if (x.type === 'run' || x.type === 'server') return cred + (x.running ? `<button class="pill sm" data-srv="stop" data-slug="${esc(x.slug)}">${icon('stop')}Stop</button>` : x.canStart ? `<button class="pill sm" data-srv="start" data-slug="${esc(x.slug)}">${icon('play')}Start</button>` : '') + more(`data-srv-menu="${esc(x.slug)}"`);
     if (x.type === 'container') return cred + (x.running ? (x.port && !x.link ? `<button class="pill ghost sm" data-share="${x.port}" data-label="${esc(x.title)}">${icon('share')}Share</button>` : '') : `<button class="pill sm" data-cact="start" data-c="${esc(x.name)}">${icon('play')}Start</button>`) + more(`data-cmenu="${esc(x.name)}"`);
-    if (x.type === 'editor') return more(`data-cs="menu" data-who="${esc(x.name)}"`);
-    if (x.type === 'box-editor') return (x.running ? `<button class="pill sm" data-cs="stop" data-who="box">${icon('stop')}Stop</button>` : `<button class="pill sm" data-cs="start" data-who="box">${icon('play')}Start</button>`) + more('data-cs="menu" data-who="box"');
+    if (x.type === 'editor' || x.type === 'box-editor') {
+        const who = x.type === 'box-editor' ? 'box' : x.name;
+        const share = !x.running ? '' : x.shared
+            ? `<span class="pill kelp sm" data-open-url="${esc(x.shareUrl || '')}">${icon('external')}Open</span><button class="pill sm" data-cs="unshare" data-who="${esc(who)}">${icon('x')}Unshare</button>`
+            : `<button class="pill ghost sm" data-cs="share" data-who="${esc(who)}">${icon('share')}Share</button>`;
+        const startStop = x.type === 'box-editor' ? (x.running ? `<button class="pill sm" data-cs="stop" data-who="box">${icon('stop')}Stop</button>` : `<button class="pill sm" data-cs="start" data-who="box">${icon('play')}Start</button>`) : '';
+        return share + startStop + more(`data-cs="menu" data-who="${esc(who)}"`);
+    }
     if (x.type === 'port') return cred + (x.link ? `<button class="pill sm" data-unshare="${x.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost sm" data-share="${x.port}" data-label="${esc(x.title)}">${icon('share')}Share</button>`) + `<button class="pill ghost sm" data-register="${x.port}" data-label="${esc(x.title)}" title="Register as a server">${icon('plus')}</button>`;
     if (x.type === 'link') return cred + more(`data-link-menu="${x.port}"`);
     return '';
@@ -787,6 +794,7 @@ function projectMenu(p, s) {
     const { panel, close } = openDialog(`<h2>${icon('folder')}${esc(p.name)}</h2><p class="muted">${esc(projSummary(p))}</p><div class="menu">
         <button data-m="folder">${icon('folder-open')}Open the folder</button>
         <button data-m="agent">${icon('claude')}Start an agent here</button>
+        ${p.hasEditor ? '' : `<button data-m="vscode">${icon('file-code')}Open in VS Code<span class="sub" style="margin-left:6px">project editor, sees only this folder</span></button>`}
         ${p.canRun ? `<button data-m="run">${icon('rocket')}.portholerun…</button>` : ''}
         ${lives.map(x => `<button data-m="live" data-k="${esc(x.key)}" data-p="${esc(x.project)}">${icon('globe')}${esc(x.title)} · service page</button>`).join('')}
         ${p.parts.filter(x => x.type === 'run' || x.type === 'server').map(x => `<button data-m="srv" data-slug="${esc(x.slug)}">${icon('logs')}${esc(x.title)} · logs and settings</button>`).join('')}
@@ -799,6 +807,7 @@ function projectMenu(p, s) {
         const m = b.dataset.m; close();
         if (m === 'folder') { state.filesPath = p.path; go('files'); }
         if (m === 'agent') newShellDialog(p.path, 'agent');
+        if (m === 'vscode') codeServerStartWith(p.path, true);
         if (m === 'run') portholerunDialog(join(p.path, '.portholerun'));
         if (m === 'live') livePage(s.live.find(x => x.project === b.dataset.p), b.dataset.k);
         if (m === 'copy') copyText(p.open, 'Link copied');
@@ -1416,6 +1425,7 @@ async function loadServices() {
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
     $$('[data-proj-folder]', body).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
+    $$('[data-open-url]', body).forEach(b => b.onclick = e => { e.stopPropagation(); if (b.dataset.openUrl) window.open(b.dataset.openUrl, '_blank', 'noopener'); });
     $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.portholerun')));
     $$('[data-proj-menu]', body).forEach(b => b.onclick = () => projectMenu(s.projects[Number(b.dataset.projMenu)], s));
     $$('.ico.logo img, .ico.fav img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }, { once: true }));
