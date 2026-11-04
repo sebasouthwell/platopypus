@@ -277,6 +277,9 @@ phone's Update button. Mechanism:
   updater and restores the state archive on rollback; `/api/update` status gains `plan`. First migration:
   `1.15.0-isolate-services`. CI gains the upgrade-from-stable job.
 
+- **1.15.1** — `install.sh` makes `/etc/porthole.env` readable by root only (it was world-readable; found by the isolation
+  check on the live box: no secrets in it, but service accounts should not see box settings). No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

@@ -18,7 +18,7 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 # On the EC2 box the first boot writes /etc/porthole.env; later re-runs (scripts/box.ps1 deploy) reuse it.
-if [ -f /etc/porthole.env ]; then set -a; . /etc/porthole.env; set +a; fi
+if [ -f /etc/porthole.env ]; then set -a; . /etc/porthole.env; set +a; chmod 600 /etc/porthole.env; fi   # root only: app accounts must not read box settings
 
 # Default: a box when systemd runs this machine, otherwise a container (the self-updater re-runs this script without MODE).
 if [ -z "${MODE:-}" ]; then if [ -d /run/systemd/system ]; then MODE=box; else MODE=docker; fi; fi
