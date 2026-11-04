@@ -31,6 +31,7 @@ import * as projectFlags from './lib/projects.js';
 import * as zoned from './lib/zoned.js';
 import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
+import * as quick from './lib/quick.js';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
 import * as portholerun from './lib/portholerun.js';
@@ -548,6 +549,12 @@ const server = http.createServer(async (req, res) => {
             const busy = list.filter(s => (s.kind === 'agent' || s.kind === 'remote-control') && (m[1] === 'move-logins' ? s.runAs !== 'agent' : s.runAs === 'agent')).map(s => s.name);
             return send(res, 200, m[1] === 'move-logins' ? await agentUser.moveLogins({ busy }) : await agentUser.undoMoveLogins({ busy }));
         }
+
+        // Pins and recents for live-service actions (Home)
+        if (p === '/api/quick' && method === 'GET') return send(res, 200, quick.get());
+        if (p === '/api/quick/pins' && method === 'POST') return send(res, 201, quick.pin(await readJson(req, 8 * 1024)));
+        if ((m = p.match(/^\/api\/quick\/pins\/([a-f0-9]{12})$/)) && method === 'DELETE') return send(res, 200, quick.unpin(m[1]));
+        if (p === '/api/quick/recents' && method === 'DELETE') return send(res, 200, quick.clearRecents());
 
         // Live services (PORTHOLE.md)
         if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());

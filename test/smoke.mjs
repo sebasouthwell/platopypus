@@ -424,6 +424,22 @@ rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-pro
         }
         r = await call('/api/live/smoke-count/web/groups/0');
         check('the list reflects the actions', r.status === 200 && r.body.items.length === 0, JSON.stringify(r.body).slice(0, 120));
+        // Pins and recents (Home): runs are recorded newest first; pins point by label and are checked.
+        r = await call('/api/quick');
+        const rec = r.body?.recents || [];
+        check('recent runs are recorded, newest first, with the item and the action', r.status === 200 && rec[0]?.kind === 'group' && rec[0].action === 'Close' && rec.some(x => x.kind === 'item' && x.item === 'r2' && x.group === 'Rooms') && rec.some(x => x.kind === 'item' && x.item === 'r1' && x.action === 'Rename'), JSON.stringify(rec).slice(0, 300));
+        const pinA = await call('/api/quick/pins', { method: 'POST', body: { kind: 'item', project: 'smoke-count', key: 'web', group: 'Rooms', item: 'r2', action: 'Close' } });
+        const pinB = await call('/api/quick/pins', { method: 'POST', body: { kind: 'item', project: 'smoke-count', key: 'web', group: 'Rooms', item: 'r2' } });
+        check('pinning an item twice keeps one pin, and an item pin opens every action', pinA.status === 201 && pinB.body?.id === pinA.body?.id && pinA.body.action === null, JSON.stringify([pinA.body, pinB.body]).slice(0, 200));
+        r = await call('/api/quick/pins', { method: 'POST', body: { kind: 'item', project: 'smoke-count', key: 'web', group: 'Rooms', item: 'r2; id' } });
+        check('a pin refuses an item id the lists could never print', r.status === 400, `${r.status} ${r.body?.error}`);
+        r = await call('/api/quick/pins', { method: 'POST', body: { kind: 'action', project: 'smoke-count', key: 'web' } });
+        check('an action pin needs its action', r.status === 400, `${r.status} ${r.body?.error}`);
+        r = await call(`/api/quick/pins/${pinA.body?.id}`, { method: 'DELETE' });
+        const after = (await call('/api/quick')).body;
+        check('unpinning removes it', r.status === 200 && r.body.removed === 1 && !after.pins.length, JSON.stringify(after.pins));
+        r = await call('/api/quick/recents', { method: 'DELETE' });
+        check('recents can be cleared', r.status === 200 && !(await call('/api/quick')).body.recents.length, String(r.status));
     }
     check('live list describes inputs and run-as', lv?.runAs === 'service' && lv.actions[2].inputs.length === 2 && lv.actions[2].inputs[0].type === 'integer', JSON.stringify(lv && { runAs: lv.runAs, a: lv.actions[2] }).slice(0, 200));
     const pidBefore = lv?.pid;

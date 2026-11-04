@@ -63,6 +63,7 @@ with mode 0600. Formats as of version 1.0:
 | `migrate/pre-<version>-<stamp>.tar.gz` | migrate.js | state archive taken before migrations (5 kept); also login-move backups (1.12.0) |
 | `project-links.json` | upgrade.js | `{ links: [{ from, to, at, level, commit }] }` — "Upgrade repo" relationships between project folders (1.16.0) |
 | `portholerun.json` | portholerun.js | `{ "<run-slug>": { file, hash, at } }` — what each .portholerun server was started from, for restarts (1.18.4) |
+| `quick.json` | quick.js | `{ pins: [{ id, kind, project, key, action, group, item, itemLabel, at }], recents: [… , code] }` — Home shortcuts to live-service commands; matched by label (1.19.0) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -359,6 +360,14 @@ phone's Update button. Mechanism:
   settings, Vault values and account (it used to rerun the bare command, so BusTracker came back without its API
   keys or `PORT`); if the file changed since it last ran, it asks you to review it in Files first. Live services take
   their own start path the same way. New state: `portholerun.json` (slug → file and the hash that was run; additive).
+
+- **1.19.0** — Quick access to live-service commands. Pin an action, a group (Rooms) or one item (a room) to Home
+  and the desktop sidebar; Home also lists the last commands run (Recent), which reopen their sheet without running.
+  Running cards show their service's groups and first actions as chips. The open action, group or item sheet comes
+  back after a reload for 10 minutes, and each has a Copy link (`/#do=…`, opens the sheet, never runs). Group lists
+  put this device's recently used items first and get a filter past 8 items. Pins point by label and are checked when
+  opened; confirmations, inputs and list checks are unchanged. New state: `quick.json` (pins and recents; additive).
+  New API: `GET /api/quick`, `POST /api/quick/pins`, `DELETE /api/quick/pins/:id`, `DELETE /api/quick/recents`.
 
 ## Release checklist
 

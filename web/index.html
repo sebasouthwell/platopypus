@@ -73,6 +73,7 @@
     </header>
     <h1>Home</h1>
     <div class="home-cols"><div class="home-main">
+    <div id="home-pinned"></div>
     <div class="stats" id="home-stats"></div>
     <form class="wish" id="home-wish">
       <label for="wish-text">I wish for:</label>
@@ -223,6 +224,10 @@
       <button data-nav-page="security" title="Security"><svg class="i"><use href="/sprite.svg#i-shield"/></svg><span>Security</span></button>
       <button data-nav-page="agents" title="AI agents"><svg class="i"><use href="/sprite.svg#i-claude"/></svg><span>AI agents</span></button>
       <button data-nav-page="github" title="GitHub"><svg class="i"><use href="/sprite.svg#i-branch"/></svg><span>GitHub</span></button>
+    </div>
+    <div class="nav-group nav-pins" id="nav-pins-wrap" hidden>
+      <div class="nav-label">Pinned</div>
+      <div id="nav-pins"></div>
     </div>
     <div class="nav-group nav-shells" id="nav-shells-wrap" hidden>
       <div class="nav-label">Open shells<button class="nav-add" id="nav-shell-new" aria-label="New shell" title="New shell"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button></div>

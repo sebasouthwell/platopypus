@@ -41,6 +41,24 @@ for (const tab of ['home', 'shells', 'services', 'files', 'more']) {
 }
 await page.screenshot({ path: process.env.SHOT || 'browser-probe.png', fullPage: false });
 
+// Pins on Home: a pin whose service has gone shows as gone, opens an explanation, and can be removed there.
+// The open sheet is remembered across a reload (iOS reloads the app when you switch away).
+{
+    const pin = await page.evaluate(async () => (await (await fetch('/api/quick/pins', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Porthole': '1' }, body: JSON.stringify({ kind: 'item', project: 'probe-gone', key: 'web', group: 'Rooms', item: 'A7KQ', itemLabel: 'Quiz night' }) })).json()));
+    await page.click('.tabs [data-go="services"]'); await page.waitForTimeout(400);
+    await page.click('.tabs [data-go="home"]'); await page.waitForTimeout(1500);
+    const tile = await page.$eval('#home-pinned .qtile', el => ({ text: el.textContent, gone: el.classList.contains('gone') })).catch(() => null);
+    check('a pin shows on Home, marked gone when its service is gone', !!pin?.id && tile?.gone && /Quiz night/.test(tile.text), JSON.stringify(tile));
+    await page.click('#home-pinned .qtile'); await page.waitForTimeout(800);
+    check('tapping a gone pin explains it instead of running anything', await page.isVisible('#dialog [data-unpin]'));
+    await page.evaluate(() => localStorage.setItem('porthole.sheet', JSON.stringify({ t: { kind: 'item', project: 'probe-gone', key: 'web', group: 'Rooms', item: 'A7KQ' }, at: Date.now() })));
+    await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1800);
+    check('the open sheet comes back after a reload', await page.isVisible('#dialog [data-unpin]'));
+    await page.click('#dialog [data-unpin]'); await page.waitForTimeout(900);
+    const left = await page.evaluate(async () => (await (await fetch('/api/quick', { headers: { 'X-Porthole': '1' } })).json()).pins.length);
+    check('the pin can be removed from its sheet', left === 0 && await page.isHidden('#dialog') && !(await page.$('#home-pinned .qtile')), String(left));
+}
+
 // Desktop: the sidebar replaces the bottom tabs, collapses with the hamburger, pages open in the content area,
 // dialogs open as a side panel and confirmations stay centred.
 {

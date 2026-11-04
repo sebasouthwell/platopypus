@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { envFor } from './vault.js';
 import { log } from './log.js';
 import { folderIcon, relative as relToRoot } from './files.js';
+import { recordRun } from './quick.js';
 
 const run = promisify(execFile);
 const projectsDir = path.join(config.root, 'Projects');
@@ -371,7 +372,9 @@ export async function action(project, key, index, values = {}) {
     const a = (Array.isArray(s.actions) ? s.actions : [])[Number(index)];
     if (!a) throw httpError(404, 'No such action.');
     const inputs = inputEnv(a.inputs, values && typeof values === 'object' ? values : {});
-    return runAction(p, project, key, s, a, inputs, String(a.label));
+    const r = await runAction(p, project, key, s, a, inputs, String(a.label));
+    recordRun({ kind: 'action', project, key, action: a.label }, { code: r.code });
+    return r;
 }
 
 // Groups: a list command names the items (rooms, sessions, users…), and each item gets the group's actions with
@@ -440,6 +443,7 @@ export async function groupAction(project, key, gi, ai, item, values = {}) {
     let tail = '';
     if (many && (a.restart || a.stop_first) && results.every(r => r.code === 0)) { try { await restart(project, key); tail = '\n[restarted the service]'; } catch (e) { tail = `\n[could not restart: ${e.message}]`; } }
     const failed = results.filter(r => r.code !== 0).length;
+    recordRun(item === '*' ? { kind: 'group', project, key, group: g.label, action: a.label } : { kind: 'item', project, key, group: g.label, action: a.label, item: targets[0].id, itemLabel: targets[0].label }, { code: failed ? 1 : 0 });
     return {
         label: a.label, items: results.length, failed, code: failed ? 1 : 0, ms: results.reduce((n, r) => n + r.ms, 0),
         output: (results.length === 1 ? results[0].output : results.map(r => `-- ${r.id} · exit ${r.code}\n${r.output.trim()}`).join('\n\n')) + tail,

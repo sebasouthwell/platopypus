@@ -108,7 +108,8 @@ function showCopySheet(text, title = 'Copy') {
 function openDialog(html, { size = null } = {}) {
     const dlg = $('#dialog'), panel = $('.dialog-panel', dlg);
     panel.innerHTML = html; dlg.hidden = false; dlg.classList.toggle('small', size === 'small');
-    const close = () => { dlg.hidden = true; panel.innerHTML = ''; };
+    forgetSheet();
+    const close = () => { dlg.hidden = true; panel.innerHTML = ''; forgetSheet(); };
     $('.dialog-backdrop', dlg).onclick = close;
     $$('[data-close]', panel).forEach(b => (b.onclick = close));
     const first = $('input, textarea', panel);
@@ -152,7 +153,7 @@ async function showLogin() {
         if (!canPasskey && loginInfo.passwordSet) $('#login-password').focus();
     }
 }
-async function showApp() { $('#login').hidden = true; $('#app').hidden = false; go(state.tab); }
+async function showApp() { $('#login').hidden = true; $('#app').hidden = false; go(state.tab); resumeSheet(); }
 
 async function postAuth(path, body) {
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Porthole': '1' }, body: JSON.stringify(body || {}), credentials: 'same-origin' });
@@ -762,7 +763,7 @@ function projectCard(p, i, credChip) {
           ${p.open ? `<a class="pill kelp" href="${esc(openLink(p.open, x.port, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
           ${partControls(x, credChip).replace(/<button class="more"[^>]*>[\s\S]*?<\/button>$/, '')}
           <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
-        </div></section>`;
+        </div>${quickChips(p)}</section>`;
     }
     return `<section class="pcard ${p.running ? 'on' : ''}">
         <div class="pcard-head">
@@ -772,7 +773,7 @@ function projectCard(p, i, credChip) {
           ${p.open ? `<a class="pill kelp" href="${esc(openLink(p.open, null, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
           ${p.canRun && !runUp ? `<button class="pill ghost-kelp" data-proj-run="${esc(p.path)}">${icon('play')}Run</button>` : ''}
           <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
-        </div>
+        </div>${quickChips(p)}
         ${p.parts.length ? `<div class="pcard-parts">${partsHtml(p.parts, credChip)}</div>` : ''}
     </section>`;
 }
@@ -831,15 +832,18 @@ async function appsDialog() {
 async function loadHomeRunning() {
     const host = $('#home-running'); if (!host) return;
     const [s] = await Promise.all([api('/api/services').catch(() => null), loadCreds()]);
+    if (s) liveSeen = s.live || [];
+    loadHomeQuick(s).catch(() => {});
     const up = (s?.projects || []).filter(p => p.running);
     const boxUp = (s?.box?.parts || []).filter(x => x.running && x.type !== 'link');
     if (!up.length && !boxUp.length) { host.innerHTML = ''; return; }
     host.innerHTML = `<h2 class="section"><span class="bullet kelp"></span>Running now<button class="act" data-go-services>Services</button></h2><div class="list">${up.map(p => `
         <div class="row"><button class="row-main" data-proj-folder="${esc(p.path)}"><span class="ico kelp${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(projSummary(p))}</div></div></button>
-          ${p.open ? `<a class="pill kelp sm" href="${esc(openLink(p.open, null, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}</div>`).join('')}
+          ${p.open ? `<a class="pill kelp sm" href="${esc(openLink(p.open, null, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}</div>${quickChips(p, 'in-row')}`).join('')}
         ${boxUp.length ? `<button class="row" data-go-services><span class="ico">${icon('server')}</span><div class="main"><div class="title">Box</div><div class="sub">${esc(boxUp.map(x => x.title).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>` : ''}</div>`;
     $$('[data-proj-folder]', host).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
     $$('[data-go-services]', host).forEach(b => b.onclick = () => go('services'));
+    bindQuickChips(host);
     $$('.ico.fav img', host).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav'); sp.innerHTML = icon('folder'); }, { once: true }));
 }
 
@@ -1307,6 +1311,7 @@ var credsSeen = []; // var: read before this line runs (no TDZ)
 async function loadCreds() { credsSeen = await api('/api/creds').catch(() => credsSeen); return credsSeen; }
 async function loadServices() {
     const s = await api('/api/services');
+    liveSeen = s.live || [];
     const shared = await loadCreds();
     const credChip = port => { const list = shared.filter(c => c.port === port); return list.length ? `<button class="pill" data-credport="${port}" title="Shared credentials">${icon('key')}${list.length > 1 ? list.length : ''}</button>` : ''; };
     const f = state.servicesFilter;
@@ -1427,6 +1432,7 @@ async function loadServices() {
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
     $$('[data-proj-folder]', body).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
+    bindQuickChips(body);
     $$('[data-open-url]', body).forEach(b => b.onclick = e => { e.stopPropagation(); if (b.dataset.openUrl) window.open(b.dataset.openUrl, '_blank', 'noopener'); });
     $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.portholerun')));
     $$('[data-proj-menu]', body).forEach(b => b.onclick = () => projectMenu(s.projects[Number(b.dataset.projMenu)], s));
@@ -1515,7 +1521,8 @@ async function livePage(p, key) {
           ${v.host ? `<a class="row" href="${esc(openLink(v.host.url, v.port, allCreds))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
-        ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
+        ${v.actions.length || v.groups?.length ? `<h3 class="section" style="margin-top:14px">Actions<button class="act" data-pinpick>${icon('pin')}Pin to Home…</button></h3>` : ''}
+        ${v.actions.length ? `<div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
         ${(v.groups || []).map(g => `<details class="group" data-group="${g.i}"><summary><span class="ico brass">${icon('package')}</span><span class="gl">${esc(g.label)}</span><span class="meta" data-gcount>${g.hint ? esc(g.hint) : ''}</span>${icon('chevron', 'i chev')}</summary><div class="list" data-gitems><p class="muted" style="padding:10px 12px">Loading…</p></div></details>`).join('')}
         ${v.links.length && base ? `<h3 class="section" style="margin-top:14px">Links</h3><div class="chips" style="flex-wrap:wrap">${v.links.map(l => `<a class="pill" href="${esc(base.replace(/\/$/, '') + (l.path.startsWith('/') ? l.path : '/' + l.path))}" target="_blank" rel="noopener">${icon('external')}${esc(l.label)}</a>`).join('')}</div>` : ''}
         ${v.credentials.length || shared.length ? `<h3 class="section" style="margin-top:14px">Credentials</h3><div class="list">
@@ -1552,49 +1559,278 @@ async function livePage(p, key) {
         catch (ex) { toast(ex.message, true); }
     });
     $$('[data-shared]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.shared); });
-    $$('details.group', panel).forEach(d => d.addEventListener('toggle', async () => {
+    $$('details.group', panel).forEach(d => d.addEventListener('toggle', () => {
         if (!d.open || d.dataset.loaded) return;
-        const g = v.groups[Number(d.dataset.group)];
-        const box = $('[data-gitems]', d);
-        try {
-            const r = await api(url(`groups/${g.i}`));
-            d.dataset.loaded = '1';
-            const items = r.items || [];
-            $('[data-gcount]', d).textContent = `${items.length}`;
-            const allOk = g.actions.some(a => a.all);
-            box.innerHTML = (r.error ? `<p class="sub warn" style="padding:8px 12px">${esc(r.error)}</p>` : '')
-                + (!items.length ? `<p class="muted" style="padding:10px 12px">No ${esc(g.item)}s right now.</p>` : '')
-                + (items.length > 1 && allOk ? `<button class="row" data-gi="*"><span class="ico kelp">${icon('package')}</span><div class="main"><div class="title">All ${items.length} ${esc(g.item)}s</div><div class="sub">Run one command on every ${esc(g.item)}</div></div>${icon('chevron', 'i chev')}</button>` : '')
-                + items.map((it, n) => `<button class="row" data-gi="${n}"><span class="ico dim">${icon('activity')}</span><div class="main"><div class="title ${it.label ? '' : 'mono'}">${esc(it.label || it.id)}</div>${it.label || it.sub ? `<div class="sub"><span class="mono">${esc(it.id)}</span>${it.sub ? ` · ${esc(it.sub)}` : ''}</div>` : ''}</div>${icon('chevron', 'i chev')}</button>`).join('');
-            $$('[data-gi]', box).forEach(row => row.onclick = () => groupItemSheet({ p, key, v, g, items, item: row.dataset.gi === '*' ? null : items[Number(row.dataset.gi)], url }));
-        } catch (ex) { box.innerHTML = `<p class="sub warn" style="padding:8px 12px">${esc(ex.message)}</p>`; }
+        d.dataset.loaded = '1';
+        fillGroupList(d, { p, key, v, g: v.groups[Number(d.dataset.group)], url });
     }));
+    const pp = $('[data-pinpick]', panel); if (pp) pp.onclick = () => pinPicker({ p, key, v, url });
 }
 
 // The command sheet for one item of a group (or for all of them): the group's actions as buttons, output below.
-function groupItemSheet({ p, key, v, g, items, item, url }, output = null) {
+function groupItemSheet(r, output = null, { last = null, busy = false } = {}) {
+    const { p, key, v, g, items, item, url } = r;
     const all = !item;
     const acts = g.actions.filter(a => !all || a.all);
     const name = all ? `All ${items.length} ${g.item}s` : (item.label || item.id);
+    const t = all ? null : { kind: 'item', project: p.project, key, group: g.label, item: item.id, itemLabel: item.label || null };
     const { panel, close } = openDialog(`<h2>${icon('package')}${esc(name)}</h2>
         <p class="muted">${esc(g.label)} · ${esc(v.title)}${all ? '' : ` · <span class="mono">${esc(item.id)}</span>`}${item?.sub ? `<br>${esc(item.sub)}` : ''}</p>
-        <div class="chips" style="flex-wrap:wrap">${acts.map(a => `<button class="pill" data-ga="${a.i}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div>
+        ${t ? sheetTools(t) : ''}
+        <div class="chips" style="flex-wrap:wrap">${acts.map(a => `<button class="pill${a.label === last ? ' ghost-kelp' : ''}" data-ga="${a.i}" ${busy ? 'disabled' : ''}>${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div>
         <pre data-ga-out ${output ? '' : 'hidden'} style="max-height:40vh;margin-top:10px">${output ? esc(output) : ''}</pre>
-        <div class="buttons"><button data-back>${icon('back')}Back to ${esc(v.title)}</button><button data-close>Close</button></div>`);
-    $('[data-back]', panel).onclick = async () => { close(); const fresh = (await api('/api/services').catch(() => ({}))).live?.find(x => x.project === p.project); livePage(fresh || p, key); };
+        <div class="buttons"><button data-glist>${icon('back')}All ${esc(g.item)}s</button><button data-back>${icon('globe')}${esc(v.title)}</button><button data-close>Close</button></div>`);
+    if (t) { rememberSheet(t); bindSheetTools(panel, t); }
+    $('[data-glist]', panel).onclick = () => groupSheet(r);
+    $('[data-back]', panel).onclick = () => { close(); backToService(r); };
     $$('[data-ga]', panel).forEach(b => b.onclick = async () => {
         const a = g.actions[Number(b.dataset.ga)];
         let inputs = {};
-        if (a.inputs.length) { inputs = await actionInputsDialog(a, name); if (!inputs) return groupItemSheet({ p, key, v, g, items, item, url }, output); }
-        else if ((a.confirm || all) && !(await confirmDialog({ title: `${a.label}: ${name}?`, text: all ? `Runs once for each of the ${items.length} ${g.item}s, one after another.${a.restarts ? ' The service restarts once at the end.' : ''}` : `${g.label} · ${item.id}${a.restarts ? '. The service is restarted.' : ''}`, action: 'Run', danger: false }))) return groupItemSheet({ p, key, v, g, items, item, url }, output);
-        groupItemSheet({ p, key, v, g, items, item, url }, 'Running…');
+        if (a.inputs.length) { inputs = await actionInputsDialog(a, name); if (!inputs) return groupItemSheet(r, output, { last }); }
+        else if ((a.confirm || all) && !(await confirmDialog({ title: `${a.label}: ${name}?`, text: all ? `Runs once for each of the ${items.length} ${g.item}s, one after another.${a.restarts ? ' The service restarts once at the end.' : ''}` : `${g.label} · ${item.id}${a.restarts ? '. The service is restarted.' : ''}`, action: 'Run', danger: false }))) return groupItemSheet(r, output, { last });
+        groupItemSheet(r, `${a.label}: running…`, { last: a.label, busy: true });
+        if (!all) noteItemUse(r, item.id);
         let text;
         try {
-            const r = await api(url(`groups/${g.i}/actions/${a.i}`), { method: 'POST', body: { item: all ? '*' : item.id, inputs } });
-            text = `${r.label} · ${r.items > 1 ? `${r.items} ${g.item}s${r.failed ? `, ${r.failed} failed` : ''}` : `exit ${r.code}`} · ${(r.ms / 1000).toFixed(1)} s\n\n${r.output || '(no output)'}`;
+            const x = await api(url(`groups/${g.i}/actions/${a.i}`), { method: 'POST', body: { item: all ? '*' : item.id, inputs } });
+            text = `${x.label} · ${x.items > 1 ? `${x.items} ${g.item}s${x.failed ? `, ${x.failed} failed` : ''}` : `exit ${x.code}`} · ${(x.ms / 1000).toFixed(1)} s\n\n${x.output || '(no output)'}`;
         } catch (ex) { text = ex.message; toast(ex.message, true); }
-        groupItemSheet({ p, key, v, g, items, item, url }, text);
+        loadQuick().catch(() => {});
+        groupItemSheet(r, text, { last: a.label });
     });
+}
+
+// ---------- pins and recents ----------
+// A pin points at a service action, a whole group, or one item (a room); recents are the last commands run.
+// Both live on the box (/api/quick). Opening one goes through the same sheets, confirmations and item checks
+// as the service page: a pin is a shortcut, never a way round them.
+var liveSeen = [];   // var: read by cards rendered before loadServices assigns it
+let quickCache = { pins: [], recents: [] };
+let quickEditing = false;
+async function loadQuick() { quickCache = await api('/api/quick').catch(() => quickCache); return quickCache; }
+const sameTarget = (a, b) => a.kind === b.kind && a.project === b.project && a.key === b.key && (a.group || null) === (b.group || null) && (a.item || null) === (b.item || null) && (a.kind !== 'action' || a.action === b.action);
+const pinOf = t => quickCache.pins.find(x => sameTarget(x, t));
+const targetName = t => t.kind === 'action' ? t.action : t.kind === 'group' ? t.group : (t.itemLabel || t.item);
+const targetIcon = t => t.kind === 'action' ? 'zap' : t.kind === 'group' ? 'package' : 'activity';
+async function togglePin(t) {
+    const have = pinOf(t);
+    try {
+        if (have) { await api(`/api/quick/pins/${have.id}`, { method: 'DELETE' }); toast('Removed from Home'); }
+        else { await api('/api/quick/pins', { method: 'POST', body: t }); toast('Pinned to Home'); }
+    } catch (ex) { toast(ex.message, true); }
+    await loadQuick(); renderNavPins();
+    return !!pinOf(t);
+}
+// Finds what a target points at now. Null when the service, action or group is gone from PORTHOLE.md.
+function resolveTarget(t, live = liveSeen) {
+    const p = (live || []).find(x => x.project === t.project);
+    const v = p?.services.find(x => x.key === t.key);
+    if (!v) return null;
+    const url = a => `/api/live/${encodeURIComponent(p.project)}/${v.key}/${a}`;
+    if (t.kind === 'action') { const a = v.actions.find(x => x.label === t.action); return a ? { p, key: v.key, v, a, url } : null; }
+    const g = (v.groups || []).find(x => x.label === t.group);
+    return g ? { p, key: v.key, v, g, url } : null;
+}
+// Small Pin / Copy link row used by the sheets.
+function sheetTools(t) {
+    const on = !!pinOf(t);
+    return `<div class="sheet-tools"><button class="pill sm ${on ? 'ghost-kelp' : 'ghost'}" data-pin-toggle aria-pressed="${on}">${icon('pin')}<span>${on ? 'Pinned' : 'Pin to Home'}</span></button><button class="pill sm ghost" data-copy-target>${icon('link')}Copy link</button></div>`;
+}
+function bindSheetTools(panel, t) {
+    const b = $('[data-pin-toggle]', panel);
+    if (b) b.onclick = async () => { b.disabled = true; const on = await togglePin(t); b.disabled = false; b.classList.toggle('ghost-kelp', on); b.classList.toggle('ghost', !on); b.setAttribute('aria-pressed', String(on)); $('span', b).textContent = on ? 'Pinned' : 'Pin to Home'; };
+    const c = $('[data-copy-target]', panel);
+    if (c) c.onclick = () => copyText(targetLink(t), 'Link copied: it opens this sheet after sign-in');
+}
+// A link that opens the sheet (never runs anything by itself). Add it to the iPhone home screen for a one-tap room.
+const targetLink = t => `${location.origin}/#do=${encodeURIComponent(JSON.stringify({ kind: t.kind, project: t.project, key: t.key, action: t.action || undefined, group: t.group || undefined, item: t.item || undefined, itemLabel: t.itemLabel || undefined }))}`;
+
+// Keep your place: the open sheet is remembered for a few minutes, so a reload (iOS does this when you switch away)
+// brings it back. Any other dialog, or closing it, forgets it.
+const SHEET_KEY = 'porthole.sheet', SHEET_TTL = 10 * 60_000;
+function rememberSheet(t) { try { localStorage.setItem(SHEET_KEY, JSON.stringify({ t, at: Date.now() })); } catch { /* private mode */ } }
+function forgetSheet() { try { localStorage.removeItem(SHEET_KEY); } catch { /* private mode */ } }
+function validTarget(t) { return t && ['action', 'group', 'item'].includes(t.kind) && typeof t.project === 'string' && typeof t.key === 'string' && (t.kind === 'action' ? typeof t.action === 'string' : typeof t.group === 'string') && (t.kind !== 'item' || typeof t.item === 'string'); }
+async function resumeSheet() {
+    let t = null;
+    const m = location.hash.match(/^#do=(.+)$/);
+    if (m) { try { t = JSON.parse(decodeURIComponent(m[1])); } catch { t = null; } history.replaceState(null, '', location.pathname + location.search); }
+    else { try { const r = JSON.parse(localStorage.getItem(SHEET_KEY) || 'null'); if (r && Date.now() - r.at < SHEET_TTL) t = r.t; } catch { t = null; } }
+    if (!validTarget(t)) return;
+    await loadQuick();
+    openTarget(t, { run: false });
+}
+
+// Opens what a pin, recent, card chip or link points at. run: a pinned action or a card chip runs straight away
+// (its confirmation and inputs still come first); recents and links only open the sheet.
+async function openTarget(t, { run = false } = {}) {
+    const s = await api('/api/services').catch(() => null);
+    if (s) liveSeen = s.live || [];
+    const r = resolveTarget(t);
+    if (!r) return goneTarget(t, `${targetName(t)} is no longer in ${t.project}'s PORTHOLE.md.`);
+    if (t.kind === 'action') return actionSheet(r, { run });
+    if (t.kind === 'group') return groupSheet(r);
+    let res;
+    try { res = await api(r.url(`groups/${r.g.i}`)); } catch (ex) { return toast(ex.message, true); }
+    const items = res.items || [];
+    const item = items.find(x => x.id === t.item);
+    if (!item) return goneTarget(t, `${t.itemLabel || t.item} is not in ${r.g.label} any more${res.error ? ` (the list failed: ${res.error})` : ''}.`, r);
+    groupItemSheet({ ...r, items, item }, null, { last: t.action || null });
+}
+function goneTarget(t, text, r = null) {
+    const pin = pinOf(t);
+    const { panel, close } = openDialog(`<h2>${icon(targetIcon(t))}${esc(targetName(t))}</h2><p class="muted">${esc(text)}</p>
+        <div class="buttons">${r ? `<button class="primary" data-glist>${icon('package')}${esc(r.g.label)}</button>` : ''}${pin ? `<button data-unpin>${icon('x')}Remove the pin</button>` : ''}<button data-close>Close</button></div>`, { size: 'small' });
+    const gl = $('[data-glist]', panel); if (gl) gl.onclick = () => groupSheet(r);
+    const u = $('[data-unpin]', panel); if (u) u.onclick = async () => { await togglePin(t); close(); loadHomeQuick().catch(() => {}); };
+}
+async function backToService(r) {
+    const fresh = (await api('/api/services').catch(() => ({}))).live?.find(x => x.project === r.p.project);
+    livePage(fresh || r.p, r.key);
+}
+
+// One plain action on its own: Run (again), output, pin.
+function actionSheet(r, { run = false, output = null, busy = false } = {}) {
+    const { p, key, v, a, url } = r;
+    const t = { kind: 'action', project: p.project, key, action: a.label };
+    const { panel, close } = openDialog(`<h2>${icon('zap')}${esc(a.label)}</h2>
+        <p class="muted">${esc(svcLine(p, v))}${a.restarts ? ' · restarts the service' : ''}${a.confirm ? ' · asks first' : ''}</p>
+        ${sheetTools(t)}
+        <div class="chips"><button class="pill kelp" data-run ${busy ? 'disabled' : ''}>${icon('play')}${output && !busy ? 'Run again' : 'Run'}${a.inputs.length ? '…' : ''}</button></div>
+        <pre data-out ${output ? '' : 'hidden'} style="max-height:45vh;margin-top:10px">${output ? esc(output) : ''}</pre>
+        <div class="buttons"><button data-back>${icon('globe')}${esc(v.title)}</button><button data-close>Close</button></div>`);
+    rememberSheet(t); bindSheetTools(panel, t);
+    $('[data-back]', panel).onclick = () => { close(); backToService(r); };
+    const go_ = async () => {
+        let inputs = {};
+        if (a.inputs.length) { inputs = await actionInputsDialog(a, v.title); if (!inputs) return actionSheet(r, { output }); }
+        else if (a.confirm && !(await confirmDialog({ title: `Run "${a.label}"?`, text: `In ${p.name}.${a.restarts ? ' The service is restarted.' : ''} Output appears here and in the service log.`, action: 'Run', danger: false }))) return actionSheet(r, { output });
+        actionSheet(r, { output: `${a.label}: running…`, busy: true });
+        let text;
+        try { const x = await api(url(`actions/${a.i}`), { method: 'POST', body: { inputs } }); text = `${x.label} · exit ${x.code} · ${(x.ms / 1000).toFixed(1)} s\n\n${x.output || '(no output)'}`; }
+        catch (ex) { text = ex.message; toast(ex.message, true); }
+        loadQuick().catch(() => {});
+        actionSheet(r, { output: text });
+    };
+    $('[data-run]', panel).onclick = go_;
+    if (run) go_();
+}
+
+// A whole group on its own sheet: the item list, recently used first.
+function groupSheet(r) {
+    const { p, key, v, g } = r;
+    const t = { kind: 'group', project: p.project, key, group: g.label };
+    const { panel, close } = openDialog(`<h2>${icon('package')}${esc(g.label)}<span class="meta" data-gcount style="margin-left:8px"></span></h2>
+        <p class="muted">${esc(svcLine(p, v))}${g.hint ? ` · ${esc(g.hint)}` : ''}</p>
+        ${sheetTools(t)}
+        <div class="list" data-gitems><p class="muted" style="padding:10px 12px">Loading…</p></div>
+        <div class="buttons"><button data-glist-refresh>${icon('refresh')}Refresh</button><button data-back>${icon('globe')}${esc(v.title)}</button><button data-close>Close</button></div>`);
+    rememberSheet(t); bindSheetTools(panel, t);
+    $('[data-back]', panel).onclick = () => { close(); backToService(r); };
+    $('[data-glist-refresh]', panel).onclick = () => groupSheet(r);
+    fillGroupList(panel, r);
+}
+const svcLine = (p, v) => v.title.toLowerCase() === p.name.toLowerCase() ? v.title : `${v.title} · ${p.name}`;
+// Recently used items per group, so the rooms you work with sit at the top: this device's picks first, then the
+// box's recent runs (from any device).
+const itemUseKey = r => `porthole.gi.${r.p.project}/${r.key}/${r.g.label}`;
+function recentItemIds(r) {
+    let mine = [];
+    try { mine = JSON.parse(localStorage.getItem(itemUseKey(r)) || '[]'); } catch { mine = []; }
+    const box = quickCache.recents.filter(x => x.kind === 'item' && x.project === r.p.project && x.key === r.key && x.group === r.g.label).map(x => x.item);
+    return [...new Set([...mine, ...box])];
+}
+function noteItemUse(r, id) { try { const mine = JSON.parse(localStorage.getItem(itemUseKey(r)) || '[]'); localStorage.setItem(itemUseKey(r), JSON.stringify([id, ...mine.filter(x => x !== id)].slice(0, 12))); } catch { /* private mode */ } }
+async function fillGroupList(host, r) {
+    const { g } = r;
+    if (!quickCache.recents.length) await loadQuick();
+    const box = $('[data-gitems]', host);
+    let res;
+    try { res = await api(r.url(`groups/${g.i}`)); } catch (ex) { box.innerHTML = `<p class="sub warn" style="padding:8px 12px">${esc(ex.message)}</p>`; return; }
+    const items = res.items || [];
+    const cnt = $('[data-gcount]', host); if (cnt) cnt.textContent = `${items.length}`;
+    const recent = recentItemIds(r);
+    const rank = it => { const n = recent.indexOf(it.id); return n < 0 ? 1e6 : n; };
+    const order = items.map((it, n) => ({ it, n })).sort((a, b) => rank(a.it) - rank(b.it) || a.n - b.n);
+    const allOk = g.actions.some(a => a.all);
+    box.innerHTML = (res.error ? `<p class="sub warn" style="padding:8px 12px">${esc(res.error)}</p>` : '')
+        + (items.length > 8 ? `<div class="gfilter"><input type="search" data-gfilter placeholder="Filter ${esc(g.item)}s" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>` : '')
+        + (!items.length ? `<p class="muted" style="padding:10px 12px">No ${esc(g.item)}s right now.</p>` : '')
+        + (items.length > 1 && allOk ? `<button class="row" data-gi="*"><span class="ico kelp">${icon('package')}</span><div class="main"><div class="title">All ${items.length} ${esc(g.item)}s</div><div class="sub">Run one command on every ${esc(g.item)}</div></div>${icon('chevron', 'i chev')}</button>` : '')
+        + order.map(({ it, n }) => `<button class="row" data-gi="${n}" data-text="${esc(`${it.id} ${it.label || ''} ${it.sub || ''}`.toLowerCase())}"><span class="ico ${rank(it) < 1e6 ? 'brass' : 'dim'}">${icon(rank(it) < 1e6 ? 'history' : 'activity')}</span><div class="main"><div class="title ${it.label ? '' : 'mono'}">${esc(it.label || it.id)}${pinOf({ kind: 'item', project: r.p.project, key: r.key, group: g.label, item: it.id }) ? `<span class="tag">${icon('pin')}pinned</span>` : ''}</div>${it.label || it.sub ? `<div class="sub"><span class="mono">${esc(it.id)}</span>${it.sub ? ` · ${esc(it.sub)}` : ''}</div>` : ''}</div>${icon('chevron', 'i chev')}</button>`).join('');
+    $$('[data-gi]', box).forEach(row => row.onclick = () => groupItemSheet({ ...r, items, item: row.dataset.gi === '*' ? null : items[Number(row.dataset.gi)] }));
+    const f = $('[data-gfilter]', box);
+    if (f) f.oninput = () => { const q = f.value.trim().toLowerCase(); $$('[data-gi]', box).forEach(row => { row.hidden = !!q && (row.dataset.gi === '*' || !row.dataset.text.includes(q)); }); };
+}
+// Pick what to pin from one service: its actions and its groups (single items are pinned from their sheet).
+function pinPicker({ p, key, v, url }) {
+    const rows = [
+        ...v.actions.map(a => ({ t: { kind: 'action', project: p.project, key, action: a.label }, sub: a.inputs.length ? 'asks for values' : a.confirm ? 'asks first' : 'runs in one tap' })),
+        ...(v.groups || []).map(g => ({ t: { kind: 'group', project: p.project, key, group: g.label }, sub: `opens the ${g.item} list` })),
+    ];
+    const { panel } = openDialog(`<h2>${icon('pin')}Pin to Home</h2><p class="muted">${esc(v.title)} · pinned commands sit at the top of Home${railMq.matches ? ' and in the sidebar' : ''}. To pin one ${esc(v.groups?.[0]?.item || 'item')}, open it and tap Pin.</p>
+        <div class="list">${rows.map((x, n) => `<button class="row" data-pk="${n}"><span class="ico ${pinOf(x.t) ? 'brass' : 'dim'}">${icon(targetIcon(x.t))}</span><div class="main"><div class="title">${esc(targetName(x.t))}</div><div class="sub">${esc(x.sub)}</div></div><span class="pill sm ${pinOf(x.t) ? 'ghost-kelp' : 'ghost'}" data-pk-state>${pinOf(x.t) ? 'Pinned' : 'Pin'}</span></button>`).join('')}</div>
+        <div class="buttons"><button data-back>${icon('back')}${esc(v.title)}</button><button data-close>Done</button></div>`);
+    $('[data-back]', panel).onclick = () => backToService({ p, key });
+    $$('[data-pk]', panel).forEach(b => b.onclick = async () => {
+        b.disabled = true; const x = rows[Number(b.dataset.pk)]; const on = await togglePin(x.t); b.disabled = false;
+        const st = $('[data-pk-state]', b); st.textContent = on ? 'Pinned' : 'Pin'; st.classList.toggle('ghost-kelp', on); st.classList.toggle('ghost', !on);
+        $('.ico', b).classList.toggle('brass', on); $('.ico', b).classList.toggle('dim', !on);
+    });
+}
+
+// Home: Pinned tiles and the Recent list.
+async function loadHomeQuick(s = null) {
+    const host = $('#home-pinned'); if (!host) return;
+    const q = await loadQuick();
+    if (s) liveSeen = s.live || [];
+    renderNavPins();
+    if (!q.pins.length && !q.recents.length) { host.innerHTML = ''; quickEditing = false; return; }
+    const svcName = t => { const p = liveSeen.find(x => x.project === t.project); const v = p?.services.find(x => x.key === t.key); return v ? (p.services.length > 1 ? `${p.name} · ${v.title}` : p.name) : t.project; };
+    const pinSub = t => t.kind === 'item' ? `${t.group} · ${svcName(t)}` : svcName(t);
+    const recentTitle = t => `${t.action || targetName(t)}${t.kind === 'item' ? ` · ${t.itemLabel || t.item}` : t.kind === 'group' ? ` · every ${t.group.toLowerCase()}` : ''}`;
+    host.innerHTML = (q.pins.length ? `<h2 class="section"><span class="bullet brass"></span>Pinned<button class="act" data-qedit>${quickEditing ? 'Done' : 'Edit'}</button></h2>
+        <div class="qtiles${quickEditing ? ' editing' : ''}">${q.pins.map((t, n) => { const ok = !!resolveTarget(t); return `<button class="qtile${ok ? '' : ' gone'}" data-qpin="${n}" title="${esc(targetName(t))} · ${esc(pinSub(t))}"><span class="ico ${t.kind === 'action' ? 'kelp' : 'brass'}">${icon(targetIcon(t))}</span><span class="qt ${t.kind === 'item' && !t.itemLabel ? 'mono' : ''}">${esc(targetName(t))}</span><span class="qs">${ok ? esc(pinSub(t)) : 'gone'}</span>${quickEditing ? `<span class="qx" aria-label="Remove">${icon('x')}</span>` : ''}</button>`; }).join('')}</div>` : '')
+        + (q.recents.length ? `<h2 class="section"><span class="bullet"></span>Recent<button class="act" data-qclear>Clear</button></h2>
+        <div class="list">${q.recents.slice(0, 5).map((t, n) => `<button class="row" data-qrecent="${n}"><span class="ico dim">${icon('history')}</span><div class="main"><div class="title">${esc(recentTitle(t))}</div><div class="sub">${esc(svcName(t))} · ${fmtAgo(t.at)}${t.code ? ' · <span class="warn">failed</span>' : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '');
+    const e = $('[data-qedit]', host); if (e) e.onclick = () => { quickEditing = !quickEditing; loadHomeQuick(); };
+    $$('[data-qpin]', host).forEach(b => b.onclick = async () => {
+        const t = q.pins[Number(b.dataset.qpin)];
+        if (quickEditing) { b.disabled = true; await togglePin(t); return loadHomeQuick(); }
+        openTarget(t, { run: true });
+    });
+    $$('[data-qrecent]', host).forEach(b => b.onclick = () => openTarget(q.recents[Number(b.dataset.qrecent)], { run: false }));
+    const c = $('[data-qclear]', host); if (c) c.onclick = async () => { await api('/api/quick/recents', { method: 'DELETE' }).catch(ex => toast(ex.message, true)); loadHomeQuick(); };
+}
+// Desktop sidebar: the same pins, one click away from any page.
+function renderNavPins() {
+    const wrap = $('#nav-pins-wrap'); if (!wrap) return;
+    const pins = quickCache.pins;
+    wrap.hidden = !pins.length;
+    $('#nav-pins').innerHTML = pins.map((t, n) => `<button data-nav-pin="${n}" title="${esc(targetName(t))} · ${esc(t.kind === 'item' ? `${t.group} · ` : '')}${esc(t.project)}">${icon(targetIcon(t))}<span>${esc(targetName(t))}</span></button>`).join('');
+    $$('#nav-pins [data-nav-pin]').forEach(b => b.onclick = () => { navOverlay(false); if (leaveSheets()) return; openTarget(pins[Number(b.dataset.navPin)], { run: true }); });
+}
+// Cards: a running live service shows its first actions and its groups, so the common commands skip the ⋯ menu.
+function quickChips(p, where = 'in-card') {
+    const out = [];
+    for (const x of p.parts.filter(y => y.type === 'live' && y.running)) {
+        const v = liveSeen.find(l => l.project === x.project)?.services.find(y => y.key === x.key);
+        if (!v) continue;
+        const attrs = (kind, label) => `data-qa-kind="${kind}" data-qa-p="${esc(x.project)}" data-qa-k="${esc(v.key)}" data-qa-l="${esc(label)}"`;
+        for (const g of v.groups || []) out.push(`<button class="pill sm ghost-kelp" ${attrs('group', g.label)}>${icon('package')}${esc(g.label)}</button>`);
+        for (const a of v.actions.slice(0, 3)) out.push(`<button class="pill sm" ${attrs('action', a.label)}>${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`);
+        if (v.actions.length > 3) out.push(`<button class="pill sm ghost" data-live-page="${esc(x.project)}" data-k="${esc(v.key)}">+${v.actions.length - 3}</button>`);
+    }
+    return out.length ? `<div class="pcard-quick ${where}">${out.join('')}</div>` : '';
+}
+function bindQuickChips(root) {
+    $$('[data-qa-kind]', root).forEach(b => b.onclick = e => {
+        e.stopPropagation();
+        const d = b.dataset, t = { kind: d.qaKind, project: d.qaP, key: d.qaK };
+        if (d.qaKind === 'action') t.action = d.qaL; else t.group = d.qaL;
+        openTarget(t, { run: d.qaKind === 'action' });
+    });
+    $$('.pcard-quick [data-live-page]', root).forEach(b => b.onclick = e => { e.stopPropagation(); livePage(liveSeen.find(x => x.project === b.dataset.livePage), b.dataset.k); });
 }
 
 // A form for an action's typed inputs. Checks on the phone mirror the server's; the server's check is the one that counts.
