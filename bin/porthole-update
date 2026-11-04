@@ -11,6 +11,8 @@
 # health check, this script restores that archive along with the previous code. User files, tmux sessions, Docker,
 # nginx and certificates are not touched.
 set -uo pipefail
+# Callers (containers, a service with a short PATH) may lack sbin, where useradd/groupadd/iptables live.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 REPO="${PORTHOLE_UPDATE_REPO:-sebasouthwell/porthole}"
 BRANCH="${PORTHOLE_UPDATE_BRANCH:-stable}"

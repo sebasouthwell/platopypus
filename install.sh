@@ -14,6 +14,8 @@
 #   MODE             "box" (default) or "docker"
 
 set -euo pipefail
+# Callers (containers, a service with a short PATH) may lack sbin, where useradd/groupadd/iptables live.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 # On the EC2 box the first boot writes /etc/porthole.env; later re-runs (scripts/box.ps1 deploy) reuse it.
 if [ -f /etc/porthole.env ]; then set -a; . /etc/porthole.env; set +a; fi

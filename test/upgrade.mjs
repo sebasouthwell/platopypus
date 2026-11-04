@@ -35,12 +35,12 @@ if (mode === 'seed') {
     check('old version: password setup', r.status === 200, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
     ex.version = (await call('/api/me')).body.version || null;
     for (const v of [
-        { name: 'upgrade general token', prefix: 'UPG_GENERAL', scope: '', value: 'general-' + crypto.randomBytes(6).toString('hex') },
+        { name: 'upgrade general token', prefix: 'UPG_GENERAL', scope: 'general', value: 'general-' + crypto.randomBytes(6).toString('hex') },
         { name: 'upgrade project token', prefix: 'UPG_PROJECT', scope: 'Projects/upgrade-app', value: 'project-' + crypto.randomBytes(6).toString('hex') },
     ]) {
         r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: v.name, prefix: v.prefix, scope: v.scope, fields: { token: v.value } } });
         check(`old version: vault entry "${v.name}"`, r.status === 201 && r.body.id, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
-        ex.vault.push({ id: r.body.id, name: v.name, value: v.value });
+        if (r.body?.id) ex.vault.push({ id: r.body.id, name: v.name, value: v.value });
     }
     sh('mkdir -p /Projects/upgrade-app/data && echo "app code" > /Projects/upgrade-app/app.js && head -c 200000 /dev/urandom > /Projects/upgrade-app/data/blob.bin && echo \'{"count":41}\' > /Projects/upgrade-app/data/count.json');
     for (const f of ['/Projects/upgrade-app/app.js', '/Projects/upgrade-app/data/blob.bin', '/Projects/upgrade-app/data/count.json']) ex.files[f] = sha(f);

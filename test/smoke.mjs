@@ -317,7 +317,8 @@ services:
 EOF
 chown -R agent:agent /Projects/smoke-count
 rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-project-secret > /Projects/smoke-other/secret.txt && chmod 755 /Projects/smoke-other && chmod 644 /Projects/smoke-other/secret.txt`);
-    r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke general secret', prefix: 'SMOKE_GENERAL_X', scope: '', fields: { token: 'general-secret-1' }, envMap: { token: 'SMOKE_GENERAL_SECRET' } } });
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke general secret', prefix: 'SMOKE_GENERAL_X', scope: 'general', fields: { token: 'general-secret-1' }, envMap: { token: 'SMOKE_GENERAL_SECRET' } } });
+    check('a general Vault value exists for the isolation checks', r.status === 201 && !!r.body.id, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
     const generalVaultId = r.body.id;
     const get = async (p) => { try { return await (await fetch(`http://127.0.0.1:8141${p}`)).text(); } catch { return null; } };
     const waitUp = async () => { for (let i = 0; i < 20; i++) { if (await get('/') !== null) return true; await sleep(300); } return false; };
