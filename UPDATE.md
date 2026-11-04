@@ -349,6 +349,11 @@ phone's Update button. Mechanism:
   with the time left, Start/Stop for the Box editor, and the editor menu; a project without an editor offers "Open
   in VS Code" from its menu. An editor's share link is never the project's Open button. No state change.
 
+- **1.18.3** — The Open buttons added in 1.18.0 (Services cards and parts, Home's Running now, the Files Running pill
+  and Run card, the .portholerun result) use a shared credential's keyed link for the same site, as the older Open
+  buttons do; a site that answers 404 without its key (BusTracker's `?k=`) no longer looks offline. Copy still
+  copies the bare address. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

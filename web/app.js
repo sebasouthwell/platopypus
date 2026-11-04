@@ -671,7 +671,7 @@ async function portholerunDialog(rel) {
             close();
             if (r.link?.url) {
                 const d = openDialog(`<h2>${icon('rocket')}${esc(r.name)} is ${a === 'restart' ? 'restarted' : 'running'}</h2><p class="muted">${r.port ? `:${r.port} · ` : ''}as ${esc(r.account)}${r.addedToGitignore ? ' · added to .gitignore' : ''}</p>
-                    <div class="buttons"><a class="primary" href="${esc(r.link.url)}" target="_blank" rel="noopener">${icon('external')}Open ${esc(r.link.url.replace(/^https:\/\//, '').split('/')[0])}</a><button data-copy-link>${icon('copy')}Copy link</button><button data-go-svc>${icon('services')}Services</button><button data-close>Close</button></div>`, { size: 'small' });
+                    <div class="buttons"><a class="primary" href="${esc(openLink(r.link.url, r.port, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open ${esc(r.link.url.replace(/^https:\/\//, '').split('/')[0])}</a><button data-copy-link>${icon('copy')}Copy link</button><button data-go-svc>${icon('services')}Services</button><button data-close>Close</button></div>`, { size: 'small' });
                 $('[data-copy-link]', d.panel).onclick = () => copyText(r.link.url, 'Link copied');
                 $('[data-go-svc]', d.panel).onclick = () => { d.close(); go('services'); };
             } else toast(r.link?.error ? `Running; the link failed: ${r.link.error}` : `${r.name} is running${r.port ? ` on :${r.port}` : ''}`, !!r.link?.error);
@@ -695,7 +695,7 @@ function partIcon(x) {
 }
 function partLink(x) {
     if (x.type === 'editor' || x.type === 'box-editor') return x.shared && x.shareUrl ? ` · <a href="${esc(x.shareUrl)}" target="_blank" rel="noopener" class="kelp-link">shared</a>, password-protected${x.expires ? ` · closes in ${fmtIn(x.expires)}` : ''}` : x.running ? ' · not shared' : '';
-    const url = x.url || x.link?.url;
+    const url = (x.url || x.link?.url) ? openLink(x.url || x.link?.url, x.port, credsSeen) : null;
     if (!url) return x.gone ? ' · <span class="warn">folder gone</span>' : x.running && x.port ? ' · local' : '';
     const host = url.replace(/^https:\/\//, '').split('/')[0];
     return ` · <a href="${esc(url)}" target="_blank" rel="noopener" class="kelp-link">${esc(host)}</a>${x.link?.expires ? ` · closes in ${fmtIn(x.link.expires)}` : ''}${x.link?.kind === 'zoned' && x.link.connected === false ? ' · <span style="color:var(--flare)">down</span>' : ''}`;
@@ -759,7 +759,7 @@ function projectCard(p, i, credChip) {
             <span class="ico ${p.running ? 'kelp' : 'brass'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span>
             <div class="main"><div class="title">${esc(p.name)}<span class="tag dim">${x.type === 'live' ? 'live' : PART_LABEL[x.type] || x.type}</span></div>
               <div class="sub">${x.running ? '<span class="live">● running</span>' : 'stopped'}${x.port ? ` · <span class="mono">:${x.port}</span>` : ''}${partLink(x).replace(/<a [^>]*>([^<]*)<\/a>/, '$1')}</div></div></button>
-          ${p.open ? `<a class="pill kelp" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+          ${p.open ? `<a class="pill kelp" href="${esc(openLink(p.open, x.port, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
           ${partControls(x, credChip).replace(/<button class="more"[^>]*>[\s\S]*?<\/button>$/, '')}
           <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
         </div></section>`;
@@ -769,7 +769,7 @@ function projectCard(p, i, credChip) {
           <button class="pcard-title" data-proj-folder="${esc(p.path)}" title="Open ${esc(p.name)} in Files">
             <span class="ico ${p.running ? 'kelp' : 'brass'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span>
             <div class="main"><div class="title">${esc(p.name)}${p.running ? '<span class="dot live"></span>' : ''}</div><div class="sub">${esc(projSummary(p))}</div></div></button>
-          ${p.open ? `<a class="pill kelp" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+          ${p.open ? `<a class="pill kelp" href="${esc(openLink(p.open, null, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
           ${p.canRun && !runUp ? `<button class="pill ghost-kelp" data-proj-run="${esc(p.path)}">${icon('play')}Run</button>` : ''}
           <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
         </div>
@@ -810,7 +810,7 @@ function projectMenu(p, s) {
         if (m === 'vscode') codeServerStartWith(p.path, true);
         if (m === 'run') portholerunDialog(join(p.path, '.portholerun'));
         if (m === 'live') livePage(s.live.find(x => x.project === b.dataset.p), b.dataset.k);
-        if (m === 'copy') copyText(p.open, 'Link copied');
+        if (m === 'copy') copyText(p.open, 'Link copied');   // the bare address: sharing it never hands over a key
         if (m === 'srv') serverMenu(s.servers.find(x => x.slug === b.dataset.slug));
         if (m === 'ctr') containerMenu(s.containers.find(x => x.name === b.dataset.name));
         if (m === 'ed') codeServerAction('menu', b.dataset.name);
@@ -830,13 +830,13 @@ async function appsDialog() {
 // Home: what's running now, one line per project.
 async function loadHomeRunning() {
     const host = $('#home-running'); if (!host) return;
-    const s = await api('/api/services').catch(() => null);
+    const [s] = await Promise.all([api('/api/services').catch(() => null), loadCreds()]);
     const up = (s?.projects || []).filter(p => p.running);
     const boxUp = (s?.box?.parts || []).filter(x => x.running && x.type !== 'link');
     if (!up.length && !boxUp.length) { host.innerHTML = ''; return; }
     host.innerHTML = `<h2 class="section"><span class="bullet kelp"></span>Running now<button class="act" data-go-services>Services</button></h2><div class="list">${up.map(p => `
         <div class="row"><button class="row-main" data-proj-folder="${esc(p.path)}"><span class="ico kelp${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(projSummary(p))}</div></div></button>
-          ${p.open ? `<a class="pill kelp sm" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}</div>`).join('')}
+          ${p.open ? `<a class="pill kelp sm" href="${esc(openLink(p.open, null, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}</div>`).join('')}
         ${boxUp.length ? `<button class="row" data-go-services><span class="ico">${icon('server')}</span><div class="main"><div class="title">Box</div><div class="sub">${esc(boxUp.map(x => x.title).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>` : ''}</div>`;
     $$('[data-proj-folder]', host).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
     $$('[data-go-services]', host).forEach(b => b.onclick = () => go('services'));
@@ -1303,9 +1303,11 @@ window.visualViewport?.addEventListener('resize', onViewport);
 $$('#services-seg button').forEach(b => b.addEventListener('click', () => { state.servicesFilter = b.dataset.f; $$('#services-seg button').forEach(x => x.classList.toggle('on', x === b)); loadServices().catch(e => toast(e.message, true)); }));
 $('#services-new').addEventListener('click', startSomethingDialog);
 
+var credsSeen = []; // var: read before this line runs (no TDZ)
+async function loadCreds() { credsSeen = await api('/api/creds').catch(() => credsSeen); return credsSeen; }
 async function loadServices() {
     const s = await api('/api/services');
-    const shared = await api('/api/creds').catch(() => []);
+    const shared = await loadCreds();
     const credChip = port => { const list = shared.filter(c => c.port === port); return list.length ? `<button class="pill" data-credport="${port}" title="Shared credentials">${icon('key')}${list.length > 1 ? list.length : ''}</button>` : ''; };
     const f = state.servicesFilter;
     const show = k => f === 'all' || f === k;
@@ -1852,6 +1854,7 @@ async function loadFiles(path = null) {
     if (path === null) path = localStorage.getItem('porthole.path');
     if (path === null) { const probe = await api('/api/files?path=.'); path = probe.home || ''; }
     const data = await api(`/api/files?path=${encodeURIComponent(path || '.')}`);
+    if (data.running?.length || data.items.some(i => i.running?.length)) await loadCreds();
     fsRoot = data.root || '/'; homeRel = data.home || '';
     state.filesPath = data.path; localStorage.setItem('porthole.path', data.path);
     renderCrumbs(data.path);
@@ -1863,14 +1866,14 @@ async function loadFiles(path = null) {
     // A folder with a .portholerun gets its Run card right under the git card.
     const mine = (data.running || []).find(r => r.kind === 'run');
     $('#run-card').innerHTML = !runFile ? '' : mine
-        ? `<div class="run-card on"><span class="ico kelp">${icon('activity')}</span><div class="main"><div class="title">${esc(basename(data.path) || 'This folder')} is running</div><div class="sub">${mine.port ? `<span class="mono">:${mine.port}</span> · ` : ''}${mine.url ? esc(mine.url.replace(/^https:\/\//, '')) : 'no link'}</div></div>${mine.url ? `<a class="pill kelp" href="${esc(mine.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}<button class="pill" data-run-file>${icon('settings')}Manage</button></div>`
+        ? `<div class="run-card on"><span class="ico kelp">${icon('activity')}</span><div class="main"><div class="title">${esc(basename(data.path) || 'This folder')} is running</div><div class="sub">${mine.port ? `<span class="mono">:${mine.port}</span> · ` : ''}${mine.url ? esc(mine.url.replace(/^https:\/\//, '')) : 'no link'}</div></div>${mine.url ? `<a class="pill kelp" href="${esc(openLink(mine.url, mine.port, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}<button class="pill" data-run-file>${icon('settings')}Manage</button></div>`
         : `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>`;
     $('#run-card [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
     $('#file-list').innerHTML = up + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}"${finePointer() ? ' draggable="true"' : ''}>
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
           <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.running?.length ? `${runningLine(i.running)} · ` : ''}${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? (i.running?.length ? '' : 'Folder · ') : fmtBytes(i.size) + ' · '}${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
-          ${i.running?.[0]?.url ? `<span class="pill kelp sm" data-open-run="${esc(i.running[0].url)}" title="${esc(i.running[0].url)}">${icon('external')}Open</span>` : ''}${i.run ? (i.running?.some(r => r.kind === 'run') ? `<span class="pill ghost-kelp sm" data-run-dir title="Running · restart or stop">${icon('activity')}Running</span>` : `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>`) : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
+          ${i.running?.[0]?.url ? `<span class="pill kelp sm" data-open-run="${esc(openLink(i.running[0].url, i.running[0].port, credsSeen))}" title="${esc(i.running[0].url)}">${icon('external')}Open</span>` : ''}${i.run ? (i.running?.some(r => r.kind === 'run') ? `<span class="pill ghost-kelp sm" data-run-dir title="Running · restart or stop">${icon('activity')}Running</span>` : `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>`) : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
     $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
