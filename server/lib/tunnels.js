@@ -186,7 +186,7 @@ export async function sweep() {
 
 // Processes that belong to the box or to Porthole/agents rather than to the user's projects. They are listed under
 // "System" with no share button: tunnelling an agent's local callback port or code-server makes no sense.
-const SYSTEM_PROCS = /^(sshd|systemd-resolve|systemd-resolved|nginx|tailscaled|cloudflared|docker-proxy|dockerd|containerd|code-server|snapd|chronyd|rpcbind|cupsd|avahi-daemon|exim4|postfix|master)$/;
+const SYSTEM_PROCS = /^(sshd|systemd|systemd-resolve|systemd-resolved|nginx|tailscaled|cloudflared|docker-proxy|dockerd|containerd|code-server|snapd|chronyd|rpcbind|cupsd|avahi-daemon|exim4|postfix|master)$/;
 const SYSTEM_CMD = /(^|\/)(claude|codex|agy|antigravity|gemini|code-server|cloudflared|tailscaled)(\s|$)|\/opt\/porthole\/|\.claude\/|\.codex\/|\.gemini\/|\.antigravity\/|\.agent-profiles\//;
 function cmdlineOf(pid) { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ').slice(0, 200); } catch { return ''; } }
 
@@ -213,7 +213,7 @@ export async function listeningPorts() {
         if (addr === '127.0.0.11') continue; // Docker's embedded DNS inside a container
         if (seen.has(port)) continue;
         const cmd = pid ? cmdlineOf(pid) : '';
-        const system = SYSTEM_PROCS.test(proc) || SYSTEM_CMD.test(cmd) || pid === process.pid;
+        const system = SYSTEM_PROCS.test(proc) || SYSTEM_CMD.test(cmd) || pid === process.pid || port === 22;   // 22: ssh, also when systemd holds the socket
         seen.set(port, { port, process: proc, addr, pid, cmd, system });
     }
     return [...seen.values()].sort((a, b) => a.port - b.port);
