@@ -508,10 +508,12 @@ details.group .list { margin: 0; border: 0; border-radius: 0; }
 .link-line svg.i { width: 12px; height: 12px; flex: none; }
 .link-line a { color: var(--kelp); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* A folder that has a .portholerun file: the run card at the top of its file list. */
-.row.run-card { background: linear-gradient(90deg, rgba(63,211,154,.10), rgba(63,211,154,0) 70%); }
-.row.run-card .title { color: var(--kelp); }
-.row.run-card .chev { color: var(--kelp); }
+/* A folder that has a .portholerun file: the Run card under the git card, and a Run pill on its row. */
+.run-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px; border-radius: var(--radius); border: 1px solid rgba(63,211,154,.35); background: linear-gradient(90deg, rgba(63,211,154,.12), rgba(63,211,154,.03)); text-align: left; }
+.run-card .main { flex: 1; min-width: 0; }
+.run-card .title { font-weight: 600; color: var(--kelp); }
+.run-card .sub { margin-top: 2px; }
+.pill.sm { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
 .warn { color: var(--brass); }
 
 /* Drag and drop in Files. */
@@ -520,3 +522,40 @@ details.group .list { margin: 0; border: 0; border-radius: 0; }
 .row.dragging { opacity: .45; }
 .drop-hint { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 35; background: var(--brass); color: var(--brass-ink); font-weight: 600; font-size: 14px; padding: 10px 16px; border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.45); pointer-events: none; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 720px) { .drop-hint { left: calc(var(--side) + (100% - var(--side)) / 2); } }
+
+/* ---------- update screen ---------- */
+.upd-screen { z-index: 70; align-items: center; justify-content: center; padding: 28px 24px calc(28px + var(--sab)); background: radial-gradient(90% 60% at 50% 0%, rgba(42,86,150,.5), rgba(10,17,32,0) 65%), var(--sea); }
+.upd { width: min(380px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; }
+.upd-ring { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; position: relative; margin-bottom: 26px; }
+.upd-ring::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, rgba(240,184,64,0) 0deg, var(--brass) 300deg, rgba(240,184,64,0) 360deg); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
+.upd-ring .ring { width: 96px; height: 96px; border-width: 10px; }
+.upd-ring .ring > span { left: 20px; top: 16px; width: 18px; height: 9px; }
+@media (prefers-reduced-motion: no-preference) {
+  .upd-screen[data-state="working"] .upd-ring::before { animation: upd-spin 1.6s linear infinite; }
+  @keyframes upd-spin { to { transform: rotate(360deg); } }
+  .upd-steps li.active .mark { animation: upd-pulse 1.2s ease-in-out infinite; }
+  @keyframes upd-pulse { 50% { box-shadow: 0 0 0 6px rgba(240,184,64,.12); } }
+}
+.upd-screen[data-state="done"] .upd-ring::before { background: var(--kelp); }
+.upd-screen[data-state="failed"] .upd-ring::before { background: var(--flare); }
+.upd-kicker { color: var(--mist); font-size: 15px; font-weight: 500; }
+.upd-screen[data-state="done"] .upd-kicker { color: var(--kelp); }
+.upd-screen[data-state="failed"] .upd-kicker { color: var(--flare); }
+.upd-ver { font-size: 40px; font-weight: 700; letter-spacing: -.03em; margin: 6px 0 26px; display: flex; align-items: baseline; gap: 14px; font-variant-numeric: tabular-nums; }
+.upd-ver #upd-from { color: var(--mist); font-weight: 500; }
+.upd-ver #upd-from:empty + .upd-arrow { display: none; }
+.upd-arrow { color: var(--brass); font-weight: 400; font-size: 30px; }
+.upd-steps { list-style: none; margin: 0; padding: 18px 20px; width: 100%; text-align: left; background: var(--hull); border: 1px solid var(--rail); border-radius: var(--radius); display: grid; gap: 14px; }
+.upd-steps li { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--dim); }
+.upd-steps .mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--rail); flex: none; display: grid; place-items: center; }
+.upd-steps li.active { color: var(--foam); font-weight: 500; }
+.upd-steps li.active .mark { border-color: var(--brass); background: radial-gradient(circle, var(--brass) 0 3px, transparent 4px); }
+.upd-steps li.done { color: var(--mist); }
+.upd-steps li.done .mark { border-color: var(--kelp); background: var(--kelp); }
+.upd-steps li.done .mark::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--sea); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
+.upd-steps li.failed { color: var(--flare); font-weight: 500; }
+.upd-steps li.failed .mark { border-color: var(--flare); background: var(--flare); }
+.upd-note { color: var(--mist); font-size: 14px; line-height: 1.5; margin-top: 18px; max-width: 34ch; }
+.upd-time { color: var(--dim); font-size: 13px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.upd-actions { display: flex; gap: 8px; margin-top: 16px; }
+.upd-logview { margin-top: 14px; width: 100%; max-height: 32vh; overflow: auto; text-align: left; background: #070D18; border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: #B9C7D6; white-space: pre-wrap; }

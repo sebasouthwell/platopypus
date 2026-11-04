@@ -106,6 +106,7 @@ export async function list(rel) {
             hidden: ent.name.startsWith('.'),
             symlink: ent.isSymbolicLink(),
             ...(isDir && !ent.name.startsWith('.') && entries.length <= 300 ? { icon: await folderIcon(full, st.mtimeMs).catch(() => null) } : {}),
+            ...(isDir && !ent.name.startsWith('.') && entries.length <= 300 && fs.existsSync(path.join(full, '.portholerun')) ? { run: true } : {}),
         });
     }
     items.sort((a, b) => (a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })));

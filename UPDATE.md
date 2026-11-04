@@ -317,6 +317,11 @@ phone's Update button. Mechanism:
   (`POST /api/files/move`, refuses a folder into itself and name clashes); drag a file out to the desktop to
   download it (Chrome/Edge). No state change.
 
+- **1.17.2** — New update screen: the version change, the four stages (download, install, restart, health check)
+  read from the update log, a ring that turns green when done or red with the reason, Show log and Reload. The Run
+  card for a `.portholerun` folder now sits right under the git card, and folders with one show a Run button in the
+  Projects listing. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

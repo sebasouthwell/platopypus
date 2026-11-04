@@ -1688,19 +1688,21 @@ async function loadFiles(path = null) {
     $('#files-empty').hidden = items.length > 0;
     $('#files-title').textContent = data.path ? basename(data.path) : (fsRoot === '/' ? 'Root' : 'Files');
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
-    const runCard = runFile ? `<button class="row run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · tap to see what it starts</div></div>${icon('play', 'i chev')}</button>` : '';
-    $('#file-list').innerHTML = up + runCard + items.map(i => `
+    // A folder with a .portholerun gets its Run card right under the git card.
+    $('#run-card').innerHTML = runFile ? `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>` : '';
+    $('#run-card [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
+    $('#file-list').innerHTML = up + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}"${finePointer() ? ' draggable="true"' : ''}>
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
           <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
-          <span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
+          ${i.run ? `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>` : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
     $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
-    $('#file-list [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
     $$('#file-list .row[data-name]').forEach(row => {
         const name = row.dataset.name, type = row.dataset.type, size = Number(row.dataset.size), rel = join(state.filesPath, name);
         row.addEventListener('click', e => {
+            if (e.target.closest('[data-run-dir]')) return portholerunDialog(join(rel, '.portholerun'));
             if (e.target.closest('[data-more]')) return toggleExpand(row, rel, name, type, size);
             if (type === 'dir') return loadFiles(rel).catch(ex => toast(ex.message, true));
             if (name === '.portholerun' && type === 'file') return portholerunDialog(rel);
@@ -2198,36 +2200,66 @@ async function loadUpdate() {
           <button class="more" data-upd="menu" aria-label="Update actions">${icon('more_h')}</button>
         </div>`;
     $$('[data-upd]', $('#update-card')).forEach(b => b.onclick = () => updateAction(b.dataset.upd, u));
-    if (u.inProgress) showUpdateOverlay();
+    if (u.inProgress) showUpdateOverlay(u);
 }
 
+// The update screen: the version change, the four real stages read from the update log, and a ring that turns
+// green when done (or red with the reason and the log when it fails).
 let overlayPolling = false;
-function showUpdateOverlay() {
-    $('#update-overlay').hidden = false;
+const UPD_STEPS = ['fetch', 'install', 'restart', 'health'];
+function updStage(stage, state = 'active') {
+    const at = UPD_STEPS.indexOf(stage);
+    $$('#upd-steps li').forEach((li, n) => { li.className = n < at || state === 'done' ? 'done' : n === at ? state : ''; });
+}
+function showUpdateOverlay(u = null) {
+    const o = $('#update-overlay'); o.hidden = false;
+    if (u) { $('#upd-from').textContent = u.installed?.version || ''; $('#upd-to').textContent = u.latestVersion && u.latestVersion !== u.installed?.version ? u.latestVersion : 'latest'; }
     if (overlayPolling) return;
     overlayPolling = true;
+    o.dataset.state = 'working'; $('#upd-actions').hidden = true; $('#upd-logview').hidden = true;
+    $('#upd-kicker').textContent = 'Updating Porthole';
+    $('#upd-note').textContent = 'Your shells, links and containers keep running. This page reloads by itself.';
+    updStage('fetch');
     const started = Date.now();
+    let wentDown = false, stage = 'fetch';
     const status = $('#update-overlay-status');
+    const finish = (ok, msg) => {
+        overlayPolling = false;
+        o.dataset.state = ok ? 'done' : 'failed';
+        if (ok) { updStage('health', 'done'); $('#upd-kicker').textContent = 'Updated'; $('#upd-note').textContent = 'Reloading…'; setTimeout(() => location.reload(), 1800); }
+        else { updStage(stage, 'failed'); $('#upd-kicker').textContent = 'Update failed'; $('#upd-note').textContent = `${msg || 'See the log.'} The previous version is running again.`; $('#upd-actions').hidden = false; }
+    };
     const poll = async () => {
-        const mins = Math.floor((Date.now() - started) / 60000), secs = Math.floor(((Date.now() - started) % 60000) / 1000);
-        status.textContent = `waiting for the service… ${mins}:${String(secs).padStart(2, '0')}`;
+        const secs = Math.floor((Date.now() - started) / 1000);
+        status.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
         try {
             const r = await fetch('/api/update', { credentials: 'same-origin', cache: 'no-store' });
             if (r.status === 401) { location.reload(); return; }
             if (r.ok) {
                 const s = await r.json();
+                if (s.installed?.version && !$('#upd-from').textContent) $('#upd-from').textContent = s.installed.version;
                 if (!s.inProgress && Date.now() - started > 8000) {
-                    status.textContent = s.lastResult?.ok ? `Updated to ${s.installed?.version || ''}. Reloading…` : `Update failed: ${s.lastResult?.message || 'see the update log'}. Reloading…`;
-                    setTimeout(() => location.reload(), 2500);
-                    return;
+                    if (s.installed?.version) $('#upd-to').textContent = s.installed.version;
+                    return finish(!!s.lastResult?.ok, s.lastResult?.message);
                 }
-            }
-        } catch { /* service restarting */ }
-        if (Date.now() - started < 10 * 60_000) setTimeout(poll, 3000);
-        else { status.textContent = 'This is taking longer than expected. Check the update log under More once the service is back.'; overlayPolling = false; }
+                // Where it is, from this run's part of the update log.
+                const log = await fetch('/api/update/log', { credentials: 'same-origin', cache: 'no-store' }).then(x => x.ok ? x.text() : '').catch(() => '');
+                const run = log.slice(Math.max(0, log.lastIndexOf('[update] fetching')));
+                stage = wentDown ? 'health' : /install\.sh finished|restarting|updated /.test(run) ? 'restart' : /upgrade plan|install/.test(run) ? 'install' : 'fetch';
+                updStage(stage);
+            } else { wentDown = true; stage = 'restart'; updStage(stage); }
+        } catch { wentDown = true; stage = 'restart'; updStage(stage); }   // the service is restarting
+        if (Date.now() - started < 10 * 60_000) setTimeout(poll, 2500);
+        else finish(false, 'This is taking longer than expected.');
     };
     poll();
 }
+$('#upd-reload').addEventListener('click', () => location.reload());
+$('#upd-log').addEventListener('click', async () => {
+    const v = $('#upd-logview');
+    v.textContent = await fetch('/api/update/log', { credentials: 'same-origin', cache: 'no-store' }).then(x => x.ok ? x.text() : 'The log is not available yet.').catch(() => 'The log is not available yet.');
+    v.hidden = false; v.scrollTop = v.scrollHeight;
+});
 
 async function updateAction(act, u) {
     try {
@@ -2236,7 +2268,7 @@ async function updateAction(act, u) {
             const ok = await updatePlanDialog(u);
             if (!ok) return;
             await api('/api/update/apply', { method: 'POST' });
-            showUpdateOverlay();
+            showUpdateOverlay(u);
             return;
         }
         if (act === 'menu') {

@@ -123,7 +123,7 @@
       <button class="tile on" id="files-claude"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>Agent here</button>
       <input id="files-input" type="file" multiple hidden>
     </div>
-    <div id="agent-ready-card"></div><div id="repo-card"></div>
+    <div id="agent-ready-card"></div><div id="repo-card"></div><div id="run-card"></div>
     <div id="upload-progress" class="uprow" hidden><svg class="i"><use href="/sprite.svg#i-upload"/></svg><div class="main"><div class="uphead"><span class="upname"></span><span class="upstate">uploading</span></div><div class="upbar"><div></div></div></div></div>
     <div id="file-list" class="list"></div>
     <div id="drop-hint" class="drop-hint" hidden></div>
@@ -311,12 +311,21 @@
 </section>
 
 <!-- Update in progress -->
-<section id="update-overlay" class="screen login" hidden>
-  <div class="login-card">
-    <div class="ring" aria-hidden="true"><span></span></div>
-    <h1>Updating Porthole</h1>
-    <p class="muted" id="update-overlay-text">Shutting down for approximately 5 minutes. The service restarts automatically after the update and this page will reload itself. Shells, tunnels, containers and files are untouched.</p>
-    <p class="mono" id="update-overlay-status" style="color:var(--mist);font-size:13px"></p>
+<section id="update-overlay" class="screen upd-screen" hidden aria-live="polite">
+  <div class="upd">
+    <div class="upd-ring" id="upd-ring" aria-hidden="true"><span class="ring"><span></span></span></div>
+    <p class="upd-kicker" id="upd-kicker">Updating Porthole</p>
+    <h1 class="upd-ver"><span id="upd-from"></span><span class="upd-arrow" aria-label="to">→</span><span id="upd-to"></span></h1>
+    <ol class="upd-steps" id="upd-steps">
+      <li data-s="fetch"><span class="mark"></span>Downloading the new version</li>
+      <li data-s="install"><span class="mark"></span>Installing</li>
+      <li data-s="restart"><span class="mark"></span>Restarting Porthole</li>
+      <li data-s="health"><span class="mark"></span>Checking it works</li>
+    </ol>
+    <p class="upd-note" id="upd-note">Your shells, links and containers keep running. This page reloads by itself.</p>
+    <p class="upd-time" id="update-overlay-status"></p>
+    <div class="upd-actions" id="upd-actions" hidden><button class="pill" id="upd-log">Show log</button><button class="pill accent" id="upd-reload">Reload</button></div>
+    <pre class="upd-logview" id="upd-logview" hidden></pre>
   </div>
 </section>
 
