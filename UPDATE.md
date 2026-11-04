@@ -57,7 +57,8 @@ with mode 0600. Formats as of version 1.0:
 | `vault.json` | vault.js | `{ items: [ v2 ] }` where v2 = `{ id, provider, title, style, name, prefix, scope, notes, fields: { <field>: <enc> }, secretFields: [..], labels: {..}, envMap: {..}, oauth: { authUrl, tokenUrl, scopes, clientAuth, pkce, authParams, scopeSeparator, expiresAt, tokenType, obtainedAt, grantedScopes }\|null, created, updated, lastUsed }`. **v1 items** (`{ envName, value, kind }`) are still read via `normalise()` and must keep working. `<enc>` = `iv.tag.ciphertext` base64, AES-256-GCM. |
 | `zoned.json`, `zoned/<slug>.log` | zoned.js | `{ items: { "<slug>": { slug, hostname, port, name, mode: direct\|tunnel, zoneId, zoneName, accountId, tunnelId, dnsRecordId, via, origin, created, token(enc) } } }` — hostnames on the user's domain (1.5.0); `token` is the cloudflared run token encrypted with `vault.key` |
 | `projects.json` | projects.js | `{ repos: { "<abs folder>": { flag: private\|public, set } } }` — publishing flags (1.4.0); a folder absent from the map is local only |
-| `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline? } } }` — registered servers (1.3.0); logs in `services/<slug>.log` |
+| `services.json` | services.js | `{ items: { "<slug>": { slug, name, port, cwd, cmd[]\|null, pid, session\|null, project, created, stoppedAt, log, external, cmdline?, owner?, live?: { project, key, title }, runAs?: agent\|service\|root } } }` — registered servers (1.3.0); logs in `services/<slug>.log`, or `/home/agent/.porthole/services/<slug>.log` for agent-started servers (1.14.0); missing `runAs` = root |
+| `live-approvals.json` | live.js | `{ "<live slug>": "<sha256 of start, cwd, patch and action commands>" }` — services allowed to run as root (1.14.0); a changed manifest no longer matches, so it asks again |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
@@ -222,6 +223,17 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 - **1.13.0** — one-shot runs: `POST /api/shells` accepts `oneshot: true` (Claude `-p` / `codex exec`, auto-approved, scratch
   folder); when the session ends Porthole stores `{ name, agent, prompt, started, finished, output }` in `~/.porthole/oneshot/<name>.json`
   (30 kept) and deletes the folder. `GET /api/oneshot`. Home Temp gains a ▾ menu: Temp session / One-shot / results.
+
+- **1.14.0** — live services run as **porthole-svc** (no shell, no logins, group porthole-dev; created by `install.sh` or on
+  first use), and so do their actions; Porthole keeps the log and the stop. `run_as: root` in PORTHOLE.md needs approval on
+  the phone, pinned to a hash of the commands (`POST|DELETE /api/live/<p>/<k>/root`). Starting a live service takes over its
+  port from a plain server in the same project folder and refuses other holders; servers that die straight after starting
+  report their log. `svc restart` and `POST /api/servers/<slug>/restart` (live slugs restart through live.js; names resolve
+  to live services by title or key). `POST /api/live/<p>/<k>/restart`. Actions gain `restart`, `stop_first` and typed
+  `inputs` (string, integer, number, boolean, choice; min, max, pattern, default, required) delivered as `INPUT_<NAME>`
+  environment variables, never pasted into the command; the action body is `{ inputs: {...} }` (absent = none). Files gains
+  **Make agent-ready** (`GET|POST /api/agent-ready`). Agent-started servers log under the agent's home (they could not
+  write to `/root/.porthole`).
 
 ## Release checklist
 

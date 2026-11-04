@@ -57,7 +57,10 @@ how to start each service, its port, the hostname it should live on, the Vault n
 the operator commands worth having as buttons. The format is in `/opt/porthole/docs/LIVE.md`. Write it when you add
 a service and keep it current; run `live check` after editing. Never put secret values in it: reference Vault names
 (`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
-from the phone; `live status` shows what Porthole sees.
+from the phone; `live status` shows what Porthole sees. Actions that need the service restarted say `restart: true`
+(or `stop_first: true` when they change data the running process holds in memory); never call `svc restart` inside an
+action. When the user starts the live service, it takes over the port from any `svc run` test copy in the same folder,
+so stop your own copy (`svc rm <name>`) once the manifest is done rather than leaving two.
 
 ## Session type and security level
 
@@ -97,7 +100,7 @@ named server, share it, read its log, stop it completely and restart it:
 
 It runs in its own session with its output logged, independent of your shell. For a process you already started
 elsewhere, register it: `svc add --name "Parle API" --port 8000` (or `--pid <pid>`). `svc ls`, `svc logs <name>`,
-`svc stop <name>`, `svc start <name>`. Do not leave servers as background jobs of your shell (`&`, nohup): they
+`svc stop <name>`, `svc start <name>`, `svc restart <name>`. Do not leave servers as background jobs of your shell (`&`, nohup): they
 cannot be managed from the phone and die with the shell.
 
 ## Exposing a dev server

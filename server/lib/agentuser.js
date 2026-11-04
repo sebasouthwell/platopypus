@@ -34,7 +34,8 @@ export function signIns() {
 export function allowedFolder(dir) {
     const a = info(); if (!a) return false;
     const real = fs.realpathSync(dir);
-    const roots = [path.join(config.root, 'Projects'), a.home]   // root's ~/scratch is not reachable for this user.map(r => { try { return fs.realpathSync(r); } catch { return r; } });
+    // Agent scratch folders live under its home; root's ~/scratch is not reachable for this user.
+    const roots = [path.join(config.root, 'Projects'), a.home].map(r => { try { return fs.realpathSync(r); } catch { return r; } });
     return roots.some(r => real === r || real.startsWith(r + path.sep));
 }
 
@@ -48,11 +49,32 @@ export async function prepareFolder(dir) {
         if (groupOk && (st.mode & 0o2070) === 0o2070) return false;
     } catch { /* fall through */ }
     if (path.resolve(dir) === a.home) return false;
+    await makeGroupWritable(dir);
+    return true;
+}
+
+// Whether every file in a project is reachable for agent shells and live services (group porthole-dev, writable).
+export async function folderReady(dir) {
+    if (!info() || !allowedFolder(dir) || path.resolve(dir) === info().home) return { eligible: false, ready: true };
+    try {
+        const { stdout } = await run('find', [dir, '(', '-not', '-group', GROUP, '-o', '-not', '-perm', '-g+w', ')', '-not', '-type', 'l', '-print', '-quit'], { timeout: 20_000 });
+        return { eligible: true, ready: !stdout.trim(), example: stdout.trim() ? path.relative(dir, stdout.trim()) || '.' : null };
+    } catch { return { eligible: true, ready: false, example: null }; }
+}
+
+// "Make agent-ready" from Files: the whole tree, even when the top folder already looks right.
+export async function makeReady(dir) {
+    if (!info()) throw httpError(412, 'The agent user does not exist on this box yet (re-run the installer).');
+    if (!allowedFolder(dir) || path.resolve(dir) === info().home) throw httpError(403, 'Only project folders under /Projects can be made agent-ready.');
+    await makeGroupWritable(dir);
+    return folderReady(dir);
+}
+
+async function makeGroupWritable(dir) {
     await run('chgrp', ['-R', GROUP, dir], { timeout: 120_000 });
     await run('chmod', ['-R', 'g+rwX', dir], { timeout: 120_000 });
     await run('find', [dir, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+'], { timeout: 120_000 });
     log('agentuser', `made ${dir} group-writable for ${GROUP}`);
-    return true;
 }
 
 // The command a tmux pane runs for an agent-user shell. Environment set on the session (tmux -e) passes through

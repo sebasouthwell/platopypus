@@ -58,7 +58,7 @@ const AGENT_ROUTES = [
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/creds\/share$/],
-    ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
+    ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
     ['GET', /^\/api\/live$/], ['GET', /^\/api\/live\/check$/],
     ['GET', /^\/api\/projects\/repo$/], ['GET', /^\/api\/projects\/profile$/], ['POST', /^\/api\/projects\/profile\/cve-checked$/],
     ['GET', /^\/api\/tunnels$/], ['POST', /^\/api\/tunnels$/], ['DELETE', /^\/api\/tunnels\/\d{1,5}$/], ['POST', /^\/api\/tunnels\/\d{1,5}\/extend$/],
@@ -273,7 +273,7 @@ const server = http.createServer(async (req, res) => {
             if (p === '/api/servers/run' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.runServer({ ...b, env: {}, owner: session.agent })); }
             if (p === '/api/servers' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.add({ ...b, owner: session.agent })); }
             if ((am = p.match(/^\/api\/tunnels\/(\d{1,5})$/)) && method === 'DELETE' && zoned.byPort(am[1])) return send(res, 403, { error: 'Hostnames on your domain are removed from the phone.' });
-            if ((am = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})(\/(stop|start))?$/)) && (method === 'POST' || method === 'DELETE') && !services.ownerOf(am[1])) return send(res, 403, { error: 'That server was not started from an agent-user shell.' });
+            if ((am = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})(\/(stop|start|restart))?$/)) && (method === 'POST' || method === 'DELETE') && !services.ownerOf(services.resolve(am[1]))) return send(res, 403, { error: 'That server was not started from an agent-user shell.' });
         }
 
         if (p === '/api/me' && method === 'GET') return send(res, 200, { ok: true, created: session.created, version: RUNNING_VERSION });
@@ -465,6 +465,11 @@ const server = http.createServer(async (req, res) => {
         // Project publishing flag (local | private | public). `abs` from box CLIs, `path` (root-relative) from the app.
         if (p === '/api/projects/repo' && method === 'GET') { const rel = url.searchParams.get('path') || '.'; let abs = url.searchParams.get('abs'); if (!abs) { try { abs = files.resolveInRoot(rel); } catch { abs = path.resolve(config.root, rel.replace(/^\/+/, '')); if (!abs.startsWith(config.root)) throw shells.httpError(403, 'Outside the allowed folder.'); } } return send(res, 200, projectFlags.allowPush(abs)); }
         if (p === '/api/projects/repo' && method === 'PUT') { const b = await readJson(req); const abs = b.abs || files.resolveInRoot(b.path || '.'); return send(res, 200, projectFlags.setRepoFlag(abs, b.flag)); }
+        if (p === '/api/agent-ready' && (method === 'GET' || method === 'POST')) {
+            const rel = method === 'GET' ? (url.searchParams.get('path') || '.') : ((await readJson(req)).path || '.');
+            const abs = files.resolveInRoot(rel);
+            return send(res, 200, method === 'GET' ? await agentUser.folderReady(abs) : await agentUser.makeReady(abs));
+        }
         if (p === '/api/projects/repo/all' && method === 'GET') return send(res, 200, projectFlags.listFlags());
         if (p === '/api/git/status' && method === 'GET') return send(res, 200, await gitMgr.status(url.searchParams.get('path') || '.'));
         if (p === '/api/git/init' && method === 'POST') return send(res, 201, await gitMgr.init((await readJson(req)).path));
@@ -501,11 +506,12 @@ const server = http.createServer(async (req, res) => {
         // Live services (PORTHOLE.md)
         if (p === '/api/live' && method === 'GET') return send(res, 200, await live.list());
         if (p === '/api/live/check' && method === 'GET') return send(res, 200, live.check(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')));
-        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|hostname)$/)) && method === 'POST') {
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|restart|hostname)$/)) && method === 'POST') {
             const [proj, key, act] = [decodeURIComponent(m[1]), m[2], m[3]];
             return send(res, 200, act === 'hostname' ? await live.putOnHostname(proj, key) : await live[act](proj, key));
         }
-        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3]));
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3], b?.inputs || {})); }
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/root$/)) && (method === 'POST' || method === 'DELETE')) return send(res, 200, method === 'POST' ? live.approveRoot(decodeURIComponent(m[1]), m[2]) : live.revokeRoot(decodeURIComponent(m[1]), m[2]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/credentials\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.credentials(decodeURIComponent(m[1]), m[2], m[3]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(services.slugify(`live ${decodeURIComponent(m[1])} ${m[2]}`), url.searchParams.get('tail') || 300));
 
@@ -513,7 +519,11 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/servers' && method === 'GET') return send(res, 200, await services.list());
         if (p === '/api/servers' && method === 'POST') return send(res, 201, await services.add(await readJson(req, 64 * 1024)));
         if (p === '/api/servers/run' && method === 'POST') return send(res, 201, await services.runServer(await readJson(req, 64 * 1024)));
-        if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/(stop|start)$/)) && method === 'POST') return send(res, 200, await services[m[2]](m[1]));
+        if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/(stop|start|restart)$/)) && method === 'POST') {
+            const slug = services.resolve(m[1]);
+            if (m[2] === 'restart' && slug.startsWith('live-')) return send(res, 200, await live.restartSlug(slug));
+            return send(res, 200, await services[m[2]](slug));
+        }
         if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(m[1], url.searchParams.get('tail') || 200));
         if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})$/)) && method === 'DELETE') { await services.remove(m[1]); return send(res, 200, { ok: true }); }
 

@@ -4,7 +4,7 @@
 //   svc run --name "Parle API" --port 8000 -- npm run dev          start a command in its own session (logged)
 //   svc add --name "Parle API" --port 8000 [--pid 1234]            register a process that is already running
 //   svc ls                                                          list registered servers and their state
-//   svc stop <name>   svc start <name>   svc rm <name>   svc logs <name> [-n 100]
+//   svc stop <name>   svc start <name>   svc restart [name]   svc rm <name>   svc logs <name> [-n 100]
 //
 // `run` is the better choice: Porthole knows the command, so it can restart it, and the log is kept.
 // Stop kills the whole process group and closes any public link on that port.
@@ -60,8 +60,8 @@ try {
         const l = await api('/api/servers');
         if (!l.length) console.log('no registered servers (svc run --name … -- <command>)');
         for (const s of l) console.log(show(s));
-    } else if (sub === 'stop' || sub === 'start' || sub === 'rm' || sub === 'remove' || sub === 'logs') {
-        const name = rest[0] || opts.name; if (!name) { console.error(`usage: svc ${sub} <name>`); process.exit(2); }
+    } else if (sub === 'stop' || sub === 'start' || sub === 'restart' || sub === 'rm' || sub === 'remove' || sub === 'logs') {
+        const name = rest[0] || opts.name || (sub === 'restart' ? process.env.PORTHOLE_SERVICE : ''); if (!name) { console.error(`usage: svc ${sub} <name>`); process.exit(2); }
         const slug = slugOf(name);
         if (sub === 'logs') { process.stdout.write(await api(`/api/servers/${slug}/logs?tail=${Number(opts.n) || 100}`) + '\n'); }
         else if (sub === 'rm' || sub === 'remove') { await api(`/api/servers/${slug}`, 'DELETE'); console.log(`removed ${slug}`); }

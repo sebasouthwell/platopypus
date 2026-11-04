@@ -1130,7 +1130,7 @@ async function loadServices() {
     const body = $('#services-body');
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
-    $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : 'Starting…'); } catch (ex) { toast(ex.message, true); } loadServices(); });
+    $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
     $$('[data-live-page]', body).forEach(b => b.onclick = () => livePage(s.live.find(p => p.project === b.dataset.livePage), b.dataset.k));
     $$('[data-live-errors]', body).forEach(b => b.onclick = () => { const p = s.live.find(x => x.project === b.dataset.liveErrors); openDialog(`<h2>${icon('info')}${esc(p.name)} · ${esc(p.file || 'PORTHOLE.md')}</h2>${p.errors.map(e => `<p class="muted" style="color:var(--flare)">${esc(e)}</p>`).join('')}${p.warnings.map(w => `<p class="sub">${esc(w)}</p>`).join('')}<p class="sub">Ask the agent in that project to fix it and run <span class="mono">live check</span>.</p><div class="buttons"><button data-close>Close</button></div>`); });
     $$('[data-srv]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { await api(`/api/servers/${b.dataset.slug}/${b.dataset.srv}`, { method: 'POST' }); toast(b.dataset.srv === 'stop' ? 'Stopped' : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
@@ -1205,12 +1205,14 @@ async function livePage(p, key) {
     const { panel, close } = openDialog(`<h2>${icon(v.worker ? 'cpu' : 'globe')}${esc(v.title)}</h2>
         <p class="muted">${esc(p.name)}${p.summary ? ` · ${esc(p.summary)}` : ''}</p>
         <p class="sub">${v.running ? '<span class="live">● running</span>' : 'stopped'}${v.port ? ` · <span class="mono">:${v.port}</span>` : ' · worker'}${p.commit ? ` · <span class="mono">${esc(p.commit)}</span>` : ''}${v.update ? ` · updates: ${esc(v.update)}` : ''}</p>
+        <p class="sub">${v.runAs === 'root' ? '<span class="tag danger">runs as root</span> approved for these exact commands · <button class="linkish" data-a="unroot">Revoke</button>' : v.runAs === 'blocked' ? '' : 'Runs as <span class="mono">porthole-svc</span>: no logins, no secrets, only this project folder. Porthole controls it as root.'}</p>
+        ${v.runAs === 'blocked' ? `<div class="banner danger" style="margin:10px 0"><b>This service asks to run as root.</b> PORTHOLE.md says <span class="mono">run_as: root</span>. Root can read every secret on the box, so only allow it if the app really needs it (binding a low port, Docker). The approval covers the start command and every action as written now; if PORTHOLE.md changes them, it asks again.<div class="buttons"><button class="danger" data-a="root">Allow as root</button></div></div>` : ''}
         <div class="menu">
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
           ${v.host ? `<a class="row" href="${esc(v.host.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
-        ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
+        ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
         ${v.links.length && base ? `<h3 class="section" style="margin-top:14px">Links</h3><div class="chips" style="flex-wrap:wrap">${v.links.map(l => `<a class="pill" href="${esc(base.replace(/\/$/, '') + (l.path.startsWith('/') ? l.path : '/' + l.path))}" target="_blank" rel="noopener">${icon('external')}${esc(l.label)}</a>`).join('')}</div>` : ''}
         ${v.credentials.length || shared.length ? `<h3 class="section" style="margin-top:14px">Credentials</h3><div class="list">
           ${v.credentials.map((c, i) => `<button class="row" data-cred="${i}"><span class="ico brass">${icon('key')}</span><div class="main"><div class="title">${esc(c.label)}<span class="tag dim">service</span></div><div class="sub">${esc(c.fields.map(f => f.label).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}
@@ -1222,18 +1224,22 @@ async function livePage(p, key) {
     $$('[data-a]', panel).forEach(b => b.onclick = async () => {
         const a = b.dataset.a;
         try {
-            if (a === 'start' || a === 'stop') { b.disabled = true; await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : 'Starting…'); return refresh_(); }
-            if (a === 'restart') { b.disabled = true; await api(url('stop'), { method: 'POST' }).catch(() => {}); await api(url('start'), { method: 'POST' }); toast('Restarted'); return refresh_(); }
+            if (a === 'start' || a === 'stop' || a === 'restart') { b.disabled = true; const r = await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : a === 'restart' ? 'Restarted' : 'Started'); return refresh_(); }
+            if (a === 'root') { if (!(await confirmDialog({ title: `Run ${v.title} as root?`, text: 'Its start command and every action run with full control of the box until PORTHOLE.md changes them.', action: 'Allow as root' }))) return; await api(url('root'), { method: 'POST' }); toast('Allowed as root'); return refresh_(); }
+            if (a === 'unroot') { await api(url('root'), { method: 'DELETE' }); toast('Root revoked; restart it to run as porthole-svc'); return refresh_(); }
             if (a === 'hostname') { b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…'; await api(url('hostname'), { method: 'POST' }); toast(`${v.hostname} is set up`); return refresh_(); }
             if (a === 'share') { close(); return shareDialog(v.port, v.title); }
             if (a === 'logs') { const res = await api(url('logs') + '?tail=400', { raw: true }); const text = await res.text(); close(); const d = openDialog(`<h2>${esc(v.title)} · log</h2><pre style="max-height:60vh">${esc(text || '(empty — start the service first)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-close>Close</button></div>`); $('[data-copy-all]', d.panel).onclick = () => copyText(text, 'Copied'); }
         } catch (ex) { toast(ex.message, true); b.disabled = false; }
     });
     $$('[data-act]', panel).forEach(b => b.onclick = async () => {
-        if (b.dataset.confirm === '1' && !(await confirmDialog({ title: `Run "${b.textContent.trim()}"?`, text: `In ${p.name}. Output appears here and in the service log.`, action: 'Run', danger: false }))) return livePage(p, key);
+        const act = v.actions[Number(b.dataset.act)];
+        let inputs = {};
+        if (act?.inputs?.length) { inputs = await actionInputsDialog(act, v.title); if (!inputs) return; }
+        else if (b.dataset.confirm === '1' && !(await confirmDialog({ title: `Run "${b.textContent.trim()}"?`, text: `In ${p.name}.${act?.restarts ? ' The service is restarted.' : ''} Output appears here and in the service log.`, action: 'Run', danger: false }))) return livePage(p, key);
         const out = $('[data-act-out]', panel); if (out) { out.hidden = false; out.textContent = 'Running…'; }
         $$('[data-act]', panel).forEach(x => { x.disabled = true; });
-        try { const r = await api(url(`actions/${b.dataset.act}`), { method: 'POST' }); const o = $('[data-act-out]', panel); if (o) o.textContent = `${r.label} · exit ${r.code} · ${(r.ms / 1000).toFixed(1)} s\n\n${r.output || '(no output)'}`; }
+        try { const r = await api(url(`actions/${b.dataset.act}`), { method: 'POST', body: { inputs } }); const o = $('[data-act-out]', panel); if (o) o.textContent = `${r.label} · exit ${r.code} · ${(r.ms / 1000).toFixed(1)} s\n\n${r.output || '(no output)'}`; }
         catch (ex) { toast(ex.message, true); }
         $$('[data-act]', panel).forEach(x => { x.disabled = false; });
     });
@@ -1244,15 +1250,57 @@ async function livePage(p, key) {
     $$('[data-shared]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.shared); });
 }
 
+// A form for an action's typed inputs. Checks on the phone mirror the server's; the server's check is the one that counts.
+function actionInputsDialog(act, title) {
+    return new Promise(resolve => {
+        const field = (f, i) => {
+            const id = `ai-${i}`;
+            const lab = `<label for="${id}">${esc(f.label)}${f.required ? '' : ' <span class="sub">(optional)</span>'}</label>`;
+            const hint = [f.hint, f.min !== null && f.max !== null ? `${f.min} to ${f.max}` : f.min !== null ? `at least ${f.min}` : f.max !== null ? `at most ${f.max}` : null].filter(Boolean).join(' · ');
+            const dv = f.default === null ? '' : String(f.default);
+            let ctl;
+            if (f.type === 'boolean') ctl = `<label class="check"><input id="${id}" type="checkbox" ${dv === 'true' ? 'checked' : ''}> ${esc(f.label)}</label>`;
+            else if (f.type === 'choice') ctl = `${lab}<select id="${id}">${(f.choices || []).map(c => `<option ${c === dv ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+            else ctl = `${lab}<input id="${id}" type="text" inputmode="${f.type === 'integer' ? 'numeric' : f.type === 'number' ? 'decimal' : 'text'}" value="${esc(dv)}" autocorrect="off" autocapitalize="off" spellcheck="false">`;
+            return `<div class="field">${ctl}${hint ? `<p class="sub">${esc(hint)}</p>` : ''}<p class="sub err" data-err="${i}" hidden></p></div>`;
+        };
+        const { panel, close } = openDialog(`<h2>${icon('zap')}${esc(act.label)}</h2><p class="muted">${esc(title)}${act.restarts ? ' · the service is restarted' : ''}</p>${act.inputs.map(field).join('')}<div class="buttons"><button class="primary" data-ok>Run</button><button data-close>Cancel</button></div>`);
+        $('.dialog-backdrop').addEventListener('click', () => resolve(null), { once: true });
+        $('[data-close]', panel).addEventListener('click', () => resolve(null), { once: true });
+        const check = (f, raw) => {
+            if (f.type === 'boolean') return null;
+            if (raw === '') return f.required ? 'Required.' : null;
+            if (f.type === 'integer' && !/^-?\d{1,15}$/.test(raw)) return 'A whole number.';
+            if (f.type === 'number' && !/^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(raw)) return 'A number.';
+            if ((f.type === 'integer' || f.type === 'number') && ((f.min !== null && Number(raw) < f.min) || (f.max !== null && Number(raw) > f.max))) return 'Out of range.';
+            if (f.pattern) { try { if (!new RegExp(`^(?:${f.pattern})$`).test(raw)) return f.hint || 'Not in the required format.'; } catch { /* server decides */ } }
+            return null;
+        };
+        const go_ = () => {
+            const values = {}; let bad = false;
+            act.inputs.forEach((f, i) => {
+                const el = $(`#ai-${i}`, panel);
+                const raw = f.type === 'boolean' ? (el.checked ? 'true' : 'false') : el.value.trim();
+                const e = check(f, raw); const er = $(`[data-err="${i}"]`, panel);
+                er.hidden = !e; er.textContent = e || ''; if (e) bad = true;
+                values[f.name] = raw;
+            });
+            if (bad) return;
+            close(); resolve(values);
+        };
+        $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
+    });
+}
+
 function serverMenu(d) {
     if (!d) return;
     const { panel, close } = openDialog(`<h2>${icon('devserver')}${esc(d.name)}</h2><p class="muted">${d.cmd ? `<span class="mono">${esc(d.cmd.join(' '))}</span><br>` : d.cmdline ? `<span class="mono">${esc(d.cmdline)}</span><br>` : ''}${d.cwd ? `in ${esc(shortPath(d.cwd))} · ` : ''}pid ${d.pid || '—'}${d.port ? ` · :${d.port}` : ''}</p>
-        <div class="menu">${d.log ? `<button data-a="logs">${icon('logs')}Logs</button>` : ''}${d.alive ? `<button data-a="stop">${icon('stop')}Stop (whole process group)</button>` : d.canStart ? `<button data-a="start">${icon('play')}Start</button>` : ''}<button data-a="rm" class="danger">${icon('trash')}Stop and forget</button></div><div class="buttons"><button data-close>Close</button></div>`);
+        <div class="menu">${d.log ? `<button data-a="logs">${icon('logs')}Logs</button>` : ''}${d.alive && d.canStart && !d.live ? `<button data-a="restart">${icon('refresh')}Restart</button>` : ''}${d.alive ? `<button data-a="stop">${icon('stop')}Stop (whole process group)</button>` : d.canStart ? `<button data-a="start">${icon('play')}Start</button>` : ''}<button data-a="rm" class="danger">${icon('trash')}Stop and forget</button></div><div class="buttons"><button data-close>Close</button></div>`);
     $$('[data-a]', panel).forEach(b => b.onclick = async () => {
         const a = b.dataset.a; close();
         try {
             if (a === 'logs') { const res = await api(`/api/servers/${d.slug}/logs?tail=400`, { raw: true }); const text = await res.text(); const dlg = openDialog(`<h2>${esc(d.name)} · log</h2><pre style="max-height:60vh">${esc(text || '(empty)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-close>Close</button></div>`); $('[data-copy-all]', dlg.panel).onclick = () => copyText(text, 'Copied'); return; }
-            if (a === 'stop' || a === 'start') await api(`/api/servers/${d.slug}/${a}`, { method: 'POST' });
+            if (a === 'stop' || a === 'start' || a === 'restart') { await api(`/api/servers/${d.slug}/${a}`, { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : a === 'restart' ? 'Restarted' : 'Started'); }
             if (a === 'rm') { if (!(await confirmDialog({ title: `Forget "${d.name}"?`, text: 'It is stopped first (process group and any public link). Nothing on disk is deleted.', action: 'Stop and forget' }))) return; await api(`/api/servers/${d.slug}`, { method: 'DELETE' }); }
             loadServices();
         } catch (ex) { toast(ex.message, true); }
@@ -1484,9 +1532,20 @@ async function loadFiles(path = null) {
 
 // ---------- git ----------
 
+// Projects made before the agent user existed: offer to make the whole tree writable for agent shells and services.
+async function loadAgentReady(rel) {
+    const box = $('#agent-ready-card'); if (!box) return;
+    box.innerHTML = '';
+    const r = await api(`/api/agent-ready?path=${encodeURIComponent(rel || '.')}`).catch(() => null);
+    if (!r || !r.eligible || r.ready || rel !== state.filesPath) return;
+    box.innerHTML = `<button class="row plain" data-ready style="background:var(--hull);border:1px solid var(--rail);border-radius:var(--radius);margin-bottom:12px"><span class="ico brass">${icon('shield')}</span><div class="main"><div class="title" style="color:var(--brass)">Make agent-ready</div><div class="sub">Agent shells and live services cannot write everything here yet${r.example ? ` (for example ${esc(r.example)})` : ''}. Gives the porthole-dev group write access; owners stay the same.</div></div></button>`;
+    $('[data-ready]', box).onclick = async e => { e.currentTarget.disabled = true; toast('Updating permissions…'); try { const x = await api('/api/agent-ready', { method: 'POST', body: { path: rel } }); toast(x.ready ? 'Agent-ready' : 'Some files could not be changed', !x.ready); loadAgentReady(rel); } catch (ex) { toast(ex.message, true); } };
+}
+
 async function loadRepoCard(rel) {
     const card = $('#repo-card');
     if (rel !== state.filesPath) return;
+    loadAgentReady(rel);
     const st = await api(`/api/git/status?path=${encodeURIComponent(rel || '.')}`);
     if (rel !== state.filesPath) return;
     if (!st.repo) {

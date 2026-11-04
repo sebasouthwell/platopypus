@@ -112,6 +112,9 @@ getent group porthole-dev >/dev/null || groupadd --system porthole-dev
 id "$AGENT_USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --user-group "$AGENT_USER"
 usermod -aG porthole-dev "$AGENT_USER"; usermod -aG porthole-dev "$PORTHOLE_USER" 2>/dev/null || true
 passwd -l "$AGENT_USER" >/dev/null 2>&1 || true
+# Live services run as porthole-svc: no shell, no logins, only porthole-dev project folders (server/lib/svcuser.js).
+id porthole-svc >/dev/null 2>&1 || useradd --system --home-dir /var/lib/porthole-svc --create-home --shell /usr/sbin/nologin --user-group --groups porthole-dev porthole-svc
+chmod 750 /var/lib/porthole-svc 2>/dev/null || true
 AGENT_HOME="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
 if ! sudo -u "$AGENT_USER" -H bash -lc 'test -x ~/.local/bin/claude' >/dev/null 2>&1; then
     say "claude code for the agent user"

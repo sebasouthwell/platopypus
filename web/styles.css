@@ -360,3 +360,12 @@ details.sys .bullet { background: var(--mist); opacity: .5; }
   .dialog { align-items: center; }
   .dialog-panel { border-radius: 22px; }
 }
+
+/* live service: root warning, run-as tag, action input form */
+.tag.danger { background: rgba(244,106,92,.16); color: var(--flare); }
+.banner.danger { padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(244,106,92,.45); background: rgba(244,106,92,.08); color: var(--foam); font-size: 14px; line-height: 1.45; }
+.banner.danger .buttons { margin-top: 10px; }
+.field .sub.err { color: var(--flare); margin-top: 4px; }
+.field label.check { display: flex; align-items: center; gap: 8px; }
+.field select { width: 100%; }
+.field > p.sub { margin: 6px 0 0; }

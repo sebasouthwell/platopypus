@@ -273,6 +273,118 @@ EOF`);
     sh('rm -rf /Projects/smoke-live');
 }
 
+// 6h2. Live services run as porthole-svc; Porthole controls them. Typed inputs, stop_first, take-over, restart, root approval.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // A counter like the dollar button: holds its total in memory and writes it back every 300 ms.
+    sh(`rm -rf /Projects/smoke-count && mkdir -p /Projects/smoke-count/data && cat > /Projects/smoke-count/app.js <<'EOF'
+const http = require('http'); const fs = require('fs');
+let count = 0; try { count = JSON.parse(fs.readFileSync('data/count.json', 'utf8')).count; } catch {}
+setInterval(() => fs.writeFileSync('data/count.json', JSON.stringify({ count })), 300);
+http.createServer((req, res) => { if (req.url === '/click') count++; if (req.url === '/env') return res.end(JSON.stringify(Object.keys(process.env).sort())); res.end(String(count)); }).listen(8141);
+EOF
+cat > /Projects/smoke-count/PORTHOLE.md <<'EOF'
+---
+porthole: 1
+services:
+  web:
+    title: Smoke counter
+    start: node app.js
+    port: 8141
+    actions:
+      - label: Who am I
+        run: id -un; env | cut -d= -f1 | sort | tr '\\n' ' '
+      - label: Reset
+        run: echo '{"count":0}' > data/count.json
+        stop_first: true
+      - label: Set
+        run: printf '{"count":%s}' "$INPUT_COUNT" > data/count.json; echo "note=[$INPUT_NOTE]"
+        stop_first: true
+        inputs:
+          - name: count
+            type: integer
+            min: 0
+            max: 1000
+          - name: note
+            type: string
+            pattern: '[a-z ]{1,20}'
+            required: false
+      - label: Bump restart
+        run: 'true'
+        restart: true
+---
+EOF
+chown -R agent:agent /Projects/smoke-count`);
+    const get = async (p) => { try { return await (await fetch(`http://127.0.0.1:8141${p}`)).text(); } catch { return null; } };
+    const waitUp = async () => { for (let i = 0; i < 20; i++) { if (await get('/') !== null) return true; await sleep(300); } return false; };
+    // An agent's test copy already holds the port; the live start takes it over.
+    r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke count test', port: 8141, cwd: '/Projects/smoke-count', cmd: ['node', 'app.js'] } });
+    check('a plain server can hold the port first', r.status === 201, `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
+    await waitUp();
+    r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke count dup', port: 8141, cwd: '/Projects/smoke-count', cmd: ['node', 'app.js'] } });
+    check('a second server on a taken port is refused with who holds it', r.status === 409 && /smoke count test/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/live/smoke-count/web/start', { method: 'POST' });
+    check('live start takes over the port from the same-folder server', r.status === 200 && r.body.tookOver === 'smoke count test' && r.body.runAs === 'service', `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    check('the test copy is gone from the registry', !(await call('/api/servers')).body.some(x => x.slug === 'smoke-count-test'));
+    await waitUp();
+    const owner = sh(`ps -eo user:20,args | grep '[n]ode app.js' | grep -v bash | awk '{print $1}' | sort -u`).trim();
+    check('the live service process runs as porthole-svc', owner === 'porthole-svc', owner);
+    const envKeys = JSON.parse(await get('/env') || '[]');
+    check('the service sees no Porthole environment', !envKeys.some(k => /^PORTHOLE_(TOKEN|STATE|PORT)$|^TMUX|^SSH_/.test(k)) && envKeys.includes('PORTHOLE_SERVICE'), envKeys.join(' '));
+    check('Porthole (root) still has the log', /./.test(sh('cat /root/.porthole/services/live-smoke-count-web.log; echo x')));
+    r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
+    check('actions run as porthole-svc without Porthole secrets', r.status === 200 && /^porthole-svc/.test(r.body.output) && !/PORTHOLE_TOKEN|TMUX/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 200));
+    for (let i = 0; i < 5; i++) await get('/click');
+    await sleep(500);
+    r = await call('/api/live/smoke-count/web/actions/1', { method: 'POST' });
+    check('stop_first reset stops, writes, starts', r.status === 200 && r.body.code === 0 && /stopped the service/.test(r.body.output) && /started the service/.test(r.body.output), JSON.stringify(r.body).slice(0, 240));
+    await waitUp(); await sleep(700);
+    check('the counter really is 0 after reset (not written back)', await get('/') === '0', await get('/'));
+    r = await call('/api/live/smoke-count/web/actions/2', { method: 'POST', body: { inputs: { count: 'abc' } } });
+    check('an integer input rejects text', r.status === 400 && /whole number/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/live/smoke-count/web/actions/2', { method: 'POST', body: { inputs: { count: '5000' } } });
+    check('an integer input enforces max', r.status === 400 && /at most 1000/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/live/smoke-count/web/actions/2', { method: 'POST', body: { inputs: { count: '7', note: '$(id); x' } } });
+    check('a string input enforces its pattern (no shell text gets through)', r.status === 400 && /format/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/live/smoke-count/web/actions/2', { method: 'POST', body: { inputs: { count: '42', note: 'hi there' } } });
+    check('valid inputs reach the command as env vars', r.status === 200 && r.body.code === 0 && /note=\[hi there\]/.test(r.body.output), JSON.stringify(r.body).slice(0, 200));
+    await waitUp(); await sleep(400);
+    check('the set value took effect', await get('/') === '42', await get('/'));
+    const lv = (await call('/api/live')).body.find(p => p.project === 'smoke-count')?.services[0];
+    check('live list describes inputs and run-as', lv?.runAs === 'service' && lv.actions[2].inputs.length === 2 && lv.actions[2].inputs[0].type === 'integer', JSON.stringify(lv && { runAs: lv.runAs, a: lv.actions[2] }).slice(0, 200));
+    const pidBefore = lv?.pid;
+    r = await call('/api/servers/smoke-counter/restart', { method: 'POST' });
+    check('svc restart resolves a live service by its title and restarts it', r.status === 200 && r.body.alive === true && r.body.pid !== pidBefore, `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
+    await waitUp();
+    r = await call('/api/live/smoke-count/web/actions/3', { method: 'POST' });
+    check('restart: true restarts after a successful command', r.status === 200 && /restarted the service/.test(r.body.output), JSON.stringify(r.body).slice(0, 200));
+    await waitUp();
+    // run_as: root needs the phone, and the approval is pinned to the commands.
+    await call('/api/live/smoke-count/web/stop', { method: 'POST' });
+    sh(`sed -i 's/^    start: node app.js/    start: node app.js\\n    run_as: root/' /Projects/smoke-count/PORTHOLE.md`);
+    r = await call('/api/live/smoke-count/web/start', { method: 'POST' });
+    check('run_as: root is refused until approved', r.status === 403 && /Approve/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    r = await call('/api/live/smoke-count/web/root', { method: 'POST' }); check('root can be approved from the phone', r.status === 200);
+    r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
+    check('approved actions run as root', r.status === 200 && /^root/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 80));
+    sh(`sed -i 's/run: id -un;/run: id -un; echo changed;/' /Projects/smoke-count/PORTHOLE.md`);
+    r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
+    check('editing a command voids the root approval', r.status === 403, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+    await call('/api/live/smoke-count/web/root', { method: 'DELETE' });
+    await call('/api/servers/live-smoke-count-web', { method: 'DELETE' }).catch(() => {});
+    // An app that dies at once is reported with its log.
+    r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke dies', cwd: '/Projects/smoke-count', cmd: ['bash', '-c', 'echo boom-at-start; exit 3'] } });
+    check('a server that dies straight away is reported with its log', r.status === 500 && /boom-at-start/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    await call('/api/servers/smoke-dies', { method: 'DELETE' }).catch(() => {});
+    // Make agent-ready for an old root-owned project.
+    sh('rm -rf /Projects/smoke-old && mkdir -p /Projects/smoke-old/sub && touch /Projects/smoke-old/sub/f && chown -R root:root /Projects/smoke-old && chmod -R go-w /Projects/smoke-old');
+    r = await call('/api/agent-ready?path=Projects/smoke-old'); check('an old project reports not agent-ready', r.status === 200 && r.body.eligible && r.body.ready === false, JSON.stringify(r.body));
+    r = await call('/api/agent-ready', { method: 'POST', body: { path: 'Projects/smoke-old' } }); check('Make agent-ready fixes the whole tree', r.status === 200 && r.body.ready === true, JSON.stringify(r.body));
+    check('agent can now write deep in it', sh(`/usr/sbin/runuser -u agent -- bash -c 'touch /Projects/smoke-old/sub/g && echo ok'`).trim() === 'ok');
+    sh('rm -rf /Projects/smoke-count /Projects/smoke-old');
+}
+
 // 6i. Agent user: no root, restricted API, vault get by real folder, elevate with phone approval.
 r = await call('/api/agent-user');
 if (r.body.available) {

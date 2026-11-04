@@ -44,12 +44,16 @@ Rollback: none needed; root shells work exactly as before.
 
 Rollback: AI agents → Undo move restores the renamed root copies; the agent-user copies are left for inspection.
 
+## Stage 2b — services off root (1.14.0, done)
+
+- Live services and their actions run as `porthole-svc` (no logins, no secrets, porthole-dev group only); `run_as: root`
+  needs a phone approval pinned to the exact commands. Porthole stays the root controller (log, stop, kill).
+- **Files → Make agent-ready** for projects created before stage 1.
+
 ## Stage 3 — root by grant only (2.0.0, MAJOR)
 
 - Agent shells always run as the agent user; running an agent as root needs the explicit **Run as root** grant,
   shown in red on the shell.
-- Live services and `svc` servers run as the agent user unless their manifest says `run_as: root`, which the phone
-  must approve once per service.
 - `server/lib/migrate.js` with `~/.porthole/schema.json` (per UPDATE.md): confirms stage 2 ran, removes the renamed
   root copies after a final backup, and refuses to start on a failed step with the rollback written to the log.
 

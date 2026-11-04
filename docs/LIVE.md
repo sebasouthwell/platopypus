@@ -24,13 +24,35 @@ services:
       NODE_ENV: production
     needs: [DATABASE_URL, OPENAI_API_KEY]   # Vault env names this service expects (project or general scope)
     update: preserve-data         # full | preserve-data | patch   (asked on the phone if missing)
-    patch: npm run build && svc restart parle-web   # only for update: patch
+    patch: npm run build          # only for update: patch (the service is restarted after it)
     actions:                      # become buttons on the service page; run in cwd, output shown on the phone
       - label: Run migrations
         run: npm run migrate
       - label: Seed demo data
         run: npm run seed
         confirm: true             # ask before running
+        restart: true             # restart the service after the command succeeds
+      - label: Reset counters
+        run: echo '{"count":0}' > data/count.json
+        stop_first: true          # stop the service, run the command, start it again (for state it holds in memory)
+      - label: Set counter
+        run: printf '{"count":%s}' "$INPUT_COUNT" > data/count.json
+        stop_first: true
+        inputs:                   # the phone shows a form; Porthole checks every value before running
+          - name: count           # reaches the command as $INPUT_COUNT (always quote it)
+            label: New total
+            type: integer         # string | integer | number | boolean | choice
+            min: 0
+            max: 1000000
+            default: 0
+          - name: note
+            type: string
+            pattern: '[A-Za-z0-9 ._-]{1,40}'   # whole value must match
+            hint: letters, digits, spaces
+            required: false
+          - name: mode
+            type: choice
+            choices: [soft, hard]
       - label: Tail app log
         run: tail -n 200 logs/app.log
     links:                        # relative paths become https://hostname/<path> when live
@@ -74,6 +96,22 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 
 - Create or update `PORTHOLE.md` whenever you add a service, change how it starts, or add a command an operator will
   want again. Keep `actions` small and useful; they become buttons.
+- **Who runs what.** The service and its actions run as `porthole-svc`: no login shell, no sudo, no AI logins, no
+  Porthole token, only project folders shared with the `porthole-dev` group (Porthole makes the project agent-ready on
+  first start). Its environment is only what the manifest and the Vault give it. Porthole stays root and is the
+  controller: it starts the process, keeps the log, and stops or kills the whole process group. `run_as: root` is for
+  the rare app that needs it (low port, Docker socket); the phone must approve it, and the approval is pinned to the
+  exact start, patch and action commands, so an edit to PORTHOLE.md asks again.
+- **Inputs.** An action may declare typed `inputs`; values arrive only as `INPUT_<NAME>` environment variables, never
+  substituted into the command text, so quote them (`"$INPUT_COUNT"`) and they cannot inject shell. Types: string
+  (one line, 500 characters unless `max_length`; `pattern` is a full-match regular expression), integer, number
+  (`min`/`max`), boolean (`true`/`false`), choice (`choices`).
+- Actions run in the service folder with the service's environment plus `PORTHOLE_SERVICE` (its slug). Never
+  restart the service from inside the command (`svc restart …`): use `restart: true`, or `stop_first: true` when the
+  command edits data the running process keeps in memory and would write back (a counter, a cache, a SQLite file
+  open in WAL mode). Porthole stops, runs, then starts, and reports each step in the output.
+- Starting a live service takes over its port from a plain server started in the same project folder (an agent's
+  `svc run` while testing); any other process on that port is reported and the start is refused.
 - Never write secret values into the file. Reference Vault env names (`$ADMIN_PASSWORD`, `needs:`).
 - `live check` validates the file; `live status` shows what Porthole sees; `live deploy <service>` asks Porthole to
   start or update it (the user confirms on the phone for updates that touch data).
