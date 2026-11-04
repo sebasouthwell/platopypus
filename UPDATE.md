@@ -85,6 +85,8 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 
 ## Rules for compatible changes
 
+0. **An update never ends a session.** Shells, servers, live services and tunnels are tmux sessions that must survive
+   `systemctl restart porthole` (`KillMode=process`); check it on the box: `tmux -L porthole ls` before and after.
 1. **Additive by default.** New fields get defaults when read; missing files mean "first run" for that feature.
    Never require a field that older versions did not write.
 2. **Read old, write new.** When a shape changes, keep a `normalise()` step that upgrades records on read (see
@@ -234,6 +236,10 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
   environment variables, never pasted into the command; the action body is `{ inputs: {...} }` (absent = none). Files gains
   **Make agent-ready** (`GET|POST /api/agent-ready`). Agent-started servers log under the agent's home (they could not
   write to `/root/.porthole`).
+
+- **1.14.1** — `porthole.service` gains `KillMode=process`: restarting Porthole (every update) no longer ends the tmux
+  server, so shells, servers, live services and tunnels survive updates as `tmux.js` always intended. Before this, each
+  update ended every session on the box. No state change.
 
 ## Release checklist
 

@@ -273,6 +273,9 @@ Environment=LANG=C.UTF-8
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=2
+# Stop/restart ends only Porthole's own process: the tmux server (every shell, server, live service and tunnel) lives
+# in this cgroup too and must survive updates. Porthole re-attaches to it on start.
+KillMode=process
 # Shells need a full environment, so no sandboxing beyond running unprivileged.
 NoNewPrivileges=no
 
