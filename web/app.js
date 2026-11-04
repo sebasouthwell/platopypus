@@ -1032,7 +1032,7 @@ async function loadServices() {
                 for (const v of p.services) html += `
                 <div class="row"><span class="ico ${v.running ? 'kelp' : 'dim'}">${icon(v.worker ? 'cpu' : 'globe')}</span>
                   <div class="main"><div class="title">${esc(v.title)}<span class="tag dim">${esc(p.name)}</span>${v.worker ? '<span class="tag dim">worker</span>' : ''}</div>
-                    <div class="sub">${v.running ? `<span class="live">● running</span>` : 'stopped'}${v.host ? ` · <a href="${esc(v.host.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
+                    <div class="sub">${v.running ? `<span class="live">● running</span>` : 'stopped'}${v.host ? ` · <a href="${esc(openLink(v.host.url, v.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
                   ${v.running ? `<button class="pill" data-live="stop" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('stop')}Stop</button>` : `<button class="pill" data-live="start" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('play')}Start</button>`}
                   <button class="more" data-live-page="${esc(p.project)}" data-k="${esc(v.key)}" aria-label="Service page">${icon('more_h')}</button>
                 </div>`;
@@ -1046,7 +1046,7 @@ async function loadServices() {
             <div class="row"><span class="ico kelp">${icon('link')}</span>
               <div class="main"><div class="title">${esc(t.name || t.target)}${t.kind === 'zoned' ? '<span class="tag">your domain</span>' : ''}${t.owner ? `<span class="tag dim">${esc(t.owner)}</span>` : ''}</div><div class="sub mono">${t.url ? esc(t.url.replace(/^https:\/\//, '')) : 'publishing…'}${t.kind === 'zoned' ? (t.connected ? ' · <span class="live">● connected</span>' : t.alive ? ' · connecting…' : ' · <span style="color:var(--flare)">● down</span>') : ''}</div>
                 ${t.expires ? `<div class="bar-mini kelp"><div style="width:${Math.max(2, Math.min(100, (t.expires - Date.now()) / (4 * 3600_000) * 100))}%"></div></div>` : ''}</div>
-              ${credChip(t.port)}${t.url ? `<a class="pill kelp" href="${esc(t.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+              ${credChip(t.port)}${t.url ? `<a class="pill kelp" href="${esc(openLink(t.url, t.port, shared))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
               <button class="more" data-link-menu="${t.port}" aria-label="Link actions">${icon('more_h')}</button>
             </div>`).join('')}</div>` : `<p class="empty">Nothing shared. Share a dev server or container below.</p>`;
     }
@@ -1055,7 +1055,7 @@ async function loadServices() {
         html += s.servers.length ? `<div class="list">${s.servers.map(d => `
             <div class="row"><span class="ico ${d.alive ? 'brass' : 'dim'}">${icon('devserver')}</span>
               <div class="main"><div class="title">${esc(d.name)}${d.port ? ` <span class="mono">:${d.port}</span>` : ''}${d.project ? `<span class="tag dim">${esc(d.project)}</span>` : ''}${d.external ? '<span class="tag dim">pid</span>' : ''}</div>
-                <div class="sub">${d.alive ? `<span class="live">● running</span>${d.listening === false ? ' · not listening yet' : ''}` : `stopped${d.stoppedAt ? ' · ' + fmtAgo(d.stoppedAt) : ''}`}${d.tunnel?.url ? ` · <a href="${esc(d.tunnel.url)}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(d.tunnel.url.replace(/^https:\/\//, ''))}</a>` : d.alive && d.port ? ' · local only' : ''}</div></div>
+                <div class="sub">${d.alive ? `<span class="live">● running</span>${d.listening === false ? ' · not listening yet' : ''}` : `stopped${d.stoppedAt ? ' · ' + fmtAgo(d.stoppedAt) : ''}`}${d.tunnel?.url ? ` · <a href="${esc(openLink(d.tunnel.url, d.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(d.tunnel.url.replace(/^https:\/\//, ''))}</a>` : d.alive && d.port ? ' · local only' : ''}</div></div>
               ${d.port ? credChip(d.port) : ''}${d.alive && d.port && !d.tunnel ? `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.name)}">${icon('share')}Share</button>` : ''}
               ${d.alive ? `<button class="pill" data-srv="stop" data-slug="${esc(d.slug)}">${icon('stop')}Stop</button>` : d.canStart ? `<button class="pill" data-srv="start" data-slug="${esc(d.slug)}">${icon('play')}Start</button>` : ''}
               <button class="more" data-srv-menu="${esc(d.slug)}" aria-label="Server actions">${icon('more_h')}</button>
@@ -1200,7 +1200,8 @@ async function codeServerStartWith(folder, project = false) {
 // The page for one live service: state, address, actions as buttons, links, credentials, log.
 async function livePage(p, key) {
     const v = p?.services.find(x => x.key === key); if (!v) return;
-    const shared = v.port ? (await api('/api/creds').catch(() => [])).filter(c => c.port === v.port) : [];
+    const allCreds = await api('/api/creds').catch(() => []);
+    const shared = v.port ? allCreds.filter(c => c.port === v.port) : [];
     const base = v.host?.url || null;
     const { panel, close } = openDialog(`<h2>${icon(v.worker ? 'cpu' : 'globe')}${esc(v.title)}</h2>
         <p class="muted">${esc(p.name)}${p.summary ? ` · ${esc(p.summary)}` : ''}</p>
@@ -1209,7 +1210,7 @@ async function livePage(p, key) {
         ${v.runAs === 'blocked' ? `<div class="banner danger" style="margin:10px 0"><b>This service asks to run as root.</b> PORTHOLE.md says <span class="mono">run_as: root</span>. Root can read every secret on the box, so only allow it if the app really needs it (binding a low port, Docker). The approval covers the start command, every action and the project's code as they are now; if any of them changes, it asks again.<div class="buttons"><button class="danger" data-a="root">Allow as root</button></div></div>` : ''}
         <div class="menu">
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
-          ${v.host ? `<a class="row" href="${esc(v.host.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
+          ${v.host ? `<a class="row" href="${esc(openLink(v.host.url, v.port, allCreds))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
         ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
@@ -2047,6 +2048,25 @@ async function loadClaude() {
 }
 
 // ---------- vault (credentials, n8n-style) ----------
+
+// The address an Open button should use for a site. When a shared credential for the same site carries a path or a
+// query (a login link such as /?key=…), open that instead of the bare address. Matches on the same origin, or on the
+// same port for a credential that gave a localhost URL (its path and query are moved onto this site's address).
+function openLink(base, port, creds) {
+    if (!base) return base;
+    let b; try { b = new URL(base); } catch { return base; }
+    const local = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?/i;
+    const tail = u => (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash;
+    for (const c of [...(creds || [])].sort((x, y) => (y.at || 0) - (x.at || 0))) {
+        for (const raw of [c.url, c.openUrl]) {
+            if (!raw) continue;
+            let u; try { u = new URL(raw); } catch { continue; }
+            const same = u.origin === b.origin || (port && c.port === port && local.test(raw));
+            if (same && tail(u) && tail(u) !== tail(b)) return b.origin + (u.pathname || '/') + u.search + u.hash;
+        }
+    }
+    return base;
+}
 
 let catalogCache = null;
 async function getCatalog() { if (!catalogCache) catalogCache = await api('/api/vault/catalog'); return catalogCache; }

@@ -42,14 +42,24 @@ jobs:
     with:
       ref: ${{ needs.resolve.outputs.sha }}
 
+  # GitHub refuses pushes from the workflow token that add or change files in .github/workflows. With a
+  # PROMOTE_TOKEN secret (fine-grained PAT: this repo, Contents + Workflows read/write) the workflow moves stable
+  # itself; without one, such a promotion stops here after CI passes and scripts/promote.ps1 pushes the tested commit
+  # from your machine, which starts release.yml through its push trigger.
   move:
     needs: [resolve, ci]
     runs-on: ubuntu-24.04
+    outputs:
+      pushed: ${{ steps.m.outputs.pushed }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          token: ${{ secrets.PROMOTE_TOKEN || github.token }}
       - name: Move stable
+        id: m
+        env:
+          HAS_PAT: ${{ secrets.PROMOTE_TOKEN != '' }}
         run: |
           set -euo pipefail
           SHA=${{ needs.resolve.outputs.sha }}
@@ -60,12 +70,20 @@ jobs:
               echo "Rolling stable back from $(git rev-parse --short origin/stable)"
             fi
           fi
+          if [ "$HAS_PAT" != "true" ] && git diff --name-only "$(git rev-parse -q --verify origin/stable || git hash-object -t tree /dev/null)" "$SHA" -- .github/workflows | grep -q .; then
+            echo "::warning::CI passed on $SHA, but it changes .github/workflows, which the workflow token may not push. Push it yourself: git push origin $SHA:refs/heads/stable (scripts/promote.ps1 -Wait does this), or add a PROMOTE_TOKEN secret."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "CI passed; stable NOT moved (workflow files changed). Push $SHA to stable from your machine." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git push -f origin "$SHA:refs/heads/stable"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "stable -> $(echo $SHA | cut -c1-7)" >> "$GITHUB_STEP_SUMMARY"
 
   # A push made with the workflow token does not start release.yml by itself, so call it directly.
   release:
     needs: [resolve, move]
+    if: needs.move.outputs.pushed == 'true'
     uses: ./.github/workflows/release.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}

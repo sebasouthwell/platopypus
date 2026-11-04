@@ -279,6 +279,11 @@ phone's Update button. Mechanism:
 
 - **1.15.1** — `install.sh` makes `/etc/porthole.env` readable by root only (it was world-readable; found by the isolation
   check on the live box: no secrets in it, but service accounts should not see box settings). No state change.
+- **1.15.2** — Open buttons for a site (shared link, registered server, live service hostname) use a shared
+  credential's link when it is the same site with a path or query, e.g. a `?k=` login key; Copy still copies the bare
+  address. Promote workflow: when a promotion changes `.github/workflows` (which the workflow token may not push), it
+  stops after CI with a notice and `scripts/promote.ps1 -Wait` pushes the tested commit; a `PROMOTE_TOKEN` secret lets
+  the workflow do it. No state change.
 
 ## Release checklist
 
