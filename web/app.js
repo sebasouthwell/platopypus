@@ -348,8 +348,9 @@ async function loadHome() {
     const list = h.projects.filter(p => p !== active);
     $('#home-projects').innerHTML = list.map(p => {
         const ag = p.shells.find(s => s.kind === 'agent');
-        const status = ag ? `<span class="live">● ${esc(agentTitle(ag.agent))} running</span>` : p.shells.length ? `${p.shells.length} shell${p.shells.length > 1 ? 's' : ''} open` : 'nothing running';
-        return `<button class="row" data-folder="${esc(p.path)}"><span class="ico brass">${icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}${p.repo && p.repo !== 'local' ? `<span class="tag ${p.repo === 'public' ? 'brass' : 'dim'}">${icon(p.repo === 'public' ? 'globe' : 'lock')}${p.repo}</span>` : ''}</div><div class="sub">${status} · ${fmtAgo(p.modified)}</div></div>${icon('chevron', 'i chev')}</button>`;
+        const shellsPart = ag ? `${esc(agentTitle(ag.agent))} working` : p.shells.length ? `${p.shells.length} shell${p.shells.length > 1 ? 's' : ''} open` : '';
+        const status = p.running?.length ? `${runningLine(p.running)}${shellsPart ? ` · ${shellsPart}` : ''}` : ag ? `<span class="live">● ${esc(agentTitle(ag.agent))} running</span>` : shellsPart || 'nothing running';
+        return `<button class="row" data-folder="${esc(p.path)}"><span class="ico ${p.running?.length ? 'kelp' : 'brass'}">${icon(p.running?.length ? 'play' : 'folder')}</span><div class="main"><div class="title">${esc(p.name)}${p.repo && p.repo !== 'local' ? `<span class="tag ${p.repo === 'public' ? 'brass' : 'dim'}">${icon(p.repo === 'public' ? 'globe' : 'lock')}${p.repo}</span>` : ''}</div><div class="sub">${status} · ${fmtAgo(p.modified)}</div></div>${icon('chevron', 'i chev')}</button>`;
     }).join('') + `<button class="row" data-new-project><span class="ico">${icon('folder-plus')}</span><div class="main"><div class="title" style="color:var(--brass)">New project</div></div></button>`;
     $$('#home-projects [data-folder]').forEach(b => b.onclick = () => { state.filesPath = b.dataset.folder; go('files'); });
     $('[data-new-project]').onclick = newProjectDialog;
@@ -675,6 +676,13 @@ async function portholerunDialog(rel) {
             } else toast(r.link?.error ? `Running; the link failed: ${r.link.error}` : `${r.name} is running${r.port ? ` on :${r.port}` : ''}`, !!r.link?.error);
         } catch (ex) { toast(ex.message, true); b.disabled = false; }
     });
+}
+
+// What runs in a folder, as one line: the first server by name, its port, and how many more.
+function runningLine(list) {
+    if (!list?.length) return '';
+    const r = list[0];
+    return `<span class="live">● ${esc(r.name)} running</span>${r.port ? ` · <span class="mono">:${r.port}</span>` : ''}${list.length > 1 ? ` · +${list.length - 1} more` : ''}`;
 }
 
 function newProfileDialog(done) {
@@ -1689,19 +1697,23 @@ async function loadFiles(path = null) {
     $('#files-title').textContent = data.path ? basename(data.path) : (fsRoot === '/' ? 'Root' : 'Files');
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
     // A folder with a .portholerun gets its Run card right under the git card.
-    $('#run-card').innerHTML = runFile ? `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>` : '';
+    const mine = (data.running || []).find(r => r.kind === 'run');
+    $('#run-card').innerHTML = !runFile ? '' : mine
+        ? `<div class="run-card on"><span class="ico kelp">${icon('activity')}</span><div class="main"><div class="title">${esc(basename(data.path) || 'This folder')} is running</div><div class="sub">${mine.port ? `<span class="mono">:${mine.port}</span> · ` : ''}${mine.url ? esc(mine.url.replace(/^https:\/\//, '')) : 'no link'}</div></div>${mine.url ? `<a class="pill kelp" href="${esc(mine.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}<button class="pill" data-run-file>${icon('settings')}Manage</button></div>`
+        : `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>`;
     $('#run-card [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
     $('#file-list').innerHTML = up + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}"${finePointer() ? ' draggable="true"' : ''}>
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
-          <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
-          ${i.run ? `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>` : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
+          <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.running?.length ? `${runningLine(i.running)} · ` : ''}${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? (i.running?.length ? '' : 'Folder · ') : fmtBytes(i.size) + ' · '}${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
+          ${i.running?.[0]?.url ? `<span class="pill kelp sm" data-open-run="${esc(i.running[0].url)}" title="${esc(i.running[0].url)}">${icon('external')}Open</span>` : ''}${i.run ? (i.running?.some(r => r.kind === 'run') ? `<span class="pill ghost-kelp sm" data-run-dir title="Running · restart or stop">${icon('activity')}Running</span>` : `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>`) : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
     $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
     $$('#file-list .row[data-name]').forEach(row => {
         const name = row.dataset.name, type = row.dataset.type, size = Number(row.dataset.size), rel = join(state.filesPath, name);
         row.addEventListener('click', e => {
+            const openRun = e.target.closest('[data-open-run]'); if (openRun) return window.open(openRun.dataset.openRun, '_blank', 'noopener');
             if (e.target.closest('[data-run-dir]')) return portholerunDialog(join(rel, '.portholerun'));
             if (e.target.closest('[data-more]')) return toggleExpand(row, rel, name, type, size);
             if (type === 'dir') return loadFiles(rel).catch(ex => toast(ex.message, true));

@@ -321,6 +321,11 @@ const server = http.createServer(async (req, res) => {
             const out = await files.list(url.searchParams.get('path') || '.');
             // Project folders show where an upgrade came from or went to.
             try { const dir = files.resolveInRoot(out.path || '.'); for (const i of out.items) if (i.type === 'dir') { const l = upgrade.linksFor(path.join(dir, i.name)); if (l) i.links = l; } } catch { /* ignore */ }
+            // What runs in this folder and in each folder listed (servers, .portholerun, live services).
+            try {
+                const dir = files.resolveInRoot(out.path || '.'), all = await home.runningServers();
+                if (all.length) { out.running = home.runningIn(dir, all); for (const i of out.items) if (i.type === 'dir') { const r = home.runningIn(path.join(dir, i.name), all); if (r.length) i.running = r; } }
+            } catch { /* ignore */ }
             return send(res, 200, out);
         }
         // Folder icons for the file list: image files only, served as images under a sandbox policy (an SVG shown in

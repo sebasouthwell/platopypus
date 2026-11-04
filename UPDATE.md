@@ -322,6 +322,11 @@ phone's Update button. Mechanism:
   card for a `.portholerun` folder now sits right under the git card, and folders with one show a Run button in the
   Projects listing. No state change.
 
+- **1.17.3** — Projects show what runs in them: Home's project list and the Files listing say "● <name> running ·
+  :port" (running projects first on Home); a project with a running `.portholerun` shows Running (restart/stop) and
+  Open instead of Run, and its Run card says it is running with Open and Manage. `/api/files` adds `running` for the
+  folder and each folder listed; `/api/home` adds `running` per project. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

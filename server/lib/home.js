@@ -26,12 +26,27 @@ function rel(abs) {
     return path.relative(config.root, abs).split(path.sep).join('/');
 }
 
+// What is running inside each folder: registered servers, .portholerun runs and live services, with their links.
+// runningIn(abs, all) picks the ones whose folder is abs or below it.
+export async function runningServers() {
+    const [regs, tl] = await Promise.all([servicesMgr.list().catch(() => []), tunnels.list().catch(() => [])]);
+    return regs.filter(r => r.alive && r.cwd).map(r => {
+        const t = r.port ? tl.find(x => x.port === r.port && x.url) : null;
+        return { slug: r.slug, name: r.live?.title || String(r.name || r.slug).replace(/^run-/, ''), kind: r.live ? 'live' : /^run-/.test(r.slug) ? 'run' : 'server', port: r.port || null, cwd: path.resolve(r.cwd), url: t?.url || null };
+    });
+}
+export function runningIn(abs, all) {
+    const root = path.resolve(abs);
+    return all.filter(r => r.cwd === root || r.cwd.startsWith(root + path.sep)).map(({ cwd, ...r }) => r);
+}
+
 export async function home() {
     await ensureProjectsDir();
     const [shellList, tunnelList, dockerAvail, status] = await Promise.all([
         shells.list(), tunnels.list(), dockerMgr.available(), system.status(),
     ]);
     const containers = dockerAvail ? await dockerMgr.containers().catch(() => []) : [];
+    const servers = await runningServers();
 
     const entries = await fs.readdir(projectsDir, { withFileTypes: true }).catch(() => []);
     const projects = new Map();
@@ -53,7 +68,8 @@ export async function home() {
         p.shells.push({ name: s.name, kind: s.kind, attached: s.attached, created: s.created });
         p.modified = Math.max(p.modified, s.created);
     }
-    const list = [...projects.values()].sort((a, b) => b.modified - a.modified);
+    for (const [abs, p] of projects) p.running = runningIn(abs, servers);
+    const list = [...projects.values()].sort((a, b) => (b.running.length ? 1 : 0) - (a.running.length ? 1 : 0) || b.modified - a.modified);
     return {
         host: status.hostname,
         uptime: status.uptime,

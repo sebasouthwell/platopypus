@@ -854,6 +854,15 @@ EOF`);
     check('it runs as the project account, not root', owner === 'ps-smoke-run', owner);
     check('.portholerun is added to the project .gitignore', /\.portholerun/.test(fsr.readFileSync('/Projects/smoke-run/.gitignore', 'utf8')));
     check('it appears as a registered server', (await call('/api/servers')).body.some(x => x.slug === 'run-smoke-run' && x.alive));
+    if (fsRootIsSlash) {
+        const lst = (await call('/api/files?path=Projects')).body;
+        const row = lst.items?.find(i => i.name === 'smoke-run');
+        check('the Projects listing shows the project as running', row?.run === true && row?.running?.some(x => x.kind === 'run' && x.port === 8152), JSON.stringify(row?.running));
+        const inside = (await call('/api/files?path=Projects/smoke-run')).body;
+        check('inside the project, the listing says what runs here', inside.running?.some(x => x.slug === 'run-smoke-run'), JSON.stringify(inside.running));
+    }
+    const hp = (await call('/api/home')).body?.projects?.find(x => x.name === 'smoke-run');
+    check('Home lists the project as running', hp?.running?.some(x => x.slug === 'run-smoke-run'), JSON.stringify(hp?.running));
     r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: (await call(`/api/portholerun?abs=${encodeURIComponent(F)}`)).body.hash, restart: true } });
     check('.portholerun restarts', r.status === 200 && r.body.started, `${r.status} ${r.body.error || ''}`);
     r = await call('/api/portholerun/stop', { method: 'POST', body: { abs: F } });

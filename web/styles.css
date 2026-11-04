@@ -559,3 +559,7 @@ details.group .list { margin: 0; border: 0; border-radius: 0; }
 .upd-time { color: var(--dim); font-size: 13px; margin-top: 8px; font-variant-numeric: tabular-nums; }
 .upd-actions { display: flex; gap: 8px; margin-top: 16px; }
 .upd-logview { margin-top: 14px; width: 100%; max-height: 32vh; overflow: auto; text-align: left; background: #070D18; border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: #B9C7D6; white-space: pre-wrap; }
+
+.pill.ghost-kelp { background: rgba(63,211,154,.12); color: var(--kelp); border-color: rgba(63,211,154,.45); }
+.run-card.on { border-color: rgba(63,211,154,.55); }
+.run-card .pill { flex: none; }
