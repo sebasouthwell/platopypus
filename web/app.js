@@ -220,7 +220,7 @@ $('#logout').addEventListener('click', async () => { await api('/api/logout', { 
 const state = {
     tab: localStorage.getItem('porthole.tab') || 'home',
     filesPath: localStorage.getItem('porthole.path'),   // null until a folder is chosen → Files opens at home
-    servicesFilter: 'all',
+    servicesFilter: 'projects',
     shells: [],
     expanded: null,
 };
@@ -314,6 +314,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // ---------- home ----------
 
 async function loadHome() {
+    loadHomeRunning().catch(() => {});
     const h = await api('/api/home');
     $('#home-sub').textContent = `up ${fmtDuration(h.uptime)}${h.diskFree != null ? ` · ${fmtBytes(h.diskFree)} free` : ''}`;
     $('#home-stats').innerHTML = `
@@ -345,7 +346,7 @@ async function loadHome() {
         pick.innerHTML = '';
     }
 
-    const list = h.projects.filter(p => p !== active);
+    const list = h.projects.filter(p => p !== active && !p.running?.length);
     $('#home-projects').innerHTML = list.map(p => {
         const ag = p.shells.find(s => s.kind === 'agent');
         const shellsPart = ag ? `${esc(agentTitle(ag.agent))} working` : p.shells.length ? `${p.shells.length} shell${p.shells.length > 1 ? 's' : ''} open` : '';
@@ -683,6 +684,154 @@ function runningLine(list) {
     if (!list?.length) return '';
     const r = list[0];
     return `<span class="live">● ${esc(r.name)} running</span>${r.port ? ` · <span class="mono">:${r.port}</span>` : ''}${list.length > 1 ? ` · +${list.length - 1} more` : ''}`;
+}
+
+// ---------- Services: one card per project ----------
+const PART_LABEL = { live: 'live', run: '.portholerun', server: 'server', container: 'container', editor: 'VS Code', port: 'port', link: 'link', 'box-editor': 'VS Code' };
+function partIcon(x) {
+    if (x.type === 'container') return `<span class="ico ${x.running ? 'dock' : 'dim'} logo"><img src="/api/docker/logo?image=${encodeURIComponent(x.image || '')}" alt="" loading="lazy" data-fb="container"><span class="badge">${icon('container')}</span></span>`;
+    const ic = { live: 'globe', run: 'rocket', server: 'devserver', port: 'devserver', editor: 'file-code', 'box-editor': 'file-code', link: 'link' }[x.type] || 'activity';
+    return `<span class="ico ${x.running ? (x.type === 'live' || x.type === 'run' || x.type === 'link' ? 'kelp' : 'brass') : 'dim'}">${icon(ic)}</span>`;
+}
+function partLink(x) {
+    const url = x.url || x.link?.url;
+    if (!url) return x.gone ? ' · <span class="warn">folder gone</span>' : x.running && x.port ? ' · local' : '';
+    const host = url.replace(/^https:\/\//, '').split('/')[0];
+    return ` · <a href="${esc(url)}" target="_blank" rel="noopener" class="kelp-link">${esc(host)}</a>${x.link?.expires ? ` · closes in ${fmtIn(x.link.expires)}` : ''}${x.link?.kind === 'zoned' && x.link.connected === false ? ' · <span style="color:var(--flare)">down</span>' : ''}`;
+}
+function partControls(x, credChip) {
+    const more = sel => `<button class="more" ${sel} aria-label="More">${icon('more_h')}</button>`;
+    const cred = x.port ? credChip(x.port) : '';
+    if (x.type === 'live') return cred + (x.worker && !x.port ? '' : '') + (x.running ? `<button class="pill sm" data-live="stop" data-p="${esc(x.project)}" data-k="${esc(x.key)}">${icon('stop')}Stop</button>` : `<button class="pill sm" data-live="start" data-p="${esc(x.project)}" data-k="${esc(x.key)}">${icon('play')}Start</button>`) + more(`data-live-page="${esc(x.project)}" data-k="${esc(x.key)}"`);
+    if (x.type === 'run' || x.type === 'server') return cred + (x.running ? `<button class="pill sm" data-srv="stop" data-slug="${esc(x.slug)}">${icon('stop')}Stop</button>` : x.canStart ? `<button class="pill sm" data-srv="start" data-slug="${esc(x.slug)}">${icon('play')}Start</button>` : '') + more(`data-srv-menu="${esc(x.slug)}"`);
+    if (x.type === 'container') return cred + (x.running ? (x.port && !x.link ? `<button class="pill ghost sm" data-share="${x.port}" data-label="${esc(x.title)}">${icon('share')}Share</button>` : '') : `<button class="pill sm" data-cact="start" data-c="${esc(x.name)}">${icon('play')}Start</button>`) + more(`data-cmenu="${esc(x.name)}"`);
+    if (x.type === 'editor') return more(`data-cs="menu" data-who="${esc(x.name)}"`);
+    if (x.type === 'box-editor') return (x.running ? `<button class="pill sm" data-cs="stop" data-who="box">${icon('stop')}Stop</button>` : `<button class="pill sm" data-cs="start" data-who="box">${icon('play')}Start</button>`) + more('data-cs="menu" data-who="box"');
+    if (x.type === 'port') return cred + (x.link ? `<button class="pill sm" data-unshare="${x.port}">${icon('x')}Unshare</button>` : `<button class="pill ghost sm" data-share="${x.port}" data-label="${esc(x.title)}">${icon('share')}Share</button>`) + `<button class="pill ghost sm" data-register="${x.port}" data-label="${esc(x.title)}" title="Register as a server">${icon('plus')}</button>`;
+    if (x.type === 'link') return cred + more(`data-link-menu="${x.port}"`);
+    return '';
+}
+function partRow(x, credChip) {
+    return `<div class="row prow">${partIcon(x)}<div class="main"><div class="title">${esc(x.title)}<span class="tag dim">${PART_LABEL[x.type] || x.type}</span></div>
+        <div class="sub">${x.running ? '<span class="live">● running</span>' : `stopped${x.status && x.type === 'container' ? ` · ${esc(x.status.toLowerCase())}` : ''}`}${x.port ? ` · <span class="mono">:${x.port}</span>` : ''}${partLink(x)}</div></div>${partControls(x, credChip)}</div>`;
+}
+function partsHtml(parts, credChip) {
+    // Containers from one compose project fold into a single row that opens to show them.
+    const out = [], done = new Set();
+    for (const x of parts) {
+        if (done.has(x.id)) continue;
+        const crew = x.type === 'container' && x.compose ? parts.filter(y => y.type === 'container' && y.compose === x.compose) : [];
+        if (crew.length > 1) {
+            crew.forEach(y => done.add(y.id));
+            const up = crew.filter(y => y.running).length, withLink = crew.find(y => y.link?.url);
+            out.push(`<details class="pgroup"><summary class="row prow"><span class="ico ${up ? 'dock' : 'dim'}">${icon('compose')}</span><div class="main"><div class="title">${esc(x.compose)}<span class="tag dim">${crew.length} containers</span></div><div class="sub">${up ? `<span class="live">● ${up} of ${crew.length} running</span>` : 'stopped'}${withLink ? partLink(withLink) : ''}</div></div><button class="more" data-pmenu="${esc(x.compose)}" aria-label="Compose actions">${icon('more_h')}</button></summary>${crew.map(y => partRow(y, credChip)).join('')}</details>`);
+            continue;
+        }
+        done.add(x.id); out.push(partRow(x, credChip));
+    }
+    return out.join('');
+}
+function projSummary(p) {
+    if (!p.parts.length) return p.canRun ? 'not running · has .portholerun' : 'nothing running';
+    const up = p.parts.filter(x => x.running);
+    if (!up.length) return `stopped · ${p.parts.length} part${p.parts.length === 1 ? '' : 's'}`;
+    const names = [];
+    const containers = up.filter(x => x.type === 'container').length;
+    for (const x of up) if (x.type !== 'container') names.push(x.type === 'editor' ? 'VS Code' : `${x.title}${x.port ? ` :${x.port}` : ''}`);
+    if (containers) names.push(`${containers} container${containers === 1 ? '' : 's'}`);
+    return names.join(' · ');
+}
+function projectCard(p, i, credChip) {
+    const runUp = p.parts.some(x => x.type === 'run' && x.running);
+    const solo = p.parts.length === 1 ? p.parts[0] : null;
+    if (solo) {
+        const x = solo;
+        return `<section class="pcard ${p.running ? 'on' : ''}">
+        <div class="pcard-head">
+          <button class="pcard-title" data-proj-folder="${esc(p.path)}" title="Open ${esc(p.name)} in Files">
+            <span class="ico ${p.running ? 'kelp' : 'brass'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span>
+            <div class="main"><div class="title">${esc(p.name)}<span class="tag dim">${x.type === 'live' ? 'live' : PART_LABEL[x.type] || x.type}</span></div>
+              <div class="sub">${x.running ? '<span class="live">● running</span>' : 'stopped'}${x.port ? ` · <span class="mono">:${x.port}</span>` : ''}${partLink(x).replace(/<a [^>]*>([^<]*)<\/a>/, '$1')}</div></div></button>
+          ${p.open ? `<a class="pill kelp" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+          ${partControls(x, credChip).replace(/<button class="more"[^>]*>[\s\S]*?<\/button>$/, '')}
+          <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
+        </div></section>`;
+    }
+    return `<section class="pcard ${p.running ? 'on' : ''}">
+        <div class="pcard-head">
+          <button class="pcard-title" data-proj-folder="${esc(p.path)}" title="Open ${esc(p.name)} in Files">
+            <span class="ico ${p.running ? 'kelp' : 'brass'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span>
+            <div class="main"><div class="title">${esc(p.name)}${p.running ? '<span class="dot live"></span>' : ''}</div><div class="sub">${esc(projSummary(p))}</div></div></button>
+          ${p.open ? `<a class="pill kelp" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
+          ${p.canRun && !runUp ? `<button class="pill ghost-kelp" data-proj-run="${esc(p.path)}">${icon('play')}Run</button>` : ''}
+          <button class="more" data-proj-menu="${i}" aria-label="${esc(p.name)} actions">${icon('more_h')}</button>
+        </div>
+        ${p.parts.length ? `<div class="pcard-parts">${partsHtml(p.parts, credChip)}</div>` : ''}
+    </section>`;
+}
+function projectsView(s, credChip) {
+    const projects = s.projects || [], box = s.box || { parts: [] };
+    const up = projects.map((p, i) => [p, i]).filter(([p]) => p.running), idle = projects.map((p, i) => [p, i]).filter(([p]) => !p.running);
+    let html = '';
+    if (!up.length && !box.parts.some(x => x.running)) html += `<p class="empty">Nothing is running. Run a project from Files or below, or tap <b>+</b> to share a port or start an app.</p>`;
+    if (up.length) html += `<div class="pgrid">${up.map(([p, i]) => projectCard(p, i, credChip)).join('')}</div>`;
+    if (box.parts.length || s.system?.length) {
+        html += `<h2 class="section"><span class="bullet"></span>Box<span class="meta">not in a project</span></h2><section class="pcard box"><div class="pcard-parts">${partsHtml(box.parts, credChip)}${s.system?.length ? `<details class="pgroup"><summary class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">System ports<span class="tag dim">${s.system.length}</span></div><div class="sub">Porthole, agents and box services · not shareable</div></div></summary>${s.system.map(d => `<div class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">${esc(d.what)}</div><div class="sub">${esc(d.process)} · <span class="mono">${esc(d.addr)}:${d.port}</span></div></div></div>`).join('')}</details>` : ''}</div></section>`;
+    }
+    if (idle.length) html += `<details class="pidle"${up.length ? '' : ' open'}><summary class="section"><span class="bullet"></span>Not running<span class="meta">${idle.length}</span></summary><div class="pgrid">${idle.map(([p, i]) => projectCard(p, i, credChip)).join('')}</div></details>`;
+    return html;
+}
+function projectMenu(p, s) {
+    if (!p) return;
+    const lives = p.parts.filter(x => x.type === 'live');
+    const { panel, close } = openDialog(`<h2>${icon('folder')}${esc(p.name)}</h2><p class="muted">${esc(projSummary(p))}</p><div class="menu">
+        <button data-m="folder">${icon('folder-open')}Open the folder</button>
+        <button data-m="agent">${icon('claude')}Start an agent here</button>
+        ${p.canRun ? `<button data-m="run">${icon('rocket')}.portholerun…</button>` : ''}
+        ${lives.map(x => `<button data-m="live" data-k="${esc(x.key)}" data-p="${esc(x.project)}">${icon('globe')}${esc(x.title)} · service page</button>`).join('')}
+        ${p.parts.filter(x => x.type === 'run' || x.type === 'server').map(x => `<button data-m="srv" data-slug="${esc(x.slug)}">${icon('logs')}${esc(x.title)} · logs and settings</button>`).join('')}
+        ${p.parts.filter(x => x.type === 'container').map(x => `<button data-m="ctr" data-name="${esc(x.name)}">${icon('container')}${esc(x.title)} · container</button>`).join('')}
+        ${p.parts.filter(x => x.type === 'editor').map(x => `<button data-m="ed" data-name="${esc(x.name)}">${icon('file-code')}VS Code for ${esc(p.name)}</button>`).join('')}
+        ${p.open ? `<button data-m="copy">${icon('copy')}Copy the link</button>` : ''}
+        <button data-m="share">${icon('share')}Share a port…</button>
+    </div><div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-m]', panel).forEach(b => b.onclick = () => {
+        const m = b.dataset.m; close();
+        if (m === 'folder') { state.filesPath = p.path; go('files'); }
+        if (m === 'agent') newShellDialog(p.path, 'agent');
+        if (m === 'run') portholerunDialog(join(p.path, '.portholerun'));
+        if (m === 'live') livePage(s.live.find(x => x.project === b.dataset.p), b.dataset.k);
+        if (m === 'copy') copyText(p.open, 'Link copied');
+        if (m === 'srv') serverMenu(s.servers.find(x => x.slug === b.dataset.slug));
+        if (m === 'ctr') containerMenu(s.containers.find(x => x.name === b.dataset.name));
+        if (m === 'ed') codeServerAction('menu', b.dataset.name);
+        if (m === 'share') shareDialog('', p.name);
+    });
+}
+// Apps in one tap, from the + sheet (they no longer take space on the Services page).
+async function appsDialog() {
+    const s = await api('/api/services').catch(() => null);
+    if (!s?.docker) return toast('Docker is not running on the box.', true);
+    const { panel, close } = openDialog(`<h2>${icon('container')}Start an app</h2><p class="muted">Pulls the image, runs it with its own volume and gives it a link.</p>
+        <div class="tiles">${s.apps.map(a => `<button class="tile ${a.running ? 'on' : ''}" data-app="${a.key}" data-title="${esc(a.title)}"><span class="ico dock">${icon('app-' + a.key.replace('stirling-pdf', 'stirling').replace('it-tools', 'ittools').replace('uptime-kuma', 'kuma'))}</span>${esc(a.title)}</button>`).join('')}
+        <button class="tile dim" data-run-image><span class="ico">${icon('container')}</span>Any image…</button></div><div class="buttons"><button data-close>Close</button></div>`);
+    $$('[data-app]', panel).forEach(b => b.onclick = () => { close(); launchApp(b.dataset.app, b.dataset.title); });
+    $('[data-run-image]', panel).onclick = () => { close(); runImageDialog(); };
+}
+// Home: what's running now, one line per project.
+async function loadHomeRunning() {
+    const host = $('#home-running'); if (!host) return;
+    const s = await api('/api/services').catch(() => null);
+    const up = (s?.projects || []).filter(p => p.running);
+    const boxUp = (s?.box?.parts || []).filter(x => x.running && x.type !== 'link');
+    if (!up.length && !boxUp.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<h2 class="section"><span class="bullet kelp"></span>Running now<button class="act" data-go-services>Services</button></h2><div class="list">${up.map(p => `
+        <div class="row"><button class="row-main" data-proj-folder="${esc(p.path)}"><span class="ico kelp${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="folder">` : icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}</div><div class="sub">${esc(projSummary(p))}</div></div></button>
+          ${p.open ? `<a class="pill kelp sm" href="${esc(p.open)}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}</div>`).join('')}
+        ${boxUp.length ? `<button class="row" data-go-services><span class="ico">${icon('server')}</span><div class="main"><div class="title">Box</div><div class="sub">${esc(boxUp.map(x => x.title).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>` : ''}</div>`;
+    $$('[data-proj-folder]', host).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
+    $$('[data-go-services]', host).forEach(b => b.onclick = () => go('services'));
+    $$('.ico.fav img', host).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav'); sp.innerHTML = icon('folder'); }, { once: true }));
 }
 
 function newProfileDialog(done) {
@@ -1151,7 +1300,7 @@ async function loadServices() {
     const credChip = port => { const list = shared.filter(c => c.port === port); return list.length ? `<button class="pill" data-credport="${port}" title="Shared credentials">${icon('key')}${list.length > 1 ? list.length : ''}</button>` : ''; };
     const f = state.servicesFilter;
     const show = k => f === 'all' || f === k;
-    let html = '';
+    let html = f === 'projects' ? projectsView(s, credChip, shared) : '';
 
     if (show('dev') || show('links')) {
         const liveRows = (s.live || []).flatMap(p => p.services.map(v => ({ p, v })));
@@ -1266,6 +1415,10 @@ async function loadServices() {
     const body = $('#services-body');
     $$('[data-credport]', body).forEach(b => b.onclick = () => { const list = shared.filter(c => c.port === Number(b.dataset.credport)); if (list.length === 1) openSharedCred(list[0].id); else sharedCredsSheet(list); });
     $$('[data-share]', body).forEach(b => b.onclick = () => shareDialog(Number(b.dataset.share), b.dataset.label));
+    $$('[data-proj-folder]', body).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
+    $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.portholerun')));
+    $$('[data-proj-menu]', body).forEach(b => b.onclick = () => projectMenu(s.projects[Number(b.dataset.projMenu)], s));
+    $$('.ico.logo img, .ico.fav img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }, { once: true }));
     $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
     $$('[data-live-page]', body).forEach(b => b.onclick = () => livePage(s.live.find(p => p.project === b.dataset.livePage), b.dataset.k));
     $$('[data-live-errors]', body).forEach(b => b.onclick = () => { const p = s.live.find(x => x.project === b.dataset.liveErrors); openDialog(`<h2>${icon('info')}${esc(p.name)} · ${esc(p.file || 'PORTHOLE.md')}</h2>${p.errors.map(e => `<p class="muted" style="color:var(--flare)">${esc(e)}</p>`).join('')}${p.warnings.map(w => `<p class="sub">${esc(w)}</p>`).join('')}<p class="sub">Ask the agent in that project to fix it and run <span class="mono">live check</span>.</p><div class="buttons"><button data-close>Close</button></div>`); });
@@ -1614,9 +1767,10 @@ async function launchApp(key, title) {
 function startSomethingDialog() {
     const { panel, close } = openDialog(`<h2>Start something</h2><div class="menu">
         <button data-a="share">${icon('share')}Share a port</button>
+        <button data-a="apps">${icon('package')}Start an app</button>
         <button data-a="image">${icon('container')}Run a Docker image</button>
         <button data-a="shell">${icon('terminal')}Open a shell</button></div><div class="buttons"><button data-close>Cancel</button></div>`);
-    $$('[data-a]', panel).forEach(b => b.onclick = () => { close(); if (b.dataset.a === 'share') shareDialog(''); if (b.dataset.a === 'image') runImageDialog(); if (b.dataset.a === 'shell') newShellDialog(state.filesPath, 'shell'); });
+    $$('[data-a]', panel).forEach(b => b.onclick = () => { close(); if (b.dataset.a === 'share') shareDialog(''); if (b.dataset.a === 'image') runImageDialog(); if (b.dataset.a === 'apps') appsDialog(); if (b.dataset.a === 'shell') newShellDialog(state.filesPath, 'shell'); });
 }
 // Run any image: look it up first (pull + inspect), then edit what the image declares before starting.
 function runImageDialog(prefill = '') {

@@ -332,6 +332,16 @@ phone's Update button. Mechanism:
   agent session (so existing projects pick it up too). Override per project with a negation (`!.claude/`) or a
   `# porthole: track .claude` line. Files already committed stay tracked. No state change.
 
+- **1.18.0** — **Services by project.** The default view is one card per project folder with everything that runs
+  for it: live services, `.portholerun` runs and registered servers (by their folder), containers (by the folder Docker
+  Compose started them in), project editors (by the folder they mount) and stray ports (by the shell that opened
+  them); a link sits on what it shares. A card shows the project's favicon and opens its folder; containers show
+  their image logo, and a compose project's containers fold into one row. One-part projects are a single row.
+  Things outside /Projects (Box editor, stray links, system ports, leftovers whose folder is gone) are under Box;
+  idle projects are in a collapsed "Not running" list. Views: Projects, Links, Docker, Everything (the old list).
+  The app catalog moved to + → Start an app. **Home** has "Running now" (its Projects list shows the rest).
+  `/api/services` adds `projects` and `box`; containers carry `workdir`. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

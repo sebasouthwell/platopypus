@@ -106,6 +106,7 @@ export async function containers() {
         ports: parsePorts(c.Ports),
         created: c.CreatedAt,
         compose: labelOf(c.Labels, 'com.docker.compose.project'),
+        workdir: labelOf(c.Labels, 'com.docker.compose.project.working_dir'),
     })).sort((a, b) => (a.state === 'running' ? 0 : 1) - (b.state === 'running' ? 0 : 1) || a.name.localeCompare(b.name));
 }
 

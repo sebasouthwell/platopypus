@@ -879,6 +879,10 @@ EOF`);
         const inside = (await call('/api/files?path=Projects/smoke-run')).body;
         check('inside the project, the listing says what runs here', inside.running?.some(x => x.slug === 'run-smoke-run'), JSON.stringify(inside.running));
     }
+    const sv = (await call('/api/services')).body;
+    const card = sv.projects?.find(x => x.name === 'smoke-run');
+    check('Services groups the run under its project folder', card?.running && card.path === 'Projects/smoke-run' && card.parts.some(x => x.type === 'run' && x.port === 8152 && x.running) && card.canRun, JSON.stringify(card).slice(0, 240));
+    check('nothing of that project is left loose under Box', !(sv.box?.parts || []).some(x => x.port === 8152), JSON.stringify(sv.box?.parts || []).slice(0, 200));
     const hp = (await call('/api/home')).body?.projects?.find(x => x.name === 'smoke-run');
     check('Home lists the project as running', hp?.running?.some(x => x.slug === 'run-smoke-run'), JSON.stringify(hp?.running));
     r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: (await call(`/api/portholerun?abs=${encodeURIComponent(F)}`)).body.hash, restart: true } });

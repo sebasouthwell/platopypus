@@ -15,6 +15,10 @@ import * as system from './system.js';
 import * as servicesMgr from './services.js';
 import * as projectFlags from './projects.js';
 import * as live from './live.js';
+import * as codeserver from './codeserver.js';
+import * as profile from './profile.js';
+import { folderIcon } from './files.js';
+import fsSync from 'node:fs';
 
 export const projectsDir = path.join(config.root, 'Projects');
 
@@ -84,6 +88,63 @@ export async function home() {
     };
 }
 
+// One entry per project folder with everything that belongs to it, worked out from where each thing runs:
+// live services from their PORTHOLE.md, servers and .portholerun runs from their folder, containers from the folder
+// Docker Compose started them in (or the folder a project editor mounts), stray ports from the shell that opened
+// them. A link sits on whatever holds its port. Anything outside /Projects goes under "box".
+async function projectsView({ liveList, servers, containers, devservers, links, shellList, cs }) {
+    const folders = new Map();
+    let entries = []; try { entries = fsSync.readdirSync(projectsDir, { withFileTypes: true }); } catch { /* none */ }
+    for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.')) continue;
+        const abs = path.join(projectsDir, e.name);
+        folders.set(abs, { name: e.name, path: rel(abs), abs, parts: [] });
+    }
+    const box = { parts: [] };
+    const home = abs => { const r = abs ? profile.projectRoot(abs) : null; return r && folders.has(r) ? folders.get(r) : null; };
+    const put = (abs, part) => (home(abs) || box).parts.push(part);
+    const linkFor = port => port ? links.find(t => t.port === port) || null : null;
+    const used = new Set();
+    const withLink = part => { const t = linkFor(part.port); if (t) { used.add(t.port); part.link = { url: t.url || null, kind: t.kind || 'quick', expires: t.expires || null, connected: t.connected ?? null, port: t.port }; } return part; };
+
+    for (const p of liveList) for (const v of p.services || []) {
+        put(p.root, withLink({ type: 'live', id: `live:${p.project}:${v.key}`, project: p.project, key: v.key, title: v.title, port: v.port, running: !!v.running, url: v.host?.url || null, hostname: v.hostname || null, worker: !!v.worker }));
+    }
+    for (const r of servers) {
+        put(r.cwd, withLink({ type: /^run-/.test(r.slug) ? 'run' : 'server', id: `srv:${r.slug}`, slug: r.slug, title: r.slug.replace(/^run-/, ''), port: r.port || null, running: !!r.alive, canStart: !!r.canStart, gone: !fsSync.existsSync(r.cwd) }));
+    }
+    const editors = new Map((cs?.projects || []).map(e => [e.name, e]));
+    for (const c of containers) {
+        const ed = editors.get(c.name);
+        const folder = ed?.folder || c.workdir || null;
+        const port = c.ports[0]?.host || null;
+        put(folder, withLink({ type: ed ? 'editor' : 'container', id: `ctr:${c.name}`, name: c.name, title: ed ? 'VS Code' : c.title, image: c.image, compose: c.compose, port, ports: c.ports.map(x => x.host), running: c.state === 'running', status: c.status, app: c.app }));
+    }
+    for (const d of devservers) {
+        const sh = d.shell ? shellList.find(x => x.name === d.shell) : null;
+        put(sh?.cwd || null, withLink({ type: 'port', id: `port:${d.port}`, title: d.process, port: d.port, running: true, shell: d.shell || null }));
+    }
+    if (cs?.installed) box.parts.unshift({ type: 'box-editor', id: 'box-editor', title: 'Box editor', port: cs.port, running: !!cs.running, url: cs.shared ? cs.url : null });
+    for (const t of links) if (!used.has(t.port)) box.parts.push({ type: 'link', id: `link:${t.port}`, title: t.name || t.target || `port ${t.port}`, port: t.port, running: true, link: { url: t.url || null, kind: t.kind || 'quick', expires: t.expires || null, connected: t.connected ?? null, port: t.port } });
+
+    // Merge a compose project's containers into one part ("3 containers"), keeping the details for the panel.
+    const out = [];
+    for (const f of folders.values()) {
+        if (!f.parts.length && !fsSync.existsSync(path.join(f.abs, '.portholerun')) && !fsSync.existsSync(path.join(f.abs, 'PORTHOLE.md'))) continue;
+        const running = f.parts.some(x => x.running);
+        const primary = f.parts.find(x => x.running && x.url) || f.parts.find(x => x.running && x.link?.url) || null;
+        let icon = null; try { const st = fsSync.statSync(f.abs); const ic = await folderIcon(f.abs, st.mtimeMs); if (ic) icon = rel(path.join(f.abs, ic)); } catch { /* none */ }
+        out.push({
+            name: f.name, path: f.path, icon, running, parts: f.parts,
+            open: primary ? (primary.url || primary.link.url) : null,
+            canRun: fsSync.existsSync(path.join(f.abs, '.portholerun')),
+            summary: { running: f.parts.filter(x => x.running).length, total: f.parts.length },
+        });
+    }
+    out.sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || a.name.localeCompare(b.name));
+    return { projects: out, box };
+}
+
 export async function services() {
     const [tunnelList, ports, dockerAvail, catalog] = await Promise.all([
         tunnels.list(), tunnels.listeningPorts(), dockerMgr.available(), apps.list().catch(() => []),
@@ -126,12 +187,16 @@ export async function services() {
         const t = hostPorts.map(p => tunnelByPort.get(p)).find(Boolean) || null;
         return {
             name: c.name, title: app?.title || c.name, image: c.image, state: c.state, status: c.status,
-            ports: c.ports, compose: c.compose, app: app?.key || null, tunnel: t, noTunnel: app?.noTunnel || false,
+            ports: c.ports, compose: c.compose, workdir: c.workdir || null, app: app?.key || null, tunnel: t, noTunnel: app?.noTunnel || false,
         };
     });
 
+    const cs = await codeserver.status().catch(() => null);
+    const { projects: projectCards, box } = await projectsView({ liveList, servers, containers: containerRows, devservers, links, shellList, cs });
     return {
         docker: dockerAvail,
+        projects: projectCards,
+        box,
         links,
         live: liveList,
         servers,
