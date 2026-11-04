@@ -76,8 +76,10 @@ if (mode === 'seed') {
     const srv = Array.isArray(servers) && servers.find(s => s.slug === ex.server);
     check('the registered server is still registered and running', !!srv && srv.alive === true, JSON.stringify(srv && { alive: srv.alive }));
     for (const f of ex.stateFiles) check(`state file kept: ${f}`, fs.existsSync(`${STATE}/${f}`));
-    const manifest = JSON.parse(fs.readFileSync('/opt/porthole/server/migrations/manifest.json', 'utf8')).migrations.map(m => m.id);
-    const schema = JSON.parse(fs.readFileSync(`${STATE}/schema.json`, 'utf8'));
+    const mf = '/opt/porthole/server/migrations/manifest.json';
+    check('the new release is installed (migrations manifest present)', fs.existsSync(mf));
+    const manifest = fs.existsSync(mf) ? JSON.parse(fs.readFileSync(mf, 'utf8')).migrations.map(m => m.id) : ['(missing)'];
+    const schema = fs.existsSync(`${STATE}/schema.json`) ? JSON.parse(fs.readFileSync(`${STATE}/schema.json`, 'utf8')) : {};
     check('schema.json records the new version', schema.version === me.version, schema.version);
     check('every migration of the release was applied', manifest.every(id => (schema.applied || []).some(a => a.id === id)), (schema.applied || []).map(a => a.id).join(' '));
     check('a pre-migration archive of the state exists', !manifest.length || (schema.lastBackup && fs.existsSync(schema.lastBackup)), schema.lastBackup || '');
