@@ -62,6 +62,7 @@ with mode 0600. Formats as of version 1.0:
 | `schema.json` | migrate.js | `{ version, applied: [{ id, version, at, ms, result? }], updatedAt, lastBackup, lastRun: { from, to, at, ids } }` — upgrade migrations (1.15.0); absent = none applied yet |
 | `migrate/pre-<version>-<stamp>.tar.gz` | migrate.js | state archive taken before migrations (5 kept); also login-move backups (1.12.0) |
 | `project-links.json` | upgrade.js | `{ links: [{ from, to, at, level, commit }] }` — "Upgrade repo" relationships between project folders (1.16.0) |
+| `portholerun.json` | portholerun.js | `{ "<run-slug>": { file, hash, at } }` — what each .portholerun server was started from, for restarts (1.18.4) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -353,6 +354,11 @@ phone's Update button. Mechanism:
   and Run card, the .portholerun result) use a shared credential's keyed link for the same site, as the older Open
   buttons do; a site that answers 404 without its key (BusTracker's `?k=`) no longer looks offline. Copy still
   copies the bare address. No state change.
+
+- **1.18.4** — Starting or restarting a `.portholerun` server from Services or `svc restart` repeats the run with its
+  settings, Vault values and account (it used to rerun the bare command, so BusTracker came back without its API
+  keys or `PORT`); if the file changed since it last ran, it asks you to review it in Files first. Live services take
+  their own start path the same way. New state: `portholerun.json` (slug → file and the hash that was run; additive).
 
 ## Release checklist
 

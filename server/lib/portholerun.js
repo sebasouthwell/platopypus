@@ -142,8 +142,25 @@ export async function run(file, hash, { restart = false } = {}) {
             else link = await zoned.create({ port: p.port, hostname: p.hostname, name: p.name });
         } catch (e) { log('portholerun', `${p.name}: link failed: ${e.message}`); link = { error: e.message }; }
     }
+    remember(p.slug, p.file, p.hash);
     log('portholerun', `${restart ? 're' : ''}started ${p.folder}/${FILE} as ${account || v.runAs}${p.port ? ` on :${p.port}` : ''}${link?.url ? ` → ${link.url}` : ''}`);
     return { ...p, started: true, server: { slug: reg.slug, pid: reg.pid || null }, link: link?.url ? { url: link.url + (p.open || ''), kind: link.kind || p.share } : link?.error ? { error: link.error } : null, addedToGitignore: ignored };
+}
+
+// What each run was started from, so a plain restart (Services, svc restart) can repeat it with its settings and
+// Vault values. state/portholerun.json: { "<slug>": { file, hash, at } }.
+const recordFile = path.join(config.state, 'portholerun.json');
+function records() { try { return JSON.parse(fs.readFileSync(recordFile, 'utf8')); } catch { return {}; } }
+function remember(slug, file, hash) { const r = records(); r[slug] = { file, hash, at: Date.now() }; try { fs.writeFileSync(recordFile, JSON.stringify(r, null, 2), { mode: 0o600 }); } catch { /* read-only state */ } }
+export const isRunSlug = slug => /^run-/.test(String(slug || '')) && !!records()[slug];
+// Start or restart a .portholerun server by slug. Refuses when the file changed since it was last run: the person
+// has to see the new plan first (Files → .portholerun).
+export async function startSlug(slug, { restart = false } = {}) {
+    const rec = records()[slug];
+    if (!rec) throw httpError(404, 'No .portholerun is known for that server.');
+    const p = await plan(rec.file);
+    if (p.hash !== rec.hash) throw httpError(409, `${FILE} in ${p.folder} changed since it was last run. Open it in Files to see the new plan, then run it.`);
+    return run(rec.file, rec.hash, { restart: restart || p.running });
 }
 
 export async function stop(file) {

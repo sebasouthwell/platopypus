@@ -569,7 +569,11 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/servers/run' && method === 'POST') return send(res, 201, await services.runServer(await readJson(req, 64 * 1024)));
         if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/(stop|start|restart)$/)) && method === 'POST') {
             const slug = services.resolve(m[1]);
-            if (m[2] === 'restart' && slug.startsWith('live-')) return send(res, 200, await live.restartSlug(slug));
+            // Live services and .portholerun runs start from their own definitions (settings, Vault values, account),
+            // never from the bare command in the registry.
+            if (m[2] !== 'stop' && slug.startsWith('live-')) return send(res, 200, await live.restartSlug(slug));
+            if (m[2] !== 'stop' && portholerun.isRunSlug(slug)) return send(res, 200, await portholerun.startSlug(slug, { restart: m[2] === 'restart' }));
+            if (m[2] !== 'stop' && slug.startsWith('run-')) return send(res, 409, { error: 'Start it from its .portholerun (Files → the project → Run), so it gets its settings and Vault values.' });
             return send(res, 200, await services[m[2]](slug));
         }
         if ((m = p.match(/^\/api\/servers\/([a-z0-9-]{1,40})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(m[1], url.searchParams.get('tail') || 200));

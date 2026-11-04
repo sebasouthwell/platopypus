@@ -887,6 +887,15 @@ EOF`);
     check('Home lists the project as running', hp?.running?.some(x => x.slug === 'run-smoke-run'), JSON.stringify(hp?.running));
     r = await call('/api/portholerun/run', { method: 'POST', body: { abs: F, hash: (await call(`/api/portholerun?abs=${encodeURIComponent(F)}`)).body.hash, restart: true } });
     check('.portholerun restarts', r.status === 200 && r.body.started, `${r.status} ${r.body.error || ''}`);
+    {   // A plain restart (Services, svc restart) repeats the run with its settings and account, never the bare command.
+        r = await call('/api/servers/run-smoke-run/restart', { method: 'POST' });
+        let env = ''; for (let i = 0; i < 20 && !/MODE=demo/.test(env); i++) { await sleep(300); try { env = sh(`ps -eo args | grep '[r]unuser -u ps-smoke-run' | grep 'http.server 8152' | grep -o 'MODE=demo' | head -1; true`); } catch { env = ''; } }
+        const who = sh(`ps -eo user:20,args | grep '[h]ttp.server 8152' | grep -v bash | awk '{print $1}' | sort -u`).trim();
+        check('a plain restart keeps the settings and account of the run', r.status === 200 && /MODE=demo/.test(env) && who === 'ps-smoke-run', `${r.status} env=${env.trim()} user=${who}`);
+        sh(`printf '\n# changed\n' >> ${F}`);
+        r = await call('/api/servers/run-smoke-run/restart', { method: 'POST' });
+        check('a plain restart refuses a changed .portholerun (review it first)', r.status === 409 && /changed/.test(r.body.error || ''), `${r.status} ${r.body.error}`);
+    }
     r = await call('/api/portholerun/stop', { method: 'POST', body: { abs: F } });
     check('.portholerun stops', r.status === 200 && !(await call('/api/servers')).body.some(x => x.slug === 'run-smoke-run' && x.alive), `${r.status}`);
     sh(`printf 'run: node x.js\nenv:\n  API_KEY: abc123\n' > ${F}`);
