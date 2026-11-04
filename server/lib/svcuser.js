@@ -7,6 +7,7 @@
 // owns the log, and stops or kills the whole process group.
 
 import fs from 'node:fs';
+import { lockSnapshot } from './prototype.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -106,6 +107,7 @@ export async function grantFolder(user, root) {
     await run('sh', ['-c', `find "$1" -type d -exec ${sbin('setfacl')} -d -m "$2" {} +`, 'sh', root, `${spec},u::rwX,g::rwX`], { timeout: 180_000 });
     await run('chmod', ['-R', 'o-rwx', root], { timeout: 180_000 });
     try { fs.mkdirSync(path.dirname(marker), { recursive: true }); fs.writeFileSync(marker, JSON.stringify({ ...want, at: Date.now() })); } catch { /* read-only project */ }
+    await lockSnapshot(root).catch(() => {});
     log('svcuser', `${user} can use ${root} (ACL); other accounts cannot`);
     return true;
 }

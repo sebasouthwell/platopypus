@@ -61,6 +61,10 @@ from the phone; `live status` shows what Porthole sees. Actions that need the se
 (or `stop_first: true` when they change data the running process holds in memory); never call `svc restart` inside an
 action. When the user starts the live service, it takes over the port from any `svc run` test copy in the same folder,
 so stop your own copy (`svc rm <name>`) once the manifest is done rather than leaving two.
+When a service manages many things of one kind (rooms, game sessions, users), add a `groups:` entry instead of one
+action per thing: a `list` command printing the current ids (one per line, or JSON `[{"id","label"}]`) and actions
+that use `$GROUP_ITEM`. Give the app a small CLI for this (for example `node scripts/rooms.js list|close <id>`); the
+phone shows each group as a dropdown with the items and their commands, plus "All". See docs/LIVE.md.
 
 ## Session type and security level
 

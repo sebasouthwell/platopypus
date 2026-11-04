@@ -2,6 +2,7 @@
 // command through runuser, sign in to the API with a per-shell token, and ask for root per command (elevate.js).
 
 import fs from 'node:fs';
+import { lockSnapshot } from './prototype.js';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -57,7 +58,7 @@ export async function prepareFolder(dir) {
 export async function folderReady(dir) {
     if (!info() || !allowedFolder(dir) || path.resolve(dir) === info().home) return { eligible: false, ready: true };
     try {
-        const { stdout } = await run('find', [dir, '(', '-not', '-group', GROUP, '-o', '-not', '-perm', '-g+w', ')', '-not', '-type', 'l', '-print', '-quit'], { timeout: 20_000 });
+        const { stdout } = await run('find', [dir, '-path', '*/.porthole/prototype', '-prune', '-o', '(', '-not', '-group', GROUP, '-o', '-not', '-perm', '-g+w', ')', '-not', '-type', 'l', '-print', '-quit'], { timeout: 20_000 });
         return { eligible: true, ready: !stdout.trim(), example: stdout.trim() ? path.relative(dir, stdout.trim()) || '.' : null };
     } catch { return { eligible: true, ready: false, example: null }; }
 }
@@ -74,6 +75,7 @@ async function makeGroupWritable(dir) {
     await run('chgrp', ['-R', GROUP, dir], { timeout: 120_000 });
     await run('chmod', ['-R', 'g+rwX', dir], { timeout: 120_000 });
     await run('find', [dir, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+'], { timeout: 120_000 });
+    await lockSnapshot(dir).catch(() => {});   // an upgraded project's prototype stays read-only
     log('agentuser', `made ${dir} group-writable for ${GROUP}`);
 }
 

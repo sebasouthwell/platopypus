@@ -61,6 +61,27 @@ export function safeName(name) {
     return base;
 }
 
+// A folder's own icon: a favicon (or app icon) at its top level or in a usual web folder. Checked per listing for
+// folders only, newest-first by place; cached by the folder's mtime so a long Projects list stays cheap.
+const ICON_DIRS = ['', 'public', 'static', 'src', 'web', 'www', 'assets', 'app', 'client', 'frontend', 'src/assets', 'public/img', 'public/images', 'static/img', 'apps/web/public', 'apps/web', 'packages/web/public', 'frontend/public', 'client/public', 'web/icons'];
+const ICON_NAMES = ['favicon.svg', 'favicon.png', 'favicon.ico', 'apple-touch-icon.png', 'icon.svg', 'icon.png', 'logo.svg', 'logo.png'];
+export const ICON_TYPES = { '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+const iconCache = new Map(); // dir -> { mtime, icon }
+export async function folderIcon(full, mtime) {
+    const hit = iconCache.get(full);
+    if (hit && hit.mtime === mtime) return hit.icon;
+    let found = null;
+    outer: for (const d of ICON_DIRS) {
+        for (const n of ICON_NAMES) {
+            const f = path.join(full, d, n);
+            try { const st = await fsp.stat(f); if (st.isFile() && st.size > 0 && st.size <= 512 * 1024) { found = path.posix.join(d, n); break outer; } } catch { /* next */ }
+        }
+    }
+    if (iconCache.size > 2000) iconCache.clear();
+    iconCache.set(full, { mtime, icon: found });
+    return found;
+}
+
 export async function list(rel) {
     const dir = resolveInRoot(rel || '.');
     let entries;
@@ -84,6 +105,7 @@ export async function list(rel) {
             modified: st.mtimeMs,
             hidden: ent.name.startsWith('.'),
             symlink: ent.isSymbolicLink(),
+            ...(isDir && !ent.name.startsWith('.') && entries.length <= 300 ? { icon: await folderIcon(full, st.mtimeMs).catch(() => null) } : {}),
         });
     }
     items.sort((a, b) => (a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })));

@@ -17,6 +17,7 @@ import * as svcUser from './svcuser.js';
 import crypto from 'node:crypto';
 import { envFor } from './vault.js';
 import { log } from './log.js';
+import { folderIcon, relative as relToRoot } from './files.js';
 
 const run = promisify(execFile);
 const projectsDir = path.join(config.root, 'Projects');
@@ -62,6 +63,17 @@ export function parseManifest(text) {
         }
         if (s.actions !== undefined && !Array.isArray(s.actions)) errors.push(`${where}.actions: a list.`);
         for (const [i, a] of (Array.isArray(s.actions) ? s.actions : []).entries()) for (const e of inputErrors(a?.inputs)) errors.push(`${where}.actions[${i}].inputs${e}`);
+        if (s.groups !== undefined && !Array.isArray(s.groups)) errors.push(`${where}.groups: a list.`);
+        for (const [gi, g] of (Array.isArray(s.groups) ? s.groups : []).entries()) {
+            const gw = `${where}.groups[${gi}]`;
+            if (!g?.label || typeof g?.list !== 'string' || !g.list.trim()) { errors.push(`${gw}: needs label and list (a command that prints one id per line, or JSON).`); continue; }
+            if (!Array.isArray(g.actions) || !g.actions.length) errors.push(`${gw}.actions: at least one action for an item.`);
+            for (const [i, a] of (Array.isArray(g.actions) ? g.actions : []).entries()) {
+                if (!a?.label || !a?.run) errors.push(`${gw}.actions[${i}]: needs label and run.`);
+                for (const e of inputErrors(a?.inputs)) errors.push(`${gw}.actions[${i}].inputs${e}`);
+                if (a?.run && !/GROUP_ITEM/.test(String(a.run))) warnings.push(`${gw}.actions[${i}]: run does not use $GROUP_ITEM, so every item does the same thing.`);
+            }
+        }
         if (s.run_as !== undefined && !['service', 'root'].includes(s.run_as)) errors.push(`${where}.run_as: service (the default) or root.`);
         if (Array.isArray(s.expose) && s.expose.length) warnings.push(`${where}.expose: raw ports only open on a service's own host; this box admits only Cloudflare on 80/443.`);
         if (!s.port) warnings.push(`${where}: no port — runs as a worker here; consider its own host.`);
@@ -187,7 +199,7 @@ function codeFingerprint(root, data = []) {
     return { hash: h.digest('hex'), files: list.length };
 }
 function rootFingerprint(p, s) {
-    const what = { start: s.start, cwd: s.cwd || '.', patch: s.patch || null, actions: (Array.isArray(s.actions) ? s.actions : []).map(a => a?.run || ''), code: codeFingerprint(p.root, p.data?.backup?.paths || []).hash };
+    const what = { start: s.start, cwd: s.cwd || '.', patch: s.patch || null, actions: (Array.isArray(s.actions) ? s.actions : []).map(a => a?.run || ''), ...(Array.isArray(s.groups) && s.groups.length ? { groups: s.groups.map(g => ({ list: g?.list || '', actions: (Array.isArray(g?.actions) ? g.actions : []).map(a => a?.run || '') })) } : {}), code: codeFingerprint(p.root, p.data?.backup?.paths || []).hash };
     return crypto.createHash('sha256').update(JSON.stringify(what)).digest('hex');
 }
 function loadApprovals() { try { return JSON.parse(fs.readFileSync(approvalsFile, 'utf8')); } catch { return {}; } }
@@ -248,13 +260,15 @@ export async function list() {
                 firewall: svcUser.firewallState(),
                 vaultNames: Array.isArray(s.needs) ? s.needs.map(String) : [],
                 actions: (Array.isArray(s.actions) ? s.actions : []).map((a, i) => ({ i, label: String(a.label), confirm: !!a.confirm, restarts: !!(a.restart || a.stop_first), inputs: (Array.isArray(a.inputs) ? a.inputs : []).map(inputView) })),
+                groups: (Array.isArray(s.groups) ? s.groups : []).filter(g => g?.label && g?.list).map((g, gi) => ({ i: gi, label: String(g.label), hint: g.hint ? String(g.hint) : null, item: g.item ? String(g.item) : 'item', actions: (Array.isArray(g.actions) ? g.actions : []).map((a, i) => ({ i, label: String(a.label), confirm: !!a.confirm, restarts: !!(a.restart || a.stop_first), all: a.all !== false, inputs: (Array.isArray(a.inputs) ? a.inputs : []).map(inputView) })) })),
                 links: (Array.isArray(s.links) ? s.links : []).map(l => ({ label: String(l.label || l.path), path: String(l.path || '/') })),
                 credentials: (Array.isArray(s.credentials) ? s.credentials : []).map(credView),
                 needs: Array.isArray(s.needs) ? s.needs.map(String) : [],
                 expose: Array.isArray(s.expose) ? s.expose : [],
             };
         });
-        out.push({ project: p.name, root: p.root, file: path.relative(p.root, p.file), name: p.data.name || p.name, summary: p.data.summary || '', commit, errors: p.errors, warnings: p.warnings, services: svcs });
+        let icon = null; try { const ic = await folderIcon(p.root, fs.statSync(p.root).mtimeMs); if (ic) icon = relToRoot(path.join(p.root, ic)); } catch { /* none */ }
+        out.push({ project: p.name, root: p.root, icon, file: path.relative(p.root, p.file), name: p.data.name || p.name, summary: p.data.summary || '', commit, errors: p.errors, warnings: p.warnings, services: svcs });
     }
     return out;
 }
@@ -320,15 +334,12 @@ export async function stop(project, key) {
     return r;
 }
 
-export async function action(project, key, index, values = {}) {
-    const { p, s } = findService(project, key);
-    const a = (Array.isArray(s.actions) ? s.actions : [])[Number(index)];
-    if (!a) throw httpError(404, 'No such action.');
+// Runs one action command for a service, as its account (or root when approved), with restart/stop_first handling.
+async function runAction(p, project, key, s, a, extraEnv, what) {
     const runAs = mustRun(p, key, s);
     const account = runAs === 'service' ? await prepareAccount(p) : null;
-    const inputs = inputEnv(a.inputs, values && typeof values === 'object' ? values : {});
     const { env: baseEnv } = await envForService(p, s);
-    const env = { ...baseEnv, ...inputs };
+    const env = { ...baseEnv, ...extraEnv };
     const cwd = path.resolve(p.root, s.cwd || '.');
     const slug = slugOf(project, key);
     const started = Date.now();
@@ -337,7 +348,7 @@ export async function action(project, key, index, values = {}) {
     // stop_first: the service is stopped while the command runs (so it cannot write its old state back), then started.
     if (a.stop_first && wasRunning) { await servicesMgr.stop(slug, { keepTunnel: true }); out += '[stopped the service]\n'; }
     try {
-        // As porthole-svc unless root was approved: the command text comes from a file agents can edit.
+        // As the service account unless root was approved: the command text comes from a file agents can edit.
         const [bin, args] = runAs === 'service' ? svcUser.argv(account, String(a.run), env) : ['bash', ['-lc', String(a.run)]];
         const r = await run(bin, args, { cwd, env: { ...actionBaseEnv(), ...env }, timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
         out += (r.stdout || '') + (r.stderr ? `\n${r.stderr}` : '');
@@ -348,10 +359,91 @@ export async function action(project, key, index, values = {}) {
         try { await (a.stop_first ? start(project, key) : restart(project, key)); out += `\n[${a.stop_first ? 'started' : 'restarted'} the service]`; }
         catch (e) { code = code || 1; out += `\n[could not start the service: ${e.message}]`; }
     } else if (a.restart) out += '\n[not restarted: the command failed]';
-    log('live', `action "${a.label}" on ${project}/${key} as ${account || runAs}${Object.keys(inputs).length ? ` with ${Object.keys(inputs).join(', ')}` : ''} → exit ${code}`);
+    const names = Object.keys(extraEnv).filter(n => n.startsWith('INPUT_'));
+    log('live', `action "${what}" on ${project}/${key} as ${account || runAs}${names.length ? ` with ${names.join(', ')}` : ''} → exit ${code}`);
     // Keep a record in the service log when there is one.
-    try { const reg = await servicesMgr.get(slugOf(project, key)); if (reg.log) fs.appendFileSync(reg.log, `\n[action ${new Date().toISOString()}] ${a.label} → exit ${code}\n${out.slice(-20000)}\n`); } catch { /* not running yet */ }
-    return { label: a.label, code, ms: Date.now() - started, output: out.slice(-60000) };
+    try { const reg = await servicesMgr.get(slug); if (reg.log) fs.appendFileSync(reg.log, `\n[action ${new Date().toISOString()}] ${what} → exit ${code}\n${out.slice(-20000)}\n`); } catch { /* not running yet */ }
+    return { label: what, code, ms: Date.now() - started, output: out.slice(-60000) };
+}
+
+export async function action(project, key, index, values = {}) {
+    const { p, s } = findService(project, key);
+    const a = (Array.isArray(s.actions) ? s.actions : [])[Number(index)];
+    if (!a) throw httpError(404, 'No such action.');
+    const inputs = inputEnv(a.inputs, values && typeof values === 'object' ? values : {});
+    return runAction(p, project, key, s, a, inputs, String(a.label));
+}
+
+// Groups: a list command names the items (rooms, sessions, users…), and each item gets the group's actions with
+// GROUP_ITEM set to its id. The list runs as the service would, so it sees exactly what the service sees.
+const ITEM_ID_RE = /^[\w.:@+\-=/]{1,128}$/;
+const MAX_ITEMS = 300;
+function findGroup(project, key, gi) {
+    const { p, s } = findService(project, key);
+    const g = (Array.isArray(s.groups) ? s.groups : [])[Number(gi)];
+    if (!g?.list) throw httpError(404, 'No such group.');
+    return { p, s, g };
+}
+export function parseItems(text) {
+    const t = String(text || '').trim();
+    let raw = null;
+    if (/^[[{]/.test(t)) { try { const j = JSON.parse(t); raw = Array.isArray(j) ? j : Array.isArray(j?.items) ? j.items : null; } catch { raw = null; } }
+    if (!raw) raw = t.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [id, ...rest] = l.split(/\t| {2,}/); return { id, label: rest.join(' ').trim() || null }; });
+    const seen = new Set(), items = [];
+    for (const r of raw) {
+        const it = typeof r === 'object' && r ? r : { id: r };
+        const id = String(it.id ?? '').trim();
+        if (!ITEM_ID_RE.test(id) || seen.has(id)) continue;
+        seen.add(id);
+        items.push({ id, label: it.label ? String(it.label).slice(0, 120) : null, sub: it.sub ? String(it.sub).slice(0, 200) : null });
+        if (items.length >= MAX_ITEMS) break;
+    }
+    return items;
+}
+export async function groupItems(project, key, gi) {
+    const { p, s, g } = findGroup(project, key, gi);
+    const runAs = mustRun(p, key, s);
+    const account = runAs === 'service' ? await prepareAccount(p) : null;
+    const { env } = await envForService(p, s);
+    const cwd = path.resolve(p.root, s.cwd || '.');
+    const [bin, args] = runAs === 'service' ? svcUser.argv(account, String(g.list), env) : ['bash', ['-lc', String(g.list)]];
+    try {
+        const r = await run(bin, args, { cwd, env: { ...actionBaseEnv(), ...env }, timeout: 20_000, maxBuffer: 1024 * 1024 });
+        return { label: String(g.label), items: parseItems(r.stdout), error: null };
+    } catch (e) {
+        return { label: String(g.label), items: parseItems(e.stdout), error: `${String(e.stderr || e.message || 'list failed').trim().split('\n').slice(-3).join(' ').slice(0, 300)}${e.killed ? ' (stopped after 20 s)' : ''}` };
+    }
+}
+// item: one id, or '*' for every item the list prints now. Ids must come from the list, not from the caller.
+export async function groupAction(project, key, gi, ai, item, values = {}) {
+    const { p, s, g } = findGroup(project, key, gi);
+    const a = (Array.isArray(g.actions) ? g.actions : [])[Number(ai)];
+    if (!a) throw httpError(404, 'No such action.');
+    const inputs = inputEnv(a.inputs, values && typeof values === 'object' ? values : {});
+    const { items, error } = await groupItems(project, key, gi);
+    let targets;
+    if (item === '*') {
+        if (a.all === false) throw httpError(400, `"${a.label}" runs on one ${g.item || 'item'} at a time.`);
+        targets = items;
+        if (!targets.length) throw httpError(409, error ? `The list failed: ${error}` : `No ${g.item || 'item'}s right now.`);
+    } else {
+        targets = items.filter(i => i.id === String(item));
+        if (!targets.length) throw httpError(404, `${String(item).slice(0, 60)} is not in ${g.label} any more.`);
+    }
+    const many = targets.length > 1;
+    const results = [];
+    for (const t of targets) {
+        const r = await runAction(p, project, key, s, { ...a, restart: many ? false : a.restart, stop_first: many ? false : a.stop_first }, { ...inputs, GROUP: String(g.label), GROUP_ITEM: t.id }, `${a.label} · ${t.id}`);
+        results.push({ id: t.id, code: r.code, ms: r.ms, output: r.output.slice(-8000) });
+    }
+    // Several items: restart once at the end rather than once per item.
+    let tail = '';
+    if (many && (a.restart || a.stop_first) && results.every(r => r.code === 0)) { try { await restart(project, key); tail = '\n[restarted the service]'; } catch (e) { tail = `\n[could not restart: ${e.message}]`; } }
+    const failed = results.filter(r => r.code !== 0).length;
+    return {
+        label: a.label, items: results.length, failed, code: failed ? 1 : 0, ms: results.reduce((n, r) => n + r.ms, 0),
+        output: (results.length === 1 ? results[0].output : results.map(r => `-- ${r.id} · exit ${r.code}\n${r.output.trim()}`).join('\n\n')) + tail,
+    };
 }
 
 // Reveal one credential block: literal values plus Vault references resolved for this project's scope.

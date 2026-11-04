@@ -313,8 +313,23 @@ services:
       - label: Bump restart
         run: 'true'
         restart: true
+    groups:
+      - label: Rooms
+        item: room
+        list: ls data/rooms
+        actions:
+          - label: Close
+            run: rm -f "data/rooms/$GROUP_ITEM"; echo "closed $GROUP_ITEM as $(id -un)"
+          - label: Rename
+            all: false
+            run: echo "rename $GROUP_ITEM to [$INPUT_NAME]"
+            inputs:
+              - name: name
+                type: string
+                pattern: '[a-z]{1,10}'
 ---
 EOF
+mkdir -p /Projects/smoke-count/data/rooms && touch /Projects/smoke-count/data/rooms/r1 /Projects/smoke-count/data/rooms/r2 /Projects/smoke-count/data/rooms/r3
 chown -R agent:agent /Projects/smoke-count
 rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-project-secret > /Projects/smoke-other/secret.txt && chmod 755 /Projects/smoke-other && chmod 644 /Projects/smoke-other/secret.txt`);
     r = await call('/api/vault', { method: 'POST', body: { provider: 'custom', style: 'token', name: 'smoke general secret', prefix: 'SMOKE_GENERAL_X', scope: 'general', fields: { token: 'general-secret-1' }, envMap: { token: 'SMOKE_GENERAL_SECRET' } } });
@@ -367,6 +382,36 @@ rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-pro
     await waitUp(); await sleep(400);
     check('the set value took effect', await get('/') === '42', await get('/'));
     const lv = (await call('/api/live')).body.find(p => p.project === 'smoke-count')?.services[0];
+    {   // Groups: items come from the list command; actions get GROUP_ITEM; ids not in the list are refused.
+        const g = lv?.groups?.[0];
+        check('live list describes groups', g?.label === 'Rooms' && g.item === 'room' && g.actions.length === 2 && g.actions[1].all === false && g.actions[1].inputs.length === 1, JSON.stringify(g).slice(0, 200));
+        r = await call('/api/live/smoke-count/web/groups/0');
+        check('a group lists its items from the list command', r.status === 200 && r.body.items.map(i => i.id).join(',') === 'r1,r2,r3', JSON.stringify(r.body).slice(0, 200));
+        r = await call('/api/live/smoke-count/web/groups/0/actions/0', { method: 'POST', body: { item: 'r9; id' } });
+        check('a group action refuses an id that is not in the list', r.status === 404, `${r.status} ${r.body.error}`);
+        r = await call('/api/live/smoke-count/web/groups/0/actions/1', { method: 'POST', body: { item: 'r1', inputs: { name: 'abc' } } });
+        check('a group action gets GROUP_ITEM and its typed inputs', r.status === 200 && /rename r1 to \[abc\]/.test(r.body.output), JSON.stringify(r.body).slice(0, 200));
+        r = await call('/api/live/smoke-count/web/groups/0/actions/1', { method: 'POST', body: { item: 'r1', inputs: { name: 'A$(id)' } } });
+        check('group action inputs are checked too', r.status === 400, `${r.status} ${r.body.error}`);
+        r = await call('/api/live/smoke-count/web/groups/0/actions/1', { method: 'POST', body: { item: '*', inputs: { name: 'abc' } } });
+        check('an all: false action cannot run on every item', r.status === 400, `${r.status} ${r.body.error}`);
+        r = await call('/api/live/smoke-count/web/groups/0/actions/0', { method: 'POST', body: { item: 'r2' } });
+        check('a group action runs on one item as the project account', r.status === 200 && r.body.code === 0 && /closed r2 as ps-smoke-count/.test(r.body.output), JSON.stringify(r.body).slice(0, 200));
+        r = await call('/api/live/smoke-count/web/groups/0/actions/0', { method: 'POST', body: { item: '*' } });
+        check('"all" runs the action once per current item', r.status === 200 && r.body.items === 2 && r.body.failed === 0 && /closed r1/.test(r.body.output) && /closed r3/.test(r.body.output), JSON.stringify(r.body).slice(0, 240));
+        sh(`mkdir -p /Projects/smoke-count/public && printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>' > /Projects/smoke-count/public/favicon.svg`);
+        if (fsRootIsSlash) {
+        r = await call('/api/files?path=' + encodeURIComponent('Projects'));
+        const fi = Array.isArray(r.body?.items) ? r.body.items.find(i => i.name === 'smoke-count') : null;
+        check('a project folder with a favicon lists it as its icon', fi?.icon === 'public/favicon.svg', JSON.stringify(fi || r.body).slice(0, 160));
+        const ir = await fetch(BASE + '/api/files/icon?path=' + encodeURIComponent('Projects/smoke-count/public/favicon.svg'), { headers: { cookie } });
+        check('the icon is served as an image under a sandbox policy', ir.status === 200 && /image\/svg\+xml/.test(ir.headers.get('content-type') || '') && /sandbox/.test(ir.headers.get('content-security-policy') || ''), `${ir.status} ${ir.headers.get('content-type')}`);
+        const nr = await fetch(BASE + '/api/files/icon?path=' + encodeURIComponent('Projects/smoke-count/app.js'), { headers: { cookie } });
+        check('the icon route refuses non-images', nr.status === 400, String(nr.status));
+        }
+        r = await call('/api/live/smoke-count/web/groups/0');
+        check('the list reflects the actions', r.status === 200 && r.body.items.length === 0, JSON.stringify(r.body).slice(0, 120));
+    }
     check('live list describes inputs and run-as', lv?.runAs === 'service' && lv.actions[2].inputs.length === 2 && lv.actions[2].inputs[0].type === 'integer', JSON.stringify(lv && { runAs: lv.runAs, a: lv.actions[2] }).slice(0, 200));
     const pidBefore = lv?.pid;
     r = await call('/api/servers/smoke-counter/restart', { method: 'POST' });
@@ -740,6 +785,31 @@ if (r.body.installed) {
 // 8g. Self-update status (no network assumptions).
 r = await call('/api/update');
 check('update status reports installed version', r.status === 200 && typeof r.body.installed?.version === 'string' && r.body.inProgress === false, JSON.stringify(r.body.installed));
+
+// 8y. Upgrade repo: a new project with a read-only prototype copy, the brief, the level, and the link.
+{
+    const { execFileSync } = await import('node:child_process');
+    const fsu = await import('node:fs');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh(`rm -rf /Projects/smoke-proto /Projects/smoke-proto-v2 && mkdir -p /Projects/smoke-proto/node_modules/x && echo 'app' > /Projects/smoke-proto/app.js && echo 'SECRET=1' > /Projects/smoke-proto/.env && echo x > /Projects/smoke-proto/node_modules/x/i.js`);
+    let r = await call('/api/projects/upgrade', { method: 'POST', body: { abs: '/Projects/smoke-proto', name: 'smoke-proto-v2', level: 'professional', tier: 'public' } });
+    check('upgrade repo creates the new project', r.status === 201 && r.body.name === 'smoke-proto-v2' && r.body.level === 'professional-public' && /PROPOSAL\.md/.test(r.body.prompt || ''), `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    const snap = '/Projects/smoke-proto-v2/.porthole/prototype';
+    check('the prototype copy has the code but no secrets or dependencies', fsu.existsSync(`${snap}/app.js`) && !fsu.existsSync(`${snap}/.env`) && !fsu.existsSync(`${snap}/node_modules`));
+    check('the new project has the brief and its level', fsu.existsSync('/Projects/smoke-proto-v2/.porthole/UPGRADE.md') && (() => { const j = JSON.parse(fsu.readFileSync('/Projects/smoke-proto-v2/.porthole/project.json', 'utf8')); return j.level === 'professional' && j.tier === 'public'; })());
+    const agentWrite = (() => { try { sh(`/usr/sbin/runuser -u agent -- bash -c 'echo changed > ${snap}/app.js' 2>&1`); return true; } catch { return false; } })();
+    const hasAgent = (() => { try { sh('id agent'); return true; } catch { return false; } })();
+    if (hasAgent) check('agent shells cannot change the prototype copy', !agentWrite && fsu.readFileSync(`${snap}/app.js`, 'utf8') === 'app\n');
+    check('the original project is unchanged', fsu.readFileSync('/Projects/smoke-proto/app.js', 'utf8') === 'app\n' && !fsu.existsSync('/Projects/smoke-proto/.porthole'));
+    r = await call('/api/files?path=Projects');
+    const lp = Array.isArray(r.body?.items) ? r.body.items.find(i => i.name === 'smoke-proto') : null, ln = Array.isArray(r.body?.items) ? r.body.items.find(i => i.name === 'smoke-proto-v2') : null;
+    if (fsRootIsSlash) check('files show the upgrade link both ways', lp?.links?.to?.[0]?.name === 'smoke-proto-v2' && ln?.links?.from?.name === 'smoke-proto', JSON.stringify({ lp: lp?.links, ln: ln?.links }).slice(0, 200));
+    r = await call('/api/projects/upgrade', { method: 'POST', body: { abs: '/Projects/smoke-proto', name: 'smoke-proto-v2', level: 'personal', audience: 'shared' } });
+    check('upgrade refuses an existing name', r.status === 409, String(r.status));
+    r = await call('/api/projects/upgrade', { method: 'POST', body: { abs: '/Projects/smoke-proto/node_modules', name: 'x2', level: 'personal', audience: 'shared' } });
+    check('upgrade only takes top-level project folders', r.status === 400, String(r.status));
+    sh('rm -rf /Projects/smoke-proto /Projects/smoke-proto-v2');
+}
 
 // 8z. Upgrade migrations: archive first, restore on failure, record on success, nothing pending afterwards.
 {

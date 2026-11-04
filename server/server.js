@@ -31,6 +31,8 @@ import * as projectFlags from './lib/projects.js';
 import * as zoned from './lib/zoned.js';
 import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
+import * as logos from './lib/logos.js';
+import * as upgrade from './lib/upgrade.js';
 import * as agentUser from './lib/agentuser.js';
 import * as elevate from './lib/elevate.js';
 import * as profile from './lib/profile.js';
@@ -314,7 +316,28 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Files
-        if (p === '/api/files' && method === 'GET') return send(res, 200, await files.list(url.searchParams.get('path') || '.'));
+        if (p === '/api/files' && method === 'GET') {
+            const out = await files.list(url.searchParams.get('path') || '.');
+            // Project folders show where an upgrade came from or went to.
+            try { const dir = files.resolveInRoot(out.path || '.'); for (const i of out.items) if (i.type === 'dir') { const l = upgrade.linksFor(path.join(dir, i.name)); if (l) i.links = l; } } catch { /* ignore */ }
+            return send(res, 200, out);
+        }
+        // Folder icons for the file list: image files only, served as images under a sandbox policy (an SVG shown in
+        // <img> cannot run script; opened directly, the sandbox still blocks it).
+        if (p === '/api/docker/logo' && method === 'GET') {
+            const f = await logos.logoFor(url.searchParams.get('image') || '');
+            if (!f) return send(res, 404, { error: 'No logo for that image.' });
+            const st = fs.statSync(f);
+            res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': st.size, 'Cache-Control': 'private, max-age=86400', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'" });
+            return fs.createReadStream(f).pipe(res);
+        }
+        if (p === '/api/files/icon' && method === 'GET') {
+            const { abs, stat } = await files.stat(url.searchParams.get('path') || '');
+            const type = files.ICON_TYPES[path.extname(abs).toLowerCase()];
+            if (!stat.isFile() || !type || stat.size > 512 * 1024) return send(res, 400, { error: 'Not an icon.' });
+            res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Cache-Control': 'private, max-age=300', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'" });
+            return fs.createReadStream(abs).pipe(res);
+        }
         if (p === '/api/files/download' && method === 'GET') {
             const { abs, stat } = await files.stat(url.searchParams.get('path') || '');
             if (!stat.isFile()) return send(res, 400, { error: 'Not a file.' });
@@ -495,6 +518,8 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/services' && method === 'GET') return send(res, 200, await home.services());
 
         // Project security profile (level chosen on the phone; brief injected into agent sessions)
+        if (p === '/api/projects/upgrade' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 201, await upgrade.upgrade({ from: b.abs || files.resolveInRoot(b.path || ''), name: b.name, level: b.level, audience: b.audience, tier: b.tier })); }
+        if (p === '/api/projects/links' && method === 'GET') return send(res, 200, upgrade.linksFor(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')) || {});
         if (p === '/api/projects/profile' && method === 'GET') { const abs = url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.'); return send(res, 200, { ...profile.get(abs), levels: profile.LEVELS }); }
         if (p === '/api/projects/profile' && method === 'PUT') { const b = await readJson(req, 4096); return send(res, 200, profile.set(b.abs || files.resolveInRoot(b.path || '.'), b)); }
         if (p === '/api/projects/profile/cve-checked' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, profile.cveChecked(b.abs || files.resolveInRoot(b.path || '.'))); }
@@ -519,6 +544,8 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, act === 'hostname' ? await live.putOnHostname(proj, key) : await live[act](proj, key));
         }
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3], b?.inputs || {})); }
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/groups\/(\d{1,3})$/)) && method === 'GET') return send(res, 200, await live.groupItems(decodeURIComponent(m[1]), m[2], m[3]));
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/groups\/(\d{1,3})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); if (typeof b?.item !== 'string' || !b.item) return send(res, 400, { error: 'item: an id from the list, or * for all' }); return send(res, 200, await live.groupAction(decodeURIComponent(m[1]), m[2], m[3], m[4], b.item, b?.inputs || {})); }
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/root$/)) && (method === 'POST' || method === 'DELETE')) return send(res, 200, method === 'POST' ? live.approveRoot(decodeURIComponent(m[1]), m[2]) : live.revokeRoot(decodeURIComponent(m[1]), m[2]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/credentials\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.credentials(decodeURIComponent(m[1]), m[2], m[3]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(services.slugify(`live ${decodeURIComponent(m[1])} ${m[2]}`), url.searchParams.get('tail') || 300));

@@ -556,6 +556,35 @@ function securityLevelDialog(folder, projectName) {
     });
 }
 
+// Upgrade repo: rebuild a prototype as a new project at a higher level. The original stays as it is; the new
+// project gets a read-only copy of it and an agent that proposes an architecture before writing code.
+async function upgradeRepoDialog(rel, name) {
+    let g = {}; try { g = await api(`/api/projects/profile?path=${encodeURIComponent(rel)}`); } catch { /* no level */ }
+    const cur = g.profile ? g.profile.key.replace('-', ' · ') : 'no level set';
+    const targets = [['personal', 'shared', 'Personal · Shared', 'a few people you know'], ['professional', 'internal', 'Professional · Internal', 'a team or company'], ['professional', 'public', 'Professional · Public', 'strangers on the internet'], ['professional', 'regulated', 'Professional · Regulated', 'personal data, payments, health']];
+    let pick = null;
+    const { panel, close } = openDialog(`<h2>${icon('rocket')}Upgrade ${esc(name)}</h2>
+        <p class="muted">Original project · ${esc(cur)}<br><span class="mono">${esc(showPath(rel))}</span></p>
+        <p class="sub" style="margin:0 2px 10px">Rebuild it as a new project that treats this one as a working prototype: an agent works out what it does, designs the version that deserves to exist, and shows you a proposal before writing code.</p>
+        <div class="field"><label for="up-name">New project name</label><input id="up-name" type="text" class="mono" value="${esc(name)}-v2" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+        <div class="field"><label>Target security level</label><div class="menu" data-tl>${targets.map(([l, t, title, d], i) => `<button data-i="${i}">${icon(t === 'shared' ? 'user' : t === 'internal' ? 'lock' : t === 'public' ? 'globe' : 'shield')}<span>${title}<br><span class="sub">${d}</span></span></button>`).join('')}</div></div>
+        <p class="sub" style="margin:6px 2px 0">${icon('check')} The original stays unchanged; the new project gets a read-only copy of it (no dependencies, history or .env files).</p>
+        <div class="buttons"><button class="primary" data-ok disabled>Plan upgraded project</button><button data-close>Cancel</button></div>`);
+    const ok = $('[data-ok]', panel);
+    $$('[data-tl] button', panel).forEach(b => b.onclick = () => { pick = targets[Number(b.dataset.i)]; $$('[data-tl] button', panel).forEach(x => x.classList.toggle('selected', x === b)); ok.disabled = false; });
+    ok.onclick = async () => {
+        const newName = $('#up-name', panel).value.trim();
+        const [level, sub] = pick;
+        ok.disabled = true; ok.textContent = 'Copying the prototype…';
+        try {
+            const r = await api('/api/projects/upgrade', { method: 'POST', body: { path: rel, name: newName, level, ...(level === 'personal' ? { audience: sub } : { tier: sub }) } });
+            close(); toast(`${r.name} created (${r.level.replace('-', ' · ')})`);
+            if (state.filesPath === parentOf(rel)) loadFiles(state.filesPath).catch(() => {});
+            newShellDialog(r.folder, 'agent', `upgrade-${r.name}`.slice(0, 40), { firstPrompt: r.prompt });
+        } catch (ex) { toast(ex.message, true); ok.disabled = false; ok.textContent = 'Plan upgraded project'; }
+    };
+}
+
 function newProfileDialog(done) {
     const { panel, close } = openDialog(`<h2>${icon('user')}New Claude profile</h2><p class="muted">A separate config folder: another Anthropic account or organisation, its own usage limits and settings.</p>
         <div class="field"><input id="np-prof" type="text" class="mono" placeholder="work" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
@@ -1030,7 +1059,7 @@ async function loadServices() {
             for (const p of s.live) {
                 if (p.errors.length) html += `<button class="row" data-live-errors="${esc(p.project)}"><span class="ico flare">${icon('info')}</span><div class="main"><div class="title">${esc(p.name)}<span class="tag" style="color:var(--flare)">PORTHOLE.md has errors</span></div><div class="sub">${esc(p.errors[0])}</div></div>${icon('chevron', 'i chev')}</button>`;
                 for (const v of p.services) html += `
-                <div class="row"><span class="ico ${v.running ? 'kelp' : 'dim'}">${icon(v.worker ? 'cpu' : 'globe')}</span>
+                <div class="row"><span class="ico ${v.running ? 'kelp' : 'dim'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="${v.worker ? 'cpu' : 'globe'}">` : icon(v.worker ? 'cpu' : 'globe')}</span>
                   <div class="main"><div class="title">${esc(v.title)}<span class="tag dim">${esc(p.name)}</span>${v.worker ? '<span class="tag dim">worker</span>' : ''}</div>
                     <div class="sub">${v.running ? `<span class="live">● running</span>` : 'stopped'}${v.host ? ` · <a href="${esc(openLink(v.host.url, v.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
                   ${v.running ? `<button class="pill" data-live="stop" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('stop')}Stop</button>` : `<button class="pill" data-live="start" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('play')}Start</button>`}
@@ -1040,22 +1069,27 @@ async function loadServices() {
             html += `</div>`;
         }
     }
+    // One card per thing: with everything shown, a link to a container or a registered server sits on that card.
+    const ownedPorts = new Set(f === 'all' ? [...(s.docker ? s.containers.flatMap(c => c.ports.map(pp => pp.host)) : []), ...s.servers.filter(d => d.port).map(d => d.port)] : []);
+    const looseLinks = s.links.filter(t => !ownedPorts.has(t.port));
+    const linkFor = port => s.links.find(t => t.port === port) || null;
+    const linkLine = t => !t ? '' : `<div class="sub mono link-line">${icon('link')}${t.url ? `<a href="${esc(openLink(t.url, t.port, shared))}" target="_blank" rel="noopener">${esc(t.url.replace(/^https:\/\//, ''))}</a>` : 'publishing…'}${t.kind === 'zoned' ? (t.connected ? ' · <span class="live">● connected</span>' : t.alive ? ' · connecting…' : ' · <span style="color:var(--flare)">● down</span>') : ''}${t.expires ? ` · closes in ${fmtIn(t.expires)}` : ''}</div>${t.expires ? `<div class="bar-mini kelp"><div style="width:${Math.max(2, Math.min(100, (t.expires - Date.now()) / (4 * 3600_000) * 100))}%"></div></div>` : ''}`;
     if (show('links')) {
         html += `<h2 class="section"><span class="bullet kelp"></span>Shared links<span class="meta">quick links close after 4 h · your domain stays</span></h2>`;
-        html += s.links.length ? `<div class="list">${s.links.map(t => `
+        html += looseLinks.length ? `<div class="list">${looseLinks.map(t => `
             <div class="row"><span class="ico kelp">${icon('link')}</span>
               <div class="main"><div class="title">${esc(t.name || t.target)}${t.kind === 'zoned' ? '<span class="tag">your domain</span>' : ''}${t.owner ? `<span class="tag dim">${esc(t.owner)}</span>` : ''}</div><div class="sub mono">${t.url ? esc(t.url.replace(/^https:\/\//, '')) : 'publishing…'}${t.kind === 'zoned' ? (t.connected ? ' · <span class="live">● connected</span>' : t.alive ? ' · connecting…' : ' · <span style="color:var(--flare)">● down</span>') : ''}</div>
                 ${t.expires ? `<div class="bar-mini kelp"><div style="width:${Math.max(2, Math.min(100, (t.expires - Date.now()) / (4 * 3600_000) * 100))}%"></div></div>` : ''}</div>
               ${credChip(t.port)}${t.url ? `<a class="pill kelp" href="${esc(openLink(t.url, t.port, shared))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}
               <button class="more" data-link-menu="${t.port}" aria-label="Link actions">${icon('more_h')}</button>
-            </div>`).join('')}</div>` : `<p class="empty">Nothing shared. Share a dev server or container below.</p>`;
+            </div>`).join('')}</div>` : `<p class="empty">${s.links.length ? 'Every link is on its container or server card below.' : 'Nothing shared. Share a dev server or container below.'}</p>`;
     }
     if (show('dev')) {
         html += `<h2 class="section"><span class="bullet brass"></span>Servers<span class="meta">registered with svc</span></h2>`;
         html += s.servers.length ? `<div class="list">${s.servers.map(d => `
             <div class="row"><span class="ico ${d.alive ? 'brass' : 'dim'}">${icon('devserver')}</span>
               <div class="main"><div class="title">${esc(d.name)}${d.port ? ` <span class="mono">:${d.port}</span>` : ''}${d.project ? `<span class="tag dim">${esc(d.project)}</span>` : ''}${d.external ? '<span class="tag dim">pid</span>' : ''}</div>
-                <div class="sub">${d.alive ? `<span class="live">● running</span>${d.listening === false ? ' · not listening yet' : ''}` : `stopped${d.stoppedAt ? ' · ' + fmtAgo(d.stoppedAt) : ''}`}${d.tunnel?.url ? ` · <a href="${esc(openLink(d.tunnel.url, d.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(d.tunnel.url.replace(/^https:\/\//, ''))}</a>` : d.alive && d.port ? ' · local only' : ''}</div></div>
+                <div class="sub">${d.alive ? `<span class="live">● running</span>${d.listening === false ? ' · not listening yet' : ''}` : `stopped${d.stoppedAt ? ' · ' + fmtAgo(d.stoppedAt) : ''}`}${d.tunnel?.url && !ownedPorts.has(d.port) ? ` · <a href="${esc(openLink(d.tunnel.url, d.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(d.tunnel.url.replace(/^https:\/\//, ''))}</a>` : d.alive && d.port && !d.tunnel ? ' · local only' : ''}</div>${ownedPorts.has(d.port) ? linkLine(linkFor(d.port)) : ''}</div>
               ${d.port ? credChip(d.port) : ''}${d.alive && d.port && !d.tunnel ? `<button class="pill ghost" data-share="${d.port}" data-label="${esc(d.name)}">${icon('share')}Share</button>` : ''}
               ${d.alive ? `<button class="pill" data-srv="stop" data-slug="${esc(d.slug)}">${icon('stop')}Stop</button>` : d.canStart ? `<button class="pill" data-srv="start" data-slug="${esc(d.slug)}">${icon('play')}Start</button>` : ''}
               <button class="more" data-srv-menu="${esc(d.slug)}" aria-label="Server actions">${icon('more_h')}</button>
@@ -1106,11 +1140,12 @@ async function loadServices() {
         if (s.docker) {
             const rows = [
                 ...s.containers.map(c => `
-                <div class="row"><span class="ico ${c.state === 'running' ? 'dock' : 'dim'}">${icon(c.app === 'postgres' || c.image.startsWith('postgres') || c.image.startsWith('redis') ? 'database' : 'container')}</span>
-                  <div class="main"><div class="title">${esc(c.title)}${c.app ? '<span class="tag">app</span>' : ''}${c.compose ? `<span class="tag dim">${esc(c.compose)}</span>` : ''}</div>
-                    <div class="sub">${c.state === 'running' ? `<span class="live">● ${esc(c.status.replace(/^Up /, 'up '))}</span>` : esc(c.status.toLowerCase())}${c.ports.length ? ` · <span class="mono">:${c.ports.map(p => p.host).join(' :')}</span>` : ''}${c.tunnel?.url ? ' · shared' : c.ports.length && c.state === 'running' ? ' · local only' : ''}</div></div>
+                <div class="row"><span class="ico ${c.state === 'running' ? 'dock' : 'dim'} logo"><img src="/api/docker/logo?image=${encodeURIComponent(c.image)}" alt="" loading="lazy" data-fb="${c.app === 'postgres' || c.image.startsWith('postgres') || c.image.startsWith('redis') ? 'database' : 'container'}"><span class="badge">${icon('container')}</span></span>
+                  <div class="main"><div class="title">${esc(c.title)}${c.app ? '<span class="tag">app</span>' : ''}${c.compose ? `<span class="tag dim">${esc(c.compose)}</span>` : ''}${c.tunnel && ownedPorts.has(c.tunnel.port || c.ports[0]?.host) ? `<span class="tag">${linkFor(c.ports[0]?.host)?.kind === 'zoned' ? 'your domain' : 'shared'}</span>` : ''}</div>
+                    <div class="sub">${c.state === 'running' ? `<span class="live">● ${esc(c.status.replace(/^Up /, 'up '))}</span>` : esc(c.status.toLowerCase())}${c.ports.length ? ` · <span class="mono">:${c.ports.map(p => p.host).join(' :')}</span>` : ''}${c.tunnel?.url ? '' : c.ports.length && c.state === 'running' ? ' · local only' : ''}</div>
+                    ${ownedPorts.size ? c.ports.map(pp => linkLine(linkFor(pp.host))).join('') : ''}</div>
                   ${c.ports[0] ? credChip(c.ports[0].host) : ''}${c.state !== 'running' ? `<button class="pill" data-cact="start" data-c="${esc(c.name)}">${icon('play')}Start</button>`
-                    : c.tunnel?.url ? `<a class="pill kelp" href="${esc(c.tunnel.url)}" target="_blank" rel="noopener">${icon('external')}Open</a>`
+                    : c.tunnel?.url ? `<a class="pill kelp" href="${esc(openLink(c.tunnel.url, c.ports[0]?.host, shared))}" target="_blank" rel="noopener">${icon('external')}Open</a>`
                     : c.ports.length && !c.noTunnel ? `<button class="pill ghost" data-share="${c.ports[0].host}" data-label="${esc(c.title)}">${icon('share')}Share</button>`
                     : `<button class="pill" data-clogs="${esc(c.name)}">${icon('logs')}Logs</button>`}
                   <button class="more" data-cmenu="${esc(c.name)}" aria-label="Container actions">${icon('more_h')}</button>
@@ -1140,6 +1175,7 @@ async function loadServices() {
     $$('[data-link-menu]', body).forEach(b => b.onclick = () => linkMenu(s.links.find(t => t.port === Number(b.dataset.linkMenu))));
     $$('[data-cact]', body).forEach(b => b.onclick = () => containerAction(b.dataset.c, b.dataset.cact));
     $$('[data-clogs]', body).forEach(b => b.onclick = () => logsSheet(b.dataset.clogs));
+    $$('.ico.fav img, .ico.logo img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }));
     $$('[data-cmenu]', body).forEach(b => b.onclick = () => containerMenu(s.containers.find(c => c.name === b.dataset.cmenu)));
     $$('[data-pmenu]', body).forEach(b => b.onclick = () => composeMenu(b.dataset.pmenu));
     $$('[data-app]', body).forEach(b => b.onclick = () => launchApp(b.dataset.app, b.dataset.title));
@@ -1214,6 +1250,7 @@ async function livePage(p, key) {
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
         ${v.actions.length ? `<h3 class="section" style="margin-top:14px">Actions</h3><div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
+        ${(v.groups || []).map(g => `<details class="group" data-group="${g.i}"><summary><span class="ico brass">${icon('package')}</span><span class="gl">${esc(g.label)}</span><span class="meta" data-gcount>${g.hint ? esc(g.hint) : ''}</span>${icon('chevron', 'i chev')}</summary><div class="list" data-gitems><p class="muted" style="padding:10px 12px">Loading…</p></div></details>`).join('')}
         ${v.links.length && base ? `<h3 class="section" style="margin-top:14px">Links</h3><div class="chips" style="flex-wrap:wrap">${v.links.map(l => `<a class="pill" href="${esc(base.replace(/\/$/, '') + (l.path.startsWith('/') ? l.path : '/' + l.path))}" target="_blank" rel="noopener">${icon('external')}${esc(l.label)}</a>`).join('')}</div>` : ''}
         ${v.credentials.length || shared.length ? `<h3 class="section" style="margin-top:14px">Credentials</h3><div class="list">
           ${v.credentials.map((c, i) => `<button class="row" data-cred="${i}"><span class="ico brass">${icon('key')}</span><div class="main"><div class="title">${esc(c.label)}<span class="tag dim">service</span></div><div class="sub">${esc(c.fields.map(f => f.label).join(' · '))}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}
@@ -1249,6 +1286,49 @@ async function livePage(p, key) {
         catch (ex) { toast(ex.message, true); }
     });
     $$('[data-shared]', panel).forEach(b => b.onclick = () => { close(); openSharedCred(b.dataset.shared); });
+    $$('details.group', panel).forEach(d => d.addEventListener('toggle', async () => {
+        if (!d.open || d.dataset.loaded) return;
+        const g = v.groups[Number(d.dataset.group)];
+        const box = $('[data-gitems]', d);
+        try {
+            const r = await api(url(`groups/${g.i}`));
+            d.dataset.loaded = '1';
+            const items = r.items || [];
+            $('[data-gcount]', d).textContent = `${items.length}`;
+            const allOk = g.actions.some(a => a.all);
+            box.innerHTML = (r.error ? `<p class="sub warn" style="padding:8px 12px">${esc(r.error)}</p>` : '')
+                + (!items.length ? `<p class="muted" style="padding:10px 12px">No ${esc(g.item)}s right now.</p>` : '')
+                + (items.length > 1 && allOk ? `<button class="row" data-gi="*"><span class="ico kelp">${icon('package')}</span><div class="main"><div class="title">All ${items.length} ${esc(g.item)}s</div><div class="sub">Run one command on every ${esc(g.item)}</div></div>${icon('chevron', 'i chev')}</button>` : '')
+                + items.map((it, n) => `<button class="row" data-gi="${n}"><span class="ico dim">${icon('activity')}</span><div class="main"><div class="title ${it.label ? '' : 'mono'}">${esc(it.label || it.id)}</div>${it.label || it.sub ? `<div class="sub"><span class="mono">${esc(it.id)}</span>${it.sub ? ` · ${esc(it.sub)}` : ''}</div>` : ''}</div>${icon('chevron', 'i chev')}</button>`).join('');
+            $$('[data-gi]', box).forEach(row => row.onclick = () => groupItemSheet({ p, key, v, g, items, item: row.dataset.gi === '*' ? null : items[Number(row.dataset.gi)], url }));
+        } catch (ex) { box.innerHTML = `<p class="sub warn" style="padding:8px 12px">${esc(ex.message)}</p>`; }
+    }));
+}
+
+// The command sheet for one item of a group (or for all of them): the group's actions as buttons, output below.
+function groupItemSheet({ p, key, v, g, items, item, url }, output = null) {
+    const all = !item;
+    const acts = g.actions.filter(a => !all || a.all);
+    const name = all ? `All ${items.length} ${g.item}s` : (item.label || item.id);
+    const { panel, close } = openDialog(`<h2>${icon('package')}${esc(name)}</h2>
+        <p class="muted">${esc(g.label)} · ${esc(v.title)}${all ? '' : ` · <span class="mono">${esc(item.id)}</span>`}${item?.sub ? `<br>${esc(item.sub)}` : ''}</p>
+        <div class="chips" style="flex-wrap:wrap">${acts.map(a => `<button class="pill" data-ga="${a.i}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div>
+        <pre data-ga-out ${output ? '' : 'hidden'} style="max-height:40vh;margin-top:10px">${output ? esc(output) : ''}</pre>
+        <div class="buttons"><button data-back>${icon('back')}Back to ${esc(v.title)}</button><button data-close>Close</button></div>`);
+    $('[data-back]', panel).onclick = async () => { close(); const fresh = (await api('/api/services').catch(() => ({}))).live?.find(x => x.project === p.project); livePage(fresh || p, key); };
+    $$('[data-ga]', panel).forEach(b => b.onclick = async () => {
+        const a = g.actions[Number(b.dataset.ga)];
+        let inputs = {};
+        if (a.inputs.length) { inputs = await actionInputsDialog(a, name); if (!inputs) return groupItemSheet({ p, key, v, g, items, item, url }, output); }
+        else if ((a.confirm || all) && !(await confirmDialog({ title: `${a.label}: ${name}?`, text: all ? `Runs once for each of the ${items.length} ${g.item}s, one after another.${a.restarts ? ' The service restarts once at the end.' : ''}` : `${g.label} · ${item.id}${a.restarts ? '. The service is restarted.' : ''}`, action: 'Run', danger: false }))) return groupItemSheet({ p, key, v, g, items, item, url }, output);
+        groupItemSheet({ p, key, v, g, items, item, url }, 'Running…');
+        let text;
+        try {
+            const r = await api(url(`groups/${g.i}/actions/${a.i}`), { method: 'POST', body: { item: all ? '*' : item.id, inputs } });
+            text = `${r.label} · ${r.items > 1 ? `${r.items} ${g.item}s${r.failed ? `, ${r.failed} failed` : ''}` : `exit ${r.code}`} · ${(r.ms / 1000).toFixed(1)} s\n\n${r.output || '(no output)'}`;
+        } catch (ex) { text = ex.message; toast(ex.message, true); }
+        groupItemSheet({ p, key, v, g, items, item, url }, text);
+    });
 }
 
 // A form for an action's typed inputs. Checks on the phone mirror the server's; the server's check is the one that counts.
@@ -1516,10 +1596,11 @@ async function loadFiles(path = null) {
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
     $('#file-list').innerHTML = up + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}">
-          <span class="ico ${i.type === 'dir' ? 'brass' : ''}">${icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
-          <div class="main"><div class="title">${esc(i.name)}</div><div class="sub">${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
+          <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
+          <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? 'Folder' : fmtBytes(i.size)} · ${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
           <span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
+    $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
     $$('#file-list .row[data-name]').forEach(row => {
         const name = row.dataset.name, type = row.dataset.type, size = Number(row.dataset.size), rel = join(state.filesPath, name);
@@ -1700,6 +1781,7 @@ function expandRow(rel, name, type, size) {
         <button data-x="rename">${icon('edit')}Rename</button>
         ${type === 'dir' ? `<button data-x="shell">${icon('terminal')}Shell</button>` : `<button data-x="download">${icon('download')}Save</button>`}
         <button data-x="claude" class="brass">${icon('claude')}Claude</button>
+        ${type === 'dir' && parentOf(rel) === projectsRel() ? `<button data-x="upgrade">${icon('rocket')}Upgrade</button>` : ''}
         <button data-x="trash" class="flare">${icon('trash')}Trash</button>
       </div>`;
 }
@@ -1713,6 +1795,7 @@ function bindExpand() {
             if (x === 'preview') return previewFile(rel, name);
             if (x === 'download') return window.open(`/api/files/download?path=${encodeURIComponent(rel)}`, '_blank', 'noopener');
             if (x === 'rename') return renameDialog(rel, name);
+            if (x === 'upgrade') return upgradeRepoDialog(rel, name);
             if (x === 'shell') return newShellDialog(rel, 'shell');
             if (x === 'claude') return newShellDialog(ex.previousElementSibling?.dataset.type === 'dir' ? rel : state.filesPath, 'agent');
             if (x === 'trash') {

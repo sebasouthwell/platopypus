@@ -61,6 +61,8 @@ with mode 0600. Formats as of version 1.0:
 | `live-approvals.json` | live.js | `{ "<live slug>": "<sha256 of start, cwd, patch and action commands>" }` — services allowed to run as root (1.14.0); a changed manifest no longer matches, so it asks again |
 | `schema.json` | migrate.js | `{ version, applied: [{ id, version, at, ms, result? }], updatedAt, lastBackup, lastRun: { from, to, at, ids } }` — upgrade migrations (1.15.0); absent = none applied yet |
 | `migrate/pre-<version>-<stamp>.tar.gz` | migrate.js | state archive taken before migrations (5 kept); also login-move backups (1.12.0) |
+| `project-links.json` | upgrade.js | `{ links: [{ from, to, at, level, commit }] }` — "Upgrade repo" relationships between project folders (1.16.0) |
+| `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
@@ -284,6 +286,18 @@ phone's Update button. Mechanism:
   address. Promote workflow: when a promotion changes `.github/workflows` (which the workflow token may not push), it
   stops after CI with a notice and `scripts/promote.ps1 -Wait` pushes the tested commit; a `PROMOTE_TOKEN` secret lets
   the workflow do it. No state change.
+
+- **1.16.0** — *Upgrade repo* (Files → a project's ⋯ → Upgrade): a new project at a chosen level that rebuilds a
+  prototype instead of hardening it in place; the original is not touched, the new project gets a root-owned read-only
+  copy (`.porthole/prototype/`, no dependencies, history or .env files), `.porthole/UPGRADE.md` with the
+  reverse-engineer → threat model → architecture → rebuild → verify workflow, and a first agent prompt that asks for
+  `PROPOSAL.md` (with a prototype-vs-new comparison table) before any code. The link shows on both folders.
+  **Groups** for live services (`groups:` in PORTHOLE.md): dropdowns of items from a list command, each item with its
+  own commands, plus "All". **Icons:** project folders and live services show the project's favicon; containers show
+  their Docker Hub image logo with a Docker badge. **One card per thing:** with All shown, a container's or server's
+  shared link sits on its card instead of a second card under Shared links. Selected options in list-style choices
+  (session type, security level) are now highlighted. New state: `project-links.json`, `logos/` (additive, no
+  migration).
 
 ## Release checklist
 
