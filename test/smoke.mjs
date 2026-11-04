@@ -824,6 +824,24 @@ check('update status reports installed version', r.status === 200 && typeof r.bo
     sh('rm -rf /Projects/smoke-proto /Projects/smoke-proto-v2');
 }
 
+// 8w. New projects keep .porthole/ and .claude/ out of git, unless the project says otherwise.
+{
+    const fsg = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh('rm -rf /Projects/smoke-ign /Projects/smoke-keep');
+    if (fsRootIsSlash) {
+        await call('/api/files/mkdir', { method: 'POST', body: { path: 'Projects', name: 'smoke-ign' } });
+        const gi = fsg.existsSync('/Projects/smoke-ign/.gitignore') ? fsg.readFileSync('/Projects/smoke-ign/.gitignore', 'utf8') : '';
+        check('a new project ignores .porthole/ and .claude/', /^\.porthole\/$/m.test(gi) && /^\.claude\/$/m.test(gi), JSON.stringify(gi));
+    }
+    sh(`mkdir -p /Projects/smoke-keep && printf 'node_modules/\n!.claude/\n' > /Projects/smoke-keep/.gitignore`);
+    const r = await call('/api/projects/profile', { method: 'PUT', body: { abs: '/Projects/smoke-keep', level: 'throwaway' } });
+    const gk = fsg.readFileSync('/Projects/smoke-keep/.gitignore', 'utf8');
+    check('setting a level adds the ignores but respects an override (!.claude/)', r.status === 200 && /^\.porthole\/$/m.test(gk) && !/^\.claude\/$/m.test(gk) && /^!\.claude\/$/m.test(gk), JSON.stringify(gk));
+    sh('rm -rf /Projects/smoke-ign /Projects/smoke-keep');
+}
+
 // 8x. .portholerun: plan shows every command and the account; running needs the planned hash; it runs as the
 //     project's account, keeps the file out of git, and stops/restarts like any registered server.
 {

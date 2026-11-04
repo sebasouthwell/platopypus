@@ -327,6 +327,11 @@ phone's Update button. Mechanism:
   Open instead of Run, and its Run card says it is running with Open and Manage. `/api/files` adds `running` for the
   folder and each folder listed; `/api/home` adds `running` per project. No state change.
 
+- **1.17.4** — Projects keep `.porthole/` and `.claude/` out of git: added to `.gitignore` when a project is created
+  in /Projects, gets its security level, is made a git repository, is upgraded, runs a `.portholerun`, or starts an
+  agent session (so existing projects pick it up too). Override per project with a negation (`!.claude/`) or a
+  `# porthole: track .claude` line. Files already committed stay tracked. No state change.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

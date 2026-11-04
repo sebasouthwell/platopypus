@@ -16,6 +16,7 @@ import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
 import { log } from './log.js';
+import { ensureIgnored } from './gitignore.js';
 
 const metaFile = path.join(config.state, 'shells.json');
 let meta = {};
@@ -119,6 +120,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (session === 'control') { security = 'control'; sessionEnv = { PORTHOLE_SESSION: 'control', PORTHOLE_SECURITY_LEVEL: 'control', PORTHOLE_SECURITY_FILE: secProfile.controlDoc() }; }
         else {
             const g = secProfile.get(dir);
+            if (g.root && g.profile) ensureIgnored(g.root);
             if (g.root && !g.profile) { const e = httpError(428, `Choose a security level for ${g.name} first.`); e.needProfile = true; throw e; }
             security = g.profile?.key || (scratch ? 'throwaway' : null);
             sessionEnv = { PORTHOLE_SESSION: 'project', ...(g.profile ? { PORTHOLE_SECURITY_LEVEL: g.profile.key, PORTHOLE_SECURITY_FILE: g.securityFile, PORTHOLE_PROJECT_ROOT: g.root } : scratch ? { PORTHOLE_SECURITY_LEVEL: 'throwaway', PORTHOLE_SECURITY_FILE: secProfile.docPath('throwaway') } : {}) };

@@ -30,6 +30,7 @@ import * as svcUser from './svcuser.js';
 import { prepareAccount } from './live.js';
 import { envFor } from './vault.js';
 import { log } from './log.js';
+import { ensureIgnored as ensureDefaultIgnores } from './gitignore.js';
 
 export const FILE = '.portholerun';
 const MAX = 8 * 1024;
@@ -130,7 +131,7 @@ export async function run(file, hash, { restart = false } = {}) {
     if (v.runAs === 'service') account = await prepareAccount({ root, name: path.basename(root) });
     if (v.runAs === 'agent') { if (!agentUser.available()) throw httpError(412, 'The agent user does not exist on this box.'); await agentUser.prepareFolder(root).catch(() => {}); }
     const reg = await servicesMgr.runServer({ name: p.slug, port: p.port, cwd: v.cwd, cmd: ['bash', '-lc', cmd], project: p.project, env, runAs: v.runAs === 'service' ? 'service' : null, account, owner: v.runAs === 'agent' ? 'portholerun' : null });
-    let ignored = false; try { ignored = ensureIgnored(root); } catch { /* read-only */ }
+    let ignored = false; try { ignored = ensureIgnored(root); ensureDefaultIgnores(root); } catch { /* read-only */ }
     // The link: an existing one for the port stays; otherwise a quick link or the domain.
     let link = null;
     if (p.port && p.share !== 'none') {

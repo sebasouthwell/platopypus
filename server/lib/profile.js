@@ -1,5 +1,5 @@
 // Project security profile: what kind of project a folder is, chosen once on the phone when the first agent session
-// starts there, and the security brief that goes with it. Stored in the project itself so it travels with the repo:
+// starts there, and the security brief that goes with it. Stored in the project (git-ignored by default, see gitignore.js):
 //   <project>/.porthole/project.json   { level, audience?, tier?, set, lastCveCheck? }
 //   <project>/.porthole/security.md    copy of deploy/security/<key>.md (refreshed when the level changes)
 // Agents are told (global instructions) to read $PORTHOLE_SECURITY_FILE at the start of every session.
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import * as agentUser from './agentuser.js';
 import { log } from './log.js';
+import { ensureIgnored } from './gitignore.js';
 
 const docsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'deploy', 'security');
 const projectsDir = path.join(config.root, 'Projects');
@@ -70,6 +71,7 @@ export function set(dir, { level, audience, tier }) {
     writeShared(path.join(meta, 'project.json'), JSON.stringify(p, null, 2) + '\n');
     const key = docKey(p);
     writeShared(path.join(meta, 'security.md'), `<!-- Written by Porthole for this project's security level (${key}). Change the level on the phone, not here. -->\n\n` + fs.readFileSync(docPath(key), 'utf8'));
+    ensureIgnored(root);
     log('profile', `${path.basename(root)} → ${key}`);
     return get(root);
 }

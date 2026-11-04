@@ -12,6 +12,7 @@ import { resolveInRoot, relative, safeName } from './files.js';
 import { envForSync as envFor } from './vault.js';
 import * as projectFlags from './projects.js';
 import { log } from './log.js';
+import { ensureIgnored } from './gitignore.js';
 
 const run = promisify(execFile);
 
@@ -121,6 +122,7 @@ export async function init(rel) {
     if (await isRepo(dir)) throw httpError(409, 'Already a git repository.');
     await git(dir, ['init', '-b', 'main']);
     if (!fs.existsSync(path.join(dir, '.gitignore'))) await fsp.writeFile(path.join(dir, '.gitignore'), 'node_modules/\n.env\n__pycache__/\n.venv/\n*.log\n.DS_Store\n');
+    ensureIgnored(dir);   // .porthole/ and .claude/ stay out of the repo
     log('git', `init ${relative(dir)}`);
     return status(rel);
 }

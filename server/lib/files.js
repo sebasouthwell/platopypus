@@ -8,6 +8,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { config } from './config.js';
 import { log } from './log.js';
+import { ensureIgnored } from './gitignore.js';
 
 function httpError(status, message) {
     const e = new Error(message);
@@ -123,6 +124,8 @@ export async function mkdir(rel, name) {
     const dir = resolveInRoot(rel || '.');
     const target = path.join(dir, safeName(name));
     await fsp.mkdir(target);
+    // A new project (a folder directly in /Projects) starts with .porthole/ and .claude/ ignored.
+    try { if (fs.realpathSync(dir) === fs.realpathSync(path.join(config.root, 'Projects'))) ensureIgnored(target); } catch { /* no Projects folder */ }
     log('files', `mkdir ${relative(target)}`);
     return { path: relative(target) };
 }

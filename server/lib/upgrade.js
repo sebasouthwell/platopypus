@@ -11,6 +11,7 @@ import * as profile from './profile.js';
 import * as agentUser from './agentuser.js';
 import { lockSnapshot, snapshotOf, SNAPSHOT } from './prototype.js';
 import { log } from './log.js';
+import { ensureIgnored } from './gitignore.js';
 
 const run = promisify(execFile);
 const linksFile = path.join(config.state, 'project-links.json');
@@ -120,7 +121,8 @@ export async function upgrade({ from, name, level, audience, tier }) {
         const commit = await commitOf(src);
         const text = brief({ srcName: path.basename(src), srcPath: src, srcLevel: srcProfile ? `${srcProfile.title}${srcProfile.key ? ` (${srcProfile.key})` : ''}` : null, destName: name, levelKey: set.profile.key, levelTitle: set.profile.key.replace('-', ' · '), commit });
         fs.writeFileSync(path.join(dest, '.porthole', 'UPGRADE.md'), text, { mode: 0o664 });
-        fs.writeFileSync(path.join(dest, '.gitignore'), `# The prototype snapshot is reference material, not part of this project.\n${SNAPSHOT}/\n.porthole/acl.json\nnode_modules/\n.env\n`, { mode: 0o664 });
+        fs.writeFileSync(path.join(dest, '.gitignore'), 'node_modules/\n.env\n', { mode: 0o664 });
+        ensureIgnored(dest);   // .porthole/ (with the prototype copy) and .claude/
         if (agentUser.available()) await agentUser.makeReady(dest).catch(() => {});   // relocks the snapshot itself
         const db = loadLinks();
         db.links.push({ from: path.resolve(src), to: path.resolve(dest), at: Date.now(), level: set.profile.key, commit });
