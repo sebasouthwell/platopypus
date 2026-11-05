@@ -16,6 +16,7 @@ import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
 import { log } from './log.js';
+import { record } from './audit.js';
 import { ensureIgnored } from './gitignore.js';
 
 const metaFile = path.join(config.state, 'shells.json');
@@ -147,7 +148,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     // General-scope vault tokens become environment variables; project credentials: `vault get` from the project folder.
     const secrets = await envFor(dir, { project: 'none' });
     await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...sessionEnv, ...shellEnv });
-    if (Object.keys(secrets).length) log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`);
+    if (Object.keys(secrets).length) { log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`); record('credential', 'shell-export', { actor: `shell "${name}"`, via: `${kind}${runAs === 'agent' ? ' (agent user)' : ''}`, cwd: dir, names: Object.keys(secrets) }); }
     if (agent === 'antigravity' && agentEnv.PORTHOLE_FIRST_PROMPT) {
         const text = agentEnv.PORTHOLE_FIRST_PROMPT;
         setTimeout(() => { tmuxCmd('send-keys', '-t', `${name}:`, '-l', text).then(() => tmuxCmd('send-keys', '-t', `${name}:`, 'Enter')).catch(() => {}); }, 9000);

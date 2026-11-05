@@ -32,6 +32,7 @@ import * as zoned from './lib/zoned.js';
 import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
 import * as quick from './lib/quick.js';
+import * as audit from './lib/audit.js';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
 import * as portholerun from './lib/portholerun.js';
@@ -62,6 +63,7 @@ const vendor = {
 };
 
 const TOKEN = loadToken();
+elevate.setShellLookup(name => shells.shellMeta(name)?.cwd || null);
 
 // ---------- helpers ----------
 
@@ -76,9 +78,32 @@ const AGENT_ROUTES = [
     ['GET', /^\/api\/tunnels$/], ['POST', /^\/api\/tunnels$/], ['DELETE', /^\/api\/tunnels\/\d{1,5}$/], ['POST', /^\/api\/tunnels\/\d{1,5}\/extend$/],
 ];
 
+// Things that change what the box runs or publishes. Each successful call is kept in the audit log as Activity,
+// with who asked (an agent shell, the box CLI from a root shell, or the phone) and the project it concerns.
+const ACTIVITY = [
+    ['POST', /^\/api\/tunnels$/, 'tunnel-start', (m, b, r) => ({ what: `port ${r?.port ?? b.port}${r?.url ? ` → ${r.url}` : ''}`, port: r?.port ?? b.port })],
+    ['DELETE', /^\/api\/tunnels\/(\d+)$/, 'tunnel-stop', m => ({ what: `port ${m[1]}`, port: Number(m[1]) })],
+    ['POST', /^\/api\/zoned$/, 'hostname-add', (m, b) => ({ what: `${b.hostname || b.name || ''} → port ${b.port}`, port: b.port })],
+    ['DELETE', /^\/api\/zoned\/([a-z0-9-]{1,50})$/, 'hostname-remove', m => ({ what: m[1] })],
+    ['POST', /^\/api\/servers\/run$/, 'server-run', (m, b, r) => ({ what: `${r?.name || b.name || ''}${r?.port || b.port ? ` :${r?.port || b.port}` : ''} · ${[].concat(b.cmd || []).join(' ').slice(0, 300)}`, cwd: r?.cwd || b.cwd })],
+    ['POST', /^\/api\/servers$/, 'server-register', (m, b, r) => ({ what: `${r?.name || b.name || ''}${b.port ? ` :${b.port}` : ''}`, cwd: r?.cwd || b.cwd })],
+    ['POST', /^\/api\/servers\/([a-z0-9-]{1,40})\/(stop|start|restart)$/, m => `server-${m[2]}`, (m, b, r) => ({ what: m[1], cwd: r?.cwd })],
+    ['DELETE', /^\/api\/servers\/([a-z0-9-]{1,40})$/, 'server-remove', m => ({ what: m[1] })],
+    ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|restart|hostname)$/, m => `service-${m[3]}`, m => ({ what: `${decodeURIComponent(m[1])}/${m[2]}`, project: decodeURIComponent(m[1]) })],
+    ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(actions|groups)\//, 'service-action', (m, b, r) => ({ what: `${r?.label || 'action'}${b.item ? ` · ${b.item}` : ''}`, project: decodeURIComponent(m[1]), code: r?.code })],
+    ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
+    ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
+];
+function actorOf(session) {
+    if (session.agent) { const sh = shells.shellMeta(session.agent); return { actor: `shell "${session.agent}"`, via: 'agent shell', cwd: sh?.cwd }; }
+    if (/local token/.test(session.how || '')) return { actor: 'box CLI', via: 'root shell' };
+    return { actor: 'phone', via: session.how || 'phone' };
+}
+
 const RUNNING_VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '0'; } catch { return '0'; } })();
 
 function send(res, status, body, headers = {}) {
+    if (res.auditHook && status < 300) { try { res.auditHook(body); } catch { /* never block the reply */ } }
     const data = typeof body === 'string' ? body : JSON.stringify(body);
     res.writeHead(status, {
         'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
@@ -110,7 +135,7 @@ async function readJson(req, limit = 1024 * 1024) {
     }
     if (!chunks.length) return {};
     try {
-        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        return (req.jsonBody = JSON.parse(Buffer.concat(chunks).toString('utf8')));
     } catch {
         throw shells.httpError(400, 'Invalid JSON.');
     }
@@ -248,6 +273,18 @@ const server = http.createServer(async (req, res) => {
             if (!auth.hasCsrfHeader(req)) return send(res, 403, { error: 'Missing request header.' });
         }
 
+        // Activity audit: recorded when the call succeeds (send() runs the hook for 2xx replies).
+        if (method !== 'GET') {
+            const hit = ACTIVITY.find(([meth, re]) => meth === method && re.test(p));
+            if (hit) {
+                const [, re, act, fn] = hit; const mm = p.match(re);
+                res.auditHook = reply => {
+                    const who = actorOf(session); const d = fn(mm, req.jsonBody || {}, reply && typeof reply === 'object' ? reply : null) || {};
+                    audit.record('activity', typeof act === 'function' ? act(mm) : act, { ...who, ...d, cwd: d.cwd || who.cwd, project: d.project !== undefined ? d.project : undefined });
+                };
+            }
+        }
+
         // Agent-user shells: only the routes the box CLIs need (docs/AGENT-USER.md).
         if (session.agent) {
             let am;
@@ -271,9 +308,11 @@ const server = http.createServer(async (req, res) => {
                 if (b.name) {
                     if (!(b.name in env)) { const it = vault.list().find(i => i.fields.some(f => f.env === b.name)); return send(res, 404, { error: it ? `${b.name} belongs to project ${it.scope}; run vault get from that project's main folder (/${it.scope}), not elsewhere or a sub-folder` : `no variable named ${b.name} (try: vault ls)` }); }
                     log('vault', `"${session.agent}" read ${b.name} from ${pr.cwd}`);
+                    audit.record('credential', 'agent-read', { actor: `shell "${session.agent}"`, via: 'vault get', cwd: pr.cwd, names: [b.name] });
                     return send(res, 200, { value: env[b.name] });
                 }
                 log('vault', `"${session.agent}" read ${Object.keys(env).length} values from ${pr.cwd}`);
+                audit.record('credential', 'agent-read', { actor: `shell "${session.agent}"`, via: 'vault env', cwd: pr.cwd, names: Object.keys(env) });
                 return send(res, 200, { env });
             }
             if (p === '/api/agent/elevate' && method === 'POST') {
@@ -302,7 +341,7 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/creds' && method === 'GET') return send(res, 200, await shared.list({ port: url.searchParams.get('port'), values: url.searchParams.get('values') === '1' }));
         if (p === '/api/creds/share' && method === 'POST') { const b = await readJson(req, 256 * 1024); if (!Array.isArray(b.fields)) return send(res, 400, { error: 'fields[] required' }); const id = await shared.add(b.shell || null, b); const one = (await shared.list({})).find(c => c.id === id); return send(res, 201, { id, port: one?.port || null }); }
         if ((m = p.match(/^\/api\/creds\/([a-f0-9]+)$/)) && method === 'DELETE') { shared.remove(m[1]); return send(res, 200, { ok: true }); }
-        if ((m = p.match(/^\/api\/creds\/([a-f0-9]+)\/values$/)) && method === 'POST') { const one = (await shared.list({ values: true })).find(c => c.id === m[1]); if (!one) return send(res, 404, { error: 'No such shared credential.' }); log('credshare', `values of "${one.title}" revealed to ${auth.clientAddr(req)}`); return send(res, 200, one); }
+        if ((m = p.match(/^\/api\/creds\/([a-f0-9]+)\/values$/)) && method === 'POST') { const one = (await shared.list({ values: true })).find(c => c.id === m[1]); if (!one) return send(res, 404, { error: 'No such shared credential.' }); log('credshare', `values of "${one.title}" revealed to ${auth.clientAddr(req)}`); audit.record('credential', 'shared-revealed', { actor: 'phone', what: one.title, project: audit.projectOf(one.project) }); return send(res, 200, one); }
         if (p === '/api/creds/stale' && method === 'DELETE') return send(res, 200, { removed: shared.removeStale() });
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/scrollback$/)) && method === 'GET') {
             const text = await shells.scrollback(decodeURIComponent(m[1]), url.searchParams.get('lines') || 2000);
@@ -548,6 +587,14 @@ const server = http.createServer(async (req, res) => {
             const list = await shells.list();
             const busy = list.filter(s => (s.kind === 'agent' || s.kind === 'remote-control') && (m[1] === 'move-logins' ? s.runAs !== 'agent' : s.runAs === 'agent')).map(s => s.name);
             return send(res, 200, m[1] === 'move-logins' ? await agentUser.moveLogins({ busy }) : await agentUser.undoMoveLogins({ busy }));
+        }
+
+        // Audit: escalations, credential use, activity (never values or output)
+        if (p === '/api/audit' && method === 'GET') {
+            const type = url.searchParams.get('type'), project = url.searchParams.get('project');
+            const r = audit.query({ type: ['elevate', 'credential', 'activity'].includes(type) ? type : null, project: project === null ? null : project, limit: url.searchParams.get('limit') });
+            if (!type || type === 'activity') r.commits = await audit.commits({ project: project === null ? null : project, days: Number(url.searchParams.get('days')) || 14 });
+            return send(res, 200, r);
         }
 
         // Pins and recents for live-service actions (Home)

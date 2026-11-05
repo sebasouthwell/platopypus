@@ -518,6 +518,25 @@ if (r.body.available) {
     check('denied elevate exits 126', /ELEV-RC=126/.test(elevOut), elevOut);
     out = await typeIn('svc run --name smoke-agent-srv --port 8160 -- python3 -m http.server 8160 >/dev/null; sleep 2; ps -o user= -p $(ss -ltnpH | grep ":8160 " | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2)', 'a6', 20);
     check('svc run from an agent-user shell runs as the agent user', /\nagent\s*$/.test(out.trimEnd()), out.slice(-120));
+    {   // Audit log: what this agent did, filed under its project; agents cannot read the log.
+        out = await typeIn('curl -s -o /dev/null -c /tmp/aj -H "Content-Type: application/json" -H "X-Porthole: 1" -d "{\\"token\\":\\"$PORTHOLE_TOKEN\\"}" http://127.0.0.1:7331/api/login/token; curl -s -o /dev/null -w "audit=%{http_code}" -b /tmp/aj -H "X-Porthole: 1" "http://127.0.0.1:7331/api/audit"', 'a7');
+        check('agents cannot read the audit log', /audit=403/.test(out), out.slice(-60));
+        const au = (await call('/api/audit?project=smoke-agent')).body;
+        const ev = au.events || [];
+        const req = ev.filter(e => e.type === 'elevate' && e.action === 'request');
+        check('root requests are filed under the project, one entry each, with how they ended', req.length === 2 && req.some(e => e.status === 'done' && e.code === 0 && /id -u/.test(e.cmd) && e.reason === 'smoke' && e.actor === 'shell "smoke-agent"' && e.decidedBy === 'phone') && req.some(e => e.status === 'denied'), JSON.stringify(req).slice(0, 400));
+        const rd = ev.find(e => e.type === 'credential' && e.action === 'agent-read');
+        check('an agent reading a Vault value is recorded by name, never the value', rd?.names?.includes('SMOKE_AGENT_KEY') && !JSON.stringify(au).includes('ag-777'), JSON.stringify(rd));
+        const srv = ev.find(e => e.type === 'activity' && e.action === 'server-run');
+        check('a server an agent starts is recorded as activity for its project', srv && srv.actor === 'shell "smoke-agent"' && /smoke-agent-srv/.test(srv.what), JSON.stringify(srv));
+        const sm = au.projects.find(x => x.project === 'smoke-agent');
+        check('the project summary counts root and credential use', sm && sm.elevate >= 2 && sm.rootRuns === 1 && sm.credential >= 1 && sm.names.includes('SMOKE_AGENT_KEY'), JSON.stringify(sm));
+        const only = (await call('/api/audit?type=elevate')).body.events;
+        check('the log filters by kind', only.length >= 2 && only.every(e => e.type === 'elevate'), String(only.length));
+        sh('cd /Projects/smoke-agent && git init -q && git -c user.name=Sam -c user.email=sam@example.com commit -q --allow-empty -m "by hand" && git -c user.name=Sam -c user.email=sam@example.com commit -q --allow-empty -m "agent change" -m "Co-Authored-By: Claude Opus <noreply@anthropic.com>"');
+        const cm = (await call('/api/audit?project=smoke-agent&type=activity&days=15')).body.commits || [];
+        check('commits come from the project history, agents marked by author or trailer', cm.length === 2 && cm.find(c => c.what === 'agent change')?.agent === 'Claude Opus' && cm.find(c => c.what === 'by hand')?.agent === null, JSON.stringify(cm).slice(0, 300));
+    }
     await call('/api/servers/smoke-agent-srv', { method: 'DELETE' }).catch(() => {});
     await call('/api/shells/smoke-agent', { method: 'DELETE' });
     await call(`/api/vault/${agVault}`, { method: 'DELETE' });

@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { config } from './config.js';
 import { log } from './log.js';
+import { record } from './audit.js';
 import { encrypt, decrypt } from './vault.js';
 import * as tunnels from './tunnels.js';
 import * as dockerMgr from './docker.js';
@@ -69,6 +70,7 @@ export async function add(shell, cred) {
     db.items.unshift(item);
     db.items = db.items.filter(i => Date.now() - i.at < TTL).slice(0, 50);
     save(db);
+    record('credential', 'shared', { actor: shell ? `shell "${shell}"` : 'box CLI', via: 'credshare', cwd: cred.cwd || undefined, what: item.title, names: item.fields.map(f => f.label) });
     log('credshare', `shell "${shell}" shared "${item.title}" (${item.fields.length} field(s)${port ? `, port ${port}` : ''})`);
     events.emit('added', { id: item.id, title: item.title, port, shell: item.shell });
     return item.id;

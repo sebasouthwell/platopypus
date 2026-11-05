@@ -19,6 +19,7 @@ import { envFor } from './vault.js';
 import { log } from './log.js';
 import { folderIcon, relative as relToRoot } from './files.js';
 import { recordRun } from './quick.js';
+import { record } from './audit.js';
 
 const run = promisify(execFile);
 const projectsDir = path.join(config.root, 'Projects');
@@ -214,6 +215,7 @@ export function approveRoot(project, key) {
     if (s.run_as !== 'root') throw httpError(400, 'This service does not ask to run as root.');
     const a = loadApprovals(); a[slugOf(project, key)] = rootFingerprint(p, s);
     const tmp = approvalsFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(a, null, 2), { mode: 0o600 }); fs.renameSync(tmp, approvalsFile);
+    record('elevate', 'root-approved', { project, actor: 'phone', what: `${project}/${key}`, decidedBy: 'phone', cmd: String(s.start || '') });
     log('live', `approved ${project}/${key} to run as root (fingerprint ${a[slugOf(project, key)].slice(0, 12)})`);
     return { ok: true };
 }
@@ -221,6 +223,7 @@ export function revokeRoot(project, key) {
     const a = loadApprovals(); delete a[slugOf(project, key)];
     const tmp = approvalsFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(a, null, 2), { mode: 0o600 }); fs.renameSync(tmp, approvalsFile);
     log('live', `revoked root for ${project}/${key}`);
+    record('elevate', 'root-revoked', { project, actor: 'phone', what: `${project}/${key}` });
     return { ok: true };
 }
 // The project's own account, with access to this project folder only (ACL); agent shells keep porthole-dev access.
@@ -305,6 +308,9 @@ export async function start(project, key) {
     const runAs = mustRun(p, key, s);
     const account = runAs === 'service' ? await prepareAccount(p) : null;
     const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd: ['bash', '-lc', s.start], project: p.name, env, runAs, account, live: { project: p.name, key, title: s.title || key } });
+    const given = (Array.isArray(s.needs) ? s.needs : []).map(String).filter(n => n in env);
+    if (given.length) record('credential', 'service-start', { project: p.name, actor: 'Porthole', via: `live service (${account || runAs})`, what: `${p.name}/${key}`, names: given });
+    if (runAs === 'root') record('elevate', 'root-start', { project: p.name, actor: 'Porthole', via: 'live service', what: `${p.name}/${key}`, cmd: String(s.start) });
     log('live', `started ${project}/${key}`);
     return tookOver ? { ...reg, tookOver } : reg;
 }
@@ -459,6 +465,7 @@ export async function credentials(project, key, index) {
     const view = credView(c);
     view.fields = view.fields.map(f => ({ ...f, value: f.ref ? (vaultEnv[f.ref] ?? null) : f.value, missing: !!f.ref && !(f.ref in vaultEnv) }));
     log('live', `revealed credentials "${view.label}" of ${project}/${key}`);
+    record('credential', 'service-revealed', { project, actor: 'phone', what: `${view.label} · ${project}/${key}`, names: view.fields.filter(f => f.ref).map(f => f.ref) });
     return view;
 }
 

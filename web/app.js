@@ -242,6 +242,7 @@ function push(page) {
     if (page === 'vault') loadVault().catch(e => toast(e.message, true));
     if (page === 'creds') loadCredsPage().catch(e => toast(e.message, true));
     if (page === 'security') loadSecurity().catch(e => toast(e.message, true));
+    if (page === 'audit') loadAudit().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -3032,6 +3033,104 @@ async function credentialFormFromLegacy(preset) {
 }
 
 // ---------- security ----------
+
+// ---------- audit log ----------
+// Root use (requests, grants, services allowed to run as root), credential use (which Vault values went where) and
+// activity (tunnels, servers, hostnames, git, commits), per project. From /api/audit; never values or output.
+const auditState = { type: '', project: null };
+const AUDIT_TITLES = {
+    elevate: {
+        request: e => `Root: ${String(e.cmd || '').split('\n')[0]}`, grant: e => `Root without asking, ${e.minutes} min`, 'grant-revoked': () => 'Root grant ended',
+        'root-approved': e => `Allowed to run as root: ${e.what}`, 'root-revoked': e => `Root revoked: ${e.what}`, 'root-start': e => `Started as root: ${e.what}`,
+    },
+    credential: {
+        'agent-read': e => `Agent read ${auditNames(e)}`, 'shell-export': e => `Put into a new shell: ${auditNames(e)}`,
+        'service-start': e => `Given to ${e.what}: ${auditNames(e)}`, portholerun: e => `Given to .portholerun ${e.what}: ${auditNames(e)}`,
+        'vault-revealed': e => `Revealed on the phone: ${e.what}`, 'service-revealed': e => `Revealed on the phone: ${e.what}`,
+        shared: e => `Shared with you: ${e.what}`, 'shared-revealed': e => `Opened shared card: ${e.what}`,
+    },
+    activity: {
+        'tunnel-start': e => `Quick link opened · ${e.what}`, 'tunnel-stop': e => `Quick link closed · ${e.what}`,
+        'hostname-add': e => `Hostname added · ${e.what}`, 'hostname-remove': e => `Hostname removed · ${e.what}`,
+        'server-run': e => `Server started · ${e.what}`, 'server-register': e => `Server registered · ${e.what}`, 'server-start': e => `Server started · ${e.what}`,
+        'server-stop': e => `Server stopped · ${e.what}`, 'server-restart': e => `Server restarted · ${e.what}`, 'server-remove': e => `Server removed · ${e.what}`,
+        'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
+        'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
+        'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what,
+    },
+};
+const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };
+const auditTitle = e => (AUDIT_TITLES[e.type]?.[e.action] || (() => `${e.action}${e.what ? ` · ${e.what}` : ''}`))(e);
+function auditIcon(e) {
+    if (e.type === 'elevate') return ['shield', 'flare'];
+    if (e.type === 'credential') return ['key', 'brass'];
+    if (e.action === 'commit' || e.action.startsWith('git-')) return ['commit', e.agent ? 'brass' : 'dim'];
+    if (/tunnel|hostname/.test(e.action)) return ['link', 'kelp'];
+    return [/service|portholerun/.test(e.action) ? 'globe' : 'server', 'dock'];
+}
+function auditStatus(e) {
+    if (e.type === 'elevate' && e.action === 'request') {
+        if (e.status === 'done') return e.code ? `<span class="tag" style="color:var(--flare)">exit ${e.code}</span>` : '<span class="tag">ran</span>';
+        if (e.status === 'denied') return '<span class="tag dim">denied</span>';
+        if (e.status === 'expired') return '<span class="tag dim">expired</span>';
+        if (e.status === 'running') return '<span class="tag">running</span>';
+        return '<span class="tag" style="color:var(--brass)">waiting</span>';
+    }
+    if (e.action === 'commit') return e.agent ? `<span class="tag">${esc(e.agent)}</span>` : '';
+    if (e.action === 'service-action' && e.code) return `<span class="tag" style="color:var(--flare)">exit ${e.code}</span>`;
+    return '';
+}
+const auditWho = e => e.action === 'commit' ? `${e.author}${e.hash ? ` · ${e.hash.slice(0, 7)}` : ''}` : (e.actor || 'Porthole');
+async function loadAudit() {
+    const q = new URLSearchParams();
+    if (auditState.type) q.set('type', auditState.type);
+    if (auditState.project !== null) q.set('project', auditState.project);
+    const r = await api(`/api/audit?${q}`);
+    // Commits join the list (Everything and Activity) by time.
+    let events = r.events;
+    if (r.commits?.length) events = [...events, ...r.commits].sort((a, b) => b.at - a.at).slice(0, 400);
+    // Project chips: everything with any entry, plus projects with commits.
+    const proj = new Map(r.projects.map(x => [x.project || '', { ...x, commits: 0, agentCommits: 0 }]));
+    const allCommits = auditState.project === null ? (r.commits || []) : [];
+    for (const c of allCommits) { const x = proj.get(c.project) || { project: c.project, elevate: 0, rootRuns: 0, credential: 0, activity: 0, names: [], last: 0, commits: 0, agentCommits: 0 }; x.commits++; if (c.agent) x.agentCommits++; x.last = Math.max(x.last, c.at); proj.set(c.project, x); }
+    if (auditState.project === null) auditState.chips = [...proj.values()].sort((a, b) => b.last - a.last);
+    const chips = auditState.chips || [];
+    $('#audit-projects').innerHTML = `<button class="chip ${auditState.project === null ? 'on' : ''}" data-ap="*">All projects</button>` + chips.map(x => `<button class="chip ${auditState.project === (x.project || '') ? 'on' : ''}" data-ap="${esc(x.project || '')}">${esc(x.project || 'Box')}<span class="n">${x.elevate + x.credential + x.activity + (x.commits || 0)}</span></button>`).join('');
+    $$('#audit-projects [data-ap]').forEach(b => b.onclick = () => { auditState.project = b.dataset.ap === '*' ? null : b.dataset.ap; loadAudit().catch(e => toast(e.message, true)); });
+    // Summary for one project: how much root, which Vault values, what agents did.
+    const one = auditState.project !== null ? (chips.find(x => (x.project || '') === auditState.project) || null) : null;
+    $('#audit-summary').innerHTML = one ? `<div class="card audit-sum">
+        <div class="audit-stats"><div><b>${one.elevate}</b><span>root entr${one.elevate === 1 ? 'y' : 'ies'}${one.rootRuns ? `, ${one.rootRuns} ran` : ''}</span></div><div><b>${one.credential}</b><span>credential use${one.credential === 1 ? '' : 's'}</span></div><div><b>${one.activity}</b><span>activity</span></div><div><b>${one.commits || 0}</b><span>commit${one.commits === 1 ? '' : 's'}${one.agentCommits ? `, ${one.agentCommits} by agents` : ''}</span></div></div>
+        ${one.names?.length ? `<p class="sub" style="margin-top:10px">Vault values used: ${one.names.map(n => `<span class="mono">${esc(n)}</span>`).join(', ')}</p>` : ''}</div>` : '';
+    if (!events.length) { $('#audit-list').innerHTML = `<p class="empty">Nothing recorded${auditState.type ? ' of this kind' : ''}${auditState.project !== null ? ` for ${esc(auditState.project || 'the box')}` : ''} yet.</p>`; return; }
+    // Grouped by day, newest first.
+    const day = ts => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    let html = '', cur = '';
+    events.forEach((e, n) => {
+        const d = day(e.at);
+        if (d !== cur) { if (cur) html += '</div>'; cur = d; html += `<h2 class="section">${esc(d)}</h2><div class="list">`; }
+        const [ic, tone] = auditIcon(e);
+        html += `<button class="row" data-ae="${n}"><span class="ico ${tone}">${icon(ic)}</span><div class="main"><div class="title audit-t">${esc(auditTitle(e))}${auditStatus(e)}</div><div class="sub">${esc(auditWho(e))}${e.project && auditState.project === null ? ` · ${esc(e.project)}` : ''} · ${new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div></div>${icon('chevron', 'i chev')}</button>`;
+    });
+    $('#audit-list').innerHTML = html + '</div>';
+    $$('#audit-list [data-ae]').forEach(b => b.onclick = () => auditDetail(events[Number(b.dataset.ae)]));
+}
+function auditDetail(e) {
+    const rows = [
+        ['When', new Date(e.at).toLocaleString()], ['Who', auditWho(e)], ['Through', e.via], ['Project', e.project || (e.type === 'activity' && e.action === 'commit' ? null : 'the box (not in a project)')],
+        ['Folder', e.cwd], ['Reason', e.reason], ['Decided by', e.decidedBy], ['Exit code', e.code ?? null], ['Minutes', e.minutes], ['Agent', e.agent],
+    ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    openDialog(`<h2>${icon(auditIcon(e)[0])}${esc(auditTitle(e))}</h2>
+        <div class="list">${rows.map(([k, v]) => `<div class="row"><div class="main"><div class="sub">${esc(k)}</div><div class="title" style="font-size:14.5px;white-space:normal">${esc(String(v))}</div></div></div>`).join('')}</div>
+        ${e.cmd ? `<h3 class="section">Command</h3><pre style="max-height:30vh;white-space:pre-wrap">${esc(e.cmd)}</pre>` : ''}
+        ${e.names?.length ? `<h3 class="section">Vault values</h3><div class="chips" style="flex-wrap:wrap">${e.names.map(n => `<span class="chip">${esc(n)}</span>`).join('')}</div>` : ''}
+        ${e.events?.length ? `<h3 class="section">Timeline</h3><div class="list">${e.events.map(x => `<div class="row"><div class="main"><div class="title" style="font-size:14px">${esc(x.action)}${x.code !== undefined && x.code !== null ? ` · exit ${x.code}` : ''}${x.decidedBy ? ` · ${esc(x.decidedBy)}` : ''}</div><div class="sub">${new Date(x.at).toLocaleTimeString()}</div></div></div>`).join('')}</div>` : ''}
+        <div class="buttons">${e.project ? `<button data-af>${icon('history')}Everything for ${esc(e.project)}</button>` : ''}<button data-close>Close</button></div>`);
+    const f = $('#dialog [data-af]'); if (f) f.onclick = () => { $('#dialog .dialog-backdrop').click(); auditState.project = e.project; loadAudit().catch(x => toast(x.message, true)); };
+}
+$$('#audit-seg button').forEach(b => b.addEventListener('click', () => { auditState.type = b.dataset.at; $$('#audit-seg button').forEach(x => x.classList.toggle('on', x === b)); loadAudit().catch(e => toast(e.message, true)); }));
+$('#audit-refresh').addEventListener('click', () => loadAudit().catch(e => toast(e.message, true)));
 
 async function loadSecurity() {
     const s = await api('/api/security');

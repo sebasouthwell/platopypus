@@ -12,6 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { log } from './log.js';
+import { record } from './audit.js';
 import { byKey, fieldsFor, AUTH_STYLES, OAUTH2_GENERIC } from './catalog.js';
 
 const keyFile = path.join(config.state, 'vault.key');
@@ -242,6 +243,7 @@ export async function reveal(id, who = '', field = null) {
     const out = {};
     for (const f of Object.keys(it.fields)) if (!field || field === f) out[envNameFor(it, f)] = decrypt(it.fields[f]);
     log('vault', `REVEALED ${it.provider} "${it.name}"${field ? ` (${field})` : ''} to ${who}`);
+    record('credential', 'vault-revealed', { actor: 'phone', via: who, what: it.name, names: Object.keys(out), project: it.scope && it.scope !== 'general' ? it.scope : null });
     const first = Object.keys(out)[0];
     return { id: it.id, values: out, envName: first, value: first ? out[first] : undefined };
 }

@@ -64,6 +64,7 @@ with mode 0600. Formats as of version 1.0:
 | `project-links.json` | upgrade.js | `{ links: [{ from, to, at, level, commit }] }` — "Upgrade repo" relationships between project folders (1.16.0) |
 | `portholerun.json` | portholerun.js | `{ "<run-slug>": { file, hash, at } }` — what each .portholerun server was started from, for restarts (1.18.4) |
 | `quick.json` | quick.js | `{ pins: [{ id, kind, project, key, action, group, item, itemLabel, at }], recents: [… , code] }` — Home shortcuts to live-service commands; matched by label (1.19.0) |
+| `audit.jsonl`, `audit.1.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); rotated at 4 MB, one old file kept (1.20.0) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -368,6 +369,15 @@ phone's Update button. Mechanism:
   put this device's recently used items first and get a filter past 8 items. Pins point by label and are checked when
   opened; confirmations, inputs and list checks are unchanged. New state: `quick.json` (pins and recents; additive).
   New API: `GET /api/quick`, `POST /api/quick/pins`, `DELETE /api/quick/pins/:id`, `DELETE /api/quick/recents`.
+
+- **1.20.0** — Audit log (More → Audit log, and the desktop sidebar). Every root request (with how it ended and who
+  decided), standing root grants, services allowed or started as root; every credential use (an agent's `vault get`,
+  Vault values put into a new shell, given to a live service or a `.portholerun`, revealed on the phone, shared with
+  `credshare`); and activity (quick links, hostnames, servers, live services and their actions, `.portholerun`, git
+  from the phone), each with who asked (agent shell, box CLI, phone) and the project. Commits come from each project's
+  git history, marked as an agent's by author or `Co-Authored-By`. Filters by kind and project, with a per-project
+  summary. Never stores secret values or command output; agents cannot read it. New state: `audit.jsonl` (+ one
+  rotated `audit.1.jsonl`, 4 MB each; additive). New API: `GET /api/audit?type=&project=&days=`.
 
 ## Release checklist
 

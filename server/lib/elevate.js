@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { log } from './log.js';
+import { record, projectOf } from './audit.js';
 
 const run = promisify(execFile);
 const requests = new Map();          // id -> request
@@ -19,7 +20,7 @@ const view = r => ({ id: r.id, shell: r.shell, cwd: r.cwd, cmd: r.cmd, reason: r
 function sweep() {
     const now = Date.now();
     for (const r of requests.values()) {
-        if (r.status === 'pending' && now - r.created > PENDING_MS) { r.status = 'expired'; log('elevate', `request ${r.id} from "${r.shell}" expired`); }
+        if (r.status === 'pending' && now - r.created > PENDING_MS) { r.status = 'expired'; log('elevate', `request ${r.id} from "${r.shell}" expired`); record('elevate', 'expired', { id: r.id, cwd: r.cwd, actor: `shell "${r.shell}"` }); }
         if (now - r.created > 24 * 3600_000) requests.delete(r.id);
     }
     for (const [s, until] of grants) if (until < now) grants.delete(s);
@@ -38,14 +39,21 @@ async function execute(r) {
     r.output = String(r.output).slice(-200_000);
     r.status = 'done';
     log('elevate', `done for "${r.shell}" → exit ${r.code}`);
+    record('elevate', 'done', { id: r.id, cwd: r.cwd, actor: `shell "${r.shell}"`, code: r.code });
 }
+
+// Grants belong to a shell; its folder says which project (set by shells.js, which imports this module).
+let shellCwd = () => null;
+export function setShellLookup(fn) { shellCwd = fn; }
+const projectOfShell = shell => projectOf(shellCwd(shell));
 
 export function grantUntil(shell) { sweep(); return grants.get(shell) || null; }
 export function grant(shell, minutes) {
     const m = Math.max(0, Math.min(Number(minutes) || 0, 8 * 60));
-    if (!m) { grants.delete(shell); log('elevate', `revoked elevation for "${shell}"`); return null; }
+    if (!m) { grants.delete(shell); log('elevate', `revoked elevation for "${shell}"`); record('elevate', 'grant-revoked', { actor: `shell "${shell}"`, decidedBy: 'phone', project: projectOfShell(shell) }); return null; }
     const until = Date.now() + m * 60_000; grants.set(shell, until);
     log('elevate', `GRANTED full elevation to "${shell}" for ${m} min`);
+    record('elevate', 'grant', { actor: `shell "${shell}"`, minutes: m, decidedBy: 'phone', project: projectOfShell(shell) });
     return until;
 }
 
@@ -57,7 +65,9 @@ export function request(shell, { cmd, cwd, reason }) {
     const r = { id: crypto.randomBytes(6).toString('hex'), shell, cwd: cwd || '/', cmd: c, reason: String(reason || '').slice(0, 300), created: Date.now(), status: 'pending' };
     requests.set(r.id, r);
     log('elevate', `request ${r.id} from "${shell}" in ${r.cwd}: ${c}`);
-    if ((grants.get(shell) || 0) > Date.now()) { r.auto = true; r.decidedBy = 'standing grant'; execute(r); }
+    const auto = (grants.get(shell) || 0) > Date.now();
+    record('elevate', 'request', { id: r.id, cwd: r.cwd, cmd: c, reason: r.reason, actor: `shell "${shell}"`, auto, decidedBy: auto ? 'standing grant' : undefined });
+    if (auto) { r.auto = true; r.decidedBy = 'standing grant'; execute(r); }
     return view(r);
 }
 
@@ -75,8 +85,9 @@ export function decide(id, { allow, minutes = 0 }) {
     const r = requests.get(id);
     if (!r) throw httpError(404, 'No such request.');
     if (r.status !== 'pending') throw httpError(409, `Already ${r.status}.`);
-    if (!allow) { r.status = 'denied'; r.decidedBy = 'phone'; log('elevate', `DENIED ${r.id} for "${r.shell}"`); return view(r); }
+    if (!allow) { r.status = 'denied'; r.decidedBy = 'phone'; log('elevate', `DENIED ${r.id} for "${r.shell}"`); record('elevate', 'denied', { id: r.id, cwd: r.cwd, decidedBy: 'phone' }); return view(r); }
     r.decidedBy = minutes ? `phone (+${minutes} min grant)` : 'phone';
+    record('elevate', 'allowed', { id: r.id, cwd: r.cwd, decidedBy: r.decidedBy });
     if (minutes) grant(r.shell, minutes);
     execute(r);
     return view(r);

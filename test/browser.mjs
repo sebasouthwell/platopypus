@@ -41,6 +41,22 @@ for (const tab of ['home', 'shells', 'services', 'files', 'more']) {
 }
 await page.screenshot({ path: process.env.SHOT || 'browser-probe.png', fullPage: false });
 
+// Audit log: opens from More, lists what the smoke suite did, filters by kind and opens an entry.
+{
+    const before = errors.length;
+    await page.click('.tabs [data-go="more"]'); await page.waitForTimeout(800);
+    await page.click('#more-list [data-page="audit"]'); await page.waitForTimeout(1500);
+    const rows = await page.$$eval('#audit-list [data-ae]', els => els.length);
+    check('the audit log opens from More and lists entries', await page.isVisible('#page-audit') && rows > 0 && errors.length === before, `${rows} rows ${errors.slice(before).join(' | ').slice(0, 200)}`);
+    await page.click('#audit-seg [data-at="elevate"]'); await page.waitForTimeout(900);
+    const kinds = await page.$$eval('#audit-list [data-ae] .ico', els => els.map(e => e.innerHTML.includes('i-shield')));
+    check('the Root filter shows only root entries', kinds.length > 0 && kinds.every(Boolean), String(kinds.length));
+    await page.click('#audit-list [data-ae]'); await page.waitForTimeout(600);
+    check('an entry opens with its details', await page.isVisible('#dialog') && /Who/.test(await page.textContent('#dialog') || ''));
+    await page.click('#dialog [data-close]'); await page.waitForTimeout(200);
+    await page.click('#page-audit [data-back]'); await page.waitForTimeout(300);
+}
+
 // Pins on Home: a pin whose service has gone shows as gone, opens an explanation, and can be removed there.
 // The open sheet is remembered across a reload (iOS reloads the app when you switch away).
 {

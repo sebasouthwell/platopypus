@@ -30,6 +30,7 @@ import * as svcUser from './svcuser.js';
 import { prepareAccount } from './live.js';
 import { envFor } from './vault.js';
 import { log } from './log.js';
+import { record } from './audit.js';
 import { ensureIgnored as ensureDefaultIgnores } from './gitignore.js';
 
 export const FILE = '.portholerun';
@@ -143,6 +144,8 @@ export async function run(file, hash, { restart = false } = {}) {
         } catch (e) { log('portholerun', `${p.name}: link failed: ${e.message}`); link = { error: e.message }; }
     }
     remember(p.slug, p.file, p.hash);
+    if (v.needs.length) record('credential', 'portholerun', { cwd: root, actor: 'Porthole', via: `.portholerun (${account || v.runAs})`, what: p.name, names: v.needs });
+    if (v.runAs === 'root') record('elevate', 'root-start', { cwd: root, actor: 'Porthole', via: '.portholerun', what: p.name, cmd });
     log('portholerun', `${restart ? 're' : ''}started ${p.folder}/${FILE} as ${account || v.runAs}${p.port ? ` on :${p.port}` : ''}${link?.url ? ` → ${link.url}` : ''}`);
     return { ...p, started: true, server: { slug: reg.slug, pid: reg.pid || null }, link: link?.url ? { url: link.url + (p.open || ''), kind: link.kind || p.share } : link?.error ? { error: link.error } : null, addedToGitignore: ignored };
 }
