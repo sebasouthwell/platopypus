@@ -305,6 +305,14 @@ const server = http.createServer(async (req, res) => {
                 const b = await readJson(req, 4096);
                 const pr = await caller(b.pid);
                 const env = await vault.envFor(pr.cwd, { project: 'exact' });
+                if (Array.isArray(b.names)) {   // vault run NAME[,NAME] -- cmd: just these, for this command
+                    const want = b.names.map(String).slice(0, 30);
+                    const gone = want.filter(n => !(n in env));
+                    if (gone.length) return send(res, 404, { error: `not available here: ${gone.join(', ')} (vault ls; project values need the project's main folder)` });
+                    log('vault', `"${session.agent}" ran ${String(b.cmd || '').slice(0, 200)} with ${want.join(', ')} from ${pr.cwd}`);
+                    audit.record('credential', 'agent-run', { actor: `shell "${session.agent}"`, via: 'vault run', cwd: pr.cwd, names: want, cmd: String(b.cmd || '').slice(0, 2000) });
+                    return send(res, 200, { env: Object.fromEntries(want.map(n => [n, env[n]])) });
+                }
                 if (b.name) {
                     if (!(b.name in env)) { const it = vault.list().find(i => i.fields.some(f => f.env === b.name)); return send(res, 404, { error: it ? `${b.name} belongs to project ${it.scope}; run vault get from that project's main folder (/${it.scope}), not elsewhere or a sub-folder` : `no variable named ${b.name} (try: vault ls)` }); }
                     log('vault', `"${session.agent}" read ${b.name} from ${pr.cwd}`);
@@ -592,7 +600,7 @@ const server = http.createServer(async (req, res) => {
         // Audit: escalations, credential use, activity (never values or output)
         if (p === '/api/audit' && method === 'GET') {
             const type = url.searchParams.get('type'), project = url.searchParams.get('project');
-            const r = audit.query({ type: ['elevate', 'credential', 'activity'].includes(type) ? type : null, project: project === null ? null : project, limit: url.searchParams.get('limit') });
+            const r = audit.query({ type: ['elevate', 'credential', 'activity'].includes(type) ? type : null, project: project === null ? null : project, limit: url.searchParams.get('limit'), days: url.searchParams.get('days') });
             if (!type || type === 'activity') r.commits = await audit.commits({ project: project === null ? null : project, days: Number(url.searchParams.get('days')) || 14 });
             return send(res, 200, r);
         }

@@ -161,7 +161,7 @@
       <h1>Vault</h1>
       <button class="icon-btn accent" id="vault-new" aria-label="Add token"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button>
     </header>
-    <p class="note">Tokens are encrypted on the box. General tokens reach every shell; project tokens only reach shells started inside that folder. Claude is told to use them from here instead of asking you.</p>
+    <p class="note">Tokens are encrypted on the box. Agents fetch them per command with <span class="mono">vault run</span> or <span class="mono">vault get</span>, and each use is in the audit log. General tokens work from any folder; project tokens only from that project's main folder. A general token can also be put into every new shell (its switch below), but uses after that are not logged.</p>
     <div id="vault-list" class="list"></div>
     <p id="vault-empty" class="empty" hidden>No tokens yet. Add an API key or OAuth token and label what it is for.</p>
   </section>
@@ -198,7 +198,7 @@
     <div class="audit-projects" id="audit-projects"></div>
     <div id="audit-summary"></div>
     <div id="audit-list"></div>
-    <p class="note gap">Kept on the box in <span class="mono">~/.porthole/audit.jsonl</span>: who asked, from which project, commands as asked and the names of Vault values. Never secret values or command output. Agents cannot read it. Commits come from each project's git history (last 14 days).</p>
+    <p class="note gap">Kept on the box in <span class="mono">~/.porthole/audit.jsonl</span>: who asked, from which project, commands as asked and the names of Vault values. Never secret values or command output. Agents cannot read it. Commits come from each project's git history (last 14 days). The page shows 30 days; the box keeps 90.</p>
   </section>
 
   <section id="page-agents" class="tab page" hidden>

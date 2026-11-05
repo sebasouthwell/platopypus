@@ -2825,7 +2825,7 @@ async function loadVault() {
     const items = await api('/api/vault');
     $('#vault-empty').hidden = items.length > 0;
     const groups = new Map();
-    for (const t of items) { const k = t.scope === 'general' ? 'General · every shell' : `Project · ${t.scope}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+    for (const t of items) { const k = t.scope === 'general' ? 'General · any folder, on request' : `Project · ${t.scope}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
     $('#vault-list').innerHTML = '';
     $('#vault-list').insertAdjacentHTML('afterend', '');
     const host = $('#vault-list').parentElement;
@@ -2833,7 +2833,7 @@ async function loadVault() {
     for (const [label, list] of groups) {
         $('#vault-list').insertAdjacentHTML('beforebegin', `<div class="vault-group"><h2 class="section">${esc(label)}</h2><div class="list">${list.map(t => `
             <button class="row" data-id="${t.id}"><span class="ico ${t.oauth ? (t.oauth.connected ? 'kelp' : 'flare') : 'brass'}">${icon(t.oauth ? 'link' : 'key')}</span>
-              <div class="main"><div class="title">${esc(t.name)}<span class="tag brass">${esc(t.title || t.provider)}</span>${t.oauth ? `<span class="tag ${t.oauth.connected ? '' : 'dim'}">${t.oauth.connected ? 'connected' : 'not connected'}</span>` : ''}${t.incomplete?.length ? `<span class="tag" style="color:var(--flare)">incomplete</span>` : ''}</div>
+              <div class="main"><div class="title">${esc(t.name)}<span class="tag brass">${esc(t.title || t.provider)}</span>${t.oauth ? `<span class="tag ${t.oauth.connected ? '' : 'dim'}">${t.oauth.connected ? 'connected' : 'not connected'}</span>` : ''}${t.incomplete?.length ? `<span class="tag" style="color:var(--flare)">incomplete</span>` : ''}${t.inShells ? '<span class="tag" style="color:var(--flare)">in new shells</span>' : ''}</div>
                 <div class="sub mono">${esc(t.fields.filter(f => !f.missing).map(f => f.env).join(' · '))}${t.incomplete?.length ? ` · missing ${esc(t.incomplete.join(', '))}` : ''}</div></div>
               ${icon('more_h', 'i chev')}</button>`).join('')}</div></div>`);
     }
@@ -2844,14 +2844,22 @@ async function loadVault() {
 
 function vaultMenu(t) {
     const { panel, close } = openDialog(`<h2>${esc(t.name)}</h2>
-        <p class="muted">${esc(t.title || t.provider)} · ${esc(t.style)} · ${t.scope === 'general' ? 'every shell' : 'shells in ' + esc(t.scope)}${t.oauth?.expiresAt ? `<br>token ${t.oauth.expiresAt > Date.now() ? 'expires in ' + fmtIn(t.oauth.expiresAt) : 'expired (refreshes on use)'}` : ''}${t.notes ? '<br>' + esc(t.notes) : ''}</p>
+        <p class="muted">${esc(t.title || t.provider)} · ${esc(t.style)} · ${t.scope === 'general' ? 'any folder' : 'only from ' + esc(t.scope)}${t.oauth?.expiresAt ? `<br>token ${t.oauth.expiresAt > Date.now() ? 'expires in ' + fmtIn(t.oauth.expiresAt) : 'expired (refreshes on use)'}` : ''}${t.notes ? '<br>' + esc(t.notes) : ''}</p>
         <div class="list" style="margin-bottom:10px">${t.fields.map(f => `<div class="row plain" style="min-height:40px;padding:8px 10px"><div class="main"><div class="title mono" style="font-size:13px">${esc(f.env)}</div><div class="sub">${esc(f.label)} · ${f.secret ? esc(f.hint) : esc(f.hint || '—')}</div></div><button class="pill" data-rv="${esc(f.name)}" style="padding:6px 10px">${icon('copy')}</button></div>`).join('')}</div>
+        ${t.scope === 'general' ? `<div class="list" style="margin-bottom:10px"><div class="row"><div class="main"><div class="title">Put into new shells</div><div class="sub" style="white-space:normal">${t.inShells ? 'On: every new shell starts with it in its environment. Uses after that are not logged.' : 'Off: agents fetch it when needed with <span class="mono">vault run</span> or <span class="mono">vault get</span>, and each use is in the audit log.'}</div></div><button class="switch ${t.inShells ? 'on' : ''}" data-inshells role="switch" aria-checked="${!!t.inShells}" aria-label="Put into new shells"><span></span></button></div></div>` : ''}
         <div class="menu">
           ${t.oauth ? `<button data-a="connect">${icon('link')}${t.oauth.connected ? 'Reconnect account' : 'Connect account'}</button>${t.oauth.connected ? `<button data-a="refresh">${icon('refresh')}Refresh token now</button>` : ''}` : ''}
           <button data-a="reveal">${icon('eye')}Reveal all</button>
           <button data-a="edit">${icon('edit')}Edit values / scope</button>
           <button data-a="remove" class="danger">${icon('trash')}Delete</button>
         </div>`);
+    const sw = $('[data-inshells]', panel);
+    if (sw) sw.onclick = async () => {
+        const on = !t.inShells;
+        if (on && !(await confirmDialog({ title: `Put ${t.name} into every new shell?`, text: 'Each new shell, and every agent in it, will have this value in its environment from the start. Porthole logs that once, when the shell starts; uses after that cannot be seen.', action: 'Put into new shells', danger: true }))) return vaultMenu(t);
+        try { await api(`/api/vault/${t.id}`, { method: 'PUT', body: { inShells: on } }); t.inShells = on; toast(on ? 'New shells will get it' : 'New shells will not get it; running shells keep theirs until they end'); loadVault(); vaultMenu(t); }
+        catch (ex) { toast(ex.message, true); }
+    };
     $$('[data-rv]', panel).forEach(b => b.onclick = async () => { try { const r = await api(`/api/vault/${t.id}/reveal`, { method: 'POST', body: { field: b.dataset.rv } }); await copyText(Object.values(r.values)[0], 'Copied'); } catch (ex) { toast(ex.message, true); } });
     $$('[data-a]', panel).forEach(b => b.onclick = async () => {
         const a = b.dataset.a; close();
@@ -3044,7 +3052,8 @@ const AUDIT_TITLES = {
         'root-approved': e => `Allowed to run as root: ${e.what}`, 'root-revoked': e => `Root revoked: ${e.what}`, 'root-start': e => `Started as root: ${e.what}`,
     },
     credential: {
-        'agent-read': e => `Agent read ${auditNames(e)}`, 'shell-export': e => `Put into a new shell: ${auditNames(e)}`,
+        'agent-read': e => `Agent read ${auditNames(e)}`, 'agent-run': e => `Agent ran a command with ${auditNames(e)}`,
+        'root-read': e => `Root shell read ${auditNames(e)}`, 'root-run': e => `Root shell ran a command with ${auditNames(e)}`, 'shell-export': e => `Put into a new shell: ${auditNames(e)}`,
         'service-start': e => `Given to ${e.what}: ${auditNames(e)}`, portholerun: e => `Given to .portholerun ${e.what}: ${auditNames(e)}`,
         'vault-revealed': e => `Revealed on the phone: ${e.what}`, 'service-revealed': e => `Revealed on the phone: ${e.what}`,
         shared: e => `Shared with you: ${e.what}`, 'shared-revealed': e => `Opened shared card: ${e.what}`,
@@ -3111,7 +3120,7 @@ async function loadAudit() {
         const d = day(e.at);
         if (d !== cur) { if (cur) html += '</div>'; cur = d; html += `<h2 class="section">${esc(d)}</h2><div class="list">`; }
         const [ic, tone] = auditIcon(e);
-        html += `<button class="row" data-ae="${n}"><span class="ico ${tone}">${icon(ic)}</span><div class="main"><div class="title audit-t">${esc(auditTitle(e))}${auditStatus(e)}</div><div class="sub">${esc(auditWho(e))}${e.project && auditState.project === null ? ` · ${esc(e.project)}` : ''} · ${new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div></div>${icon('chevron', 'i chev')}</button>`;
+        html += `<button class="row" data-ae="${n}"><span class="ico ${tone}">${icon(ic)}</span><div class="main"><div class="title audit-t">${esc(auditTitle(e))}${auditStatus(e)}${e.count > 1 ? `<span class="tag dim">×${e.count}</span>` : ''}</div><div class="sub">${esc(auditWho(e))}${e.project && auditState.project === null ? ` · ${esc(e.project)}` : ''} · ${new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div></div>${icon('chevron', 'i chev')}</button>`;
     });
     $('#audit-list').innerHTML = html + '</div>';
     $$('#audit-list [data-ae]').forEach(b => b.onclick = () => auditDetail(events[Number(b.dataset.ae)]));
@@ -3119,7 +3128,7 @@ async function loadAudit() {
 function auditDetail(e) {
     const rows = [
         ['When', new Date(e.at).toLocaleString()], ['Who', auditWho(e)], ['Through', e.via], ['Project', e.project || (e.type === 'activity' && e.action === 'commit' ? null : 'the box (not in a project)')],
-        ['Folder', e.cwd], ['Reason', e.reason], ['Decided by', e.decidedBy], ['Exit code', e.code ?? null], ['Minutes', e.minutes], ['Agent', e.agent],
+        ['Folder', e.cwd], ['Repeated', e.count > 1 ? `${e.count} times, last at ${new Date(e.lastAt).toLocaleTimeString()}` : null], ['Reason', e.reason], ['Decided by', e.decidedBy], ['Exit code', e.code ?? null], ['Minutes', e.minutes], ['Agent', e.agent],
     ].filter(([, v]) => v !== undefined && v !== null && v !== '');
     openDialog(`<h2>${icon(auditIcon(e)[0])}${esc(auditTitle(e))}</h2>
         <div class="list">${rows.map(([k, v]) => `<div class="row"><div class="main"><div class="sub">${esc(k)}</div><div class="title" style="font-size:14.5px;white-space:normal">${esc(String(v))}</div></div></div>`).join('')}</div>

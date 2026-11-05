@@ -18,12 +18,20 @@ API keys and OAuth tokens live in the Porthole vault. Before asking the user for
 1. Run `vault ls` to see what exists: one line per environment variable (e.g. `SPOTIFY_CLIENT_ID`,
    `SPOTIFY_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`, `PG_URL`), with service, auth style
    and scope. It never prints values.
-2. General-scope credentials are already in this shell's environment. Project-scope ones are never exported:
-   `vault get NAME` returns them only when run from that project's main folder.
-3. If a variable is listed but not in the environment, read it with `vault get ENV_NAME` or load all
-   applicable ones with `eval "$(vault env)"`. OAuth2 access tokens are refreshed automatically by `vault get`.
+2. Values are not in your shell's environment (unless the user chose to put one there). Fetch them for the
+   command that needs them, so they never sit in the shell:
+
+       vault run OPENAI_API_KEY -- python3 scripts/summarise.py
+       vault run TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID -- node notify.js "deploy finished"
+
+   `vault get NAME` prints one value, for the rare case a command cannot read the environment. Avoid
+   `eval "$(vault env)"`: it puts every value into the shell at once. Project values are only given out from
+   that project's main folder. OAuth2 access tokens are refreshed automatically.
+3. Every `vault run` and `vault get` is in the user's audit log with the command it was for: name the real
+   command, one per call, rather than starting a sub-shell with the values.
 4. Build on these variables instead of hard-coding or re-asking: a new project that needs Telegram should
-   read `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from the environment.
+   read `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from its environment, and its README or `.portholerun`
+   should start it with `vault run` or list them under `needs:`.
 
 Never echo, log or commit a token value. Pass it through environment variables or files with 0600
 permissions. If the vault has nothing for a provider, tell the user to add it in the Vault tab rather
@@ -93,13 +101,13 @@ one at a time, and say why. Exit code 126 means it was denied or not answered: d
 needed instead. Never try to get root another way. Porthole's own files, other users' homes and the box token are off
 limits; the box CLIs (vault, credshare, svc, tunnel, live, project) work as usual.
 
-Every `elevate`, `vault get`, `credshare`, server and link you start is kept in an audit log the user reviews, filed
+Every `elevate`, `vault run`, `vault get`, `credshare`, server and link you start is kept in an audit log the user reviews, filed
 under your project with the command as you wrote it. Put the real reason in `--reason`.
 
 ## Project credentials
 
-General Vault entries are in every shell's environment. Project entries are not: read them with `vault get NAME`
-from the project's main folder (not a sub-folder, not elsewhere). If it refuses, `cd` to the project root first;
+Project entries are given out only from the project's main folder (not a sub-folder, not elsewhere): use
+`vault run NAME -- command` or `vault get NAME` there. If it refuses, `cd` to the project root first;
 do not look for the value any other way.
 
 ## Long-running servers

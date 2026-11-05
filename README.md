@@ -2,7 +2,7 @@
 
 A phone-first web console for your own Linux dev box. Open it on a phone and you get real terminals running
 AI coding agents, a file browser with upload and editing, one-tap public links to anything that listens on a
-port, Docker and VS Code on demand, Git and GitHub, and an encrypted credential vault that feeds every shell.
+port, Docker and VS Code on demand, Git and GitHub, and an encrypted credential vault that agents draw from per command, with every use logged.
 It is a single Node process with a handful of dependencies, designed for one owner and a box that can be
 rebuilt at any time.
 
@@ -54,8 +54,8 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
 - **Agents without root** — start an agent as the unprivileged agent user (New shell → Run as). It works in its project
   and asks for root one command at a time with `elevate`; the phone shows a red banner with Allow once, Allow this
   shell for 30 minutes, or Deny. Its token only reaches the box CLIs' routes. Migration plan: docs/AGENT-USER.md.
-- **Project credentials** — general Vault entries reach every shell; project entries are only given out by
-  `vault get` run from that project's main folder.
+- **Credentials** — fetched per command (`vault run NAME -- cmd`, `vault get NAME`), each use in the audit log;
+  project entries only from that project's main folder. A general entry can be put into every new shell by choice.
 - **Vault helpers** — pick the project scope from an inline folder browser, save a credential half-filled and finish
   it later (marked incomplete), paste a `.env` block or JSON to fill fields, and convert formats: Telegram token →
   bot ID and chat ID lookup, connection URL ↔ host/port/user/password/database, JSON key file check, SMTP presets,
@@ -95,7 +95,7 @@ Porthole is root-level control of a box, so every layer assumes the one before i
 | Vault | AES-256-GCM, key file 0600, values never listed, reveal is explicit and logged, reserved env names blocked, project scope only reaches shells in that folder. |
 | Docker | Arguments validated and exec'd without a shell; containers bind to loopback. |
 | Process | Runs as root by default (`PORTHOLE_USER=ubuntu` for a confined install). Loopback-only token sign-in remains for the box's own `vault`/`tunnel` CLIs; requests through the reverse proxy can never use it. |
-| Audit | Every auth event and every shell, tunnel, vault, docker, git and editor action goes to stdout → journald. |
+| Audit | Every auth event and every shell, tunnel, vault, docker, git and editor action goes to stdout → journald. Root use, credential use and activity also go to a browsable audit log (More → Audit log), one file per day, kept 90 days. |
 
 Every route is listed with its gate in `server/server.js`; the endpoint audit is summarised at the bottom of
 this file.

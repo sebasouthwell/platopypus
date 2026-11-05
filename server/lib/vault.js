@@ -88,7 +88,7 @@ function publicView(raw) {
     try { missing = (fieldsFor(it.style) || []).filter(d => !d.derived && !d.optional && !(d.name in (it.fields || {}))); } catch { /* legacy style */ }
     return {
         id: it.id, name: it.name, provider: it.provider, title: it.title || it.name, style: it.style, prefix: it.prefix,
-        scope: it.scope, notes: it.notes || '', created: it.created, updated: it.updated, lastUsed: it.lastUsed || null,
+        scope: it.scope, notes: it.notes || '', inShells: it.scope === 'general' && !!it.inShells, created: it.created, updated: it.updated, lastUsed: it.lastUsed || null,
         fields: [
             ...fieldNames.map(f => ({ name: f, env: envNameFor(it, f), label: it.labels?.[f] || f, secret: (it.secretFields || []).includes(f), hint: (it.secretFields || []).includes(f) ? hintOf(safeDecrypt(it.fields[f])) : safeDecrypt(it.fields[f]) })),
             ...missing.map(d => ({ name: d.name, env: envNameFor(it, d.name), label: d.label, secret: !!d.secret, hint: '', missing: true })),
@@ -167,7 +167,7 @@ export function create(body) {
         fields.scopes = encrypt(oauth.scopes); labels.scopes = 'Scopes';
     }
     const db = load();
-    const item = { id: crypto.randomBytes(8).toString('hex'), provider: svc.key, title: svc.title, style, name, prefix, scope, notes: String(body.notes || '').slice(0, 500), fields, secretFields, labels, envMap, oauth, created: Date.now(), updated: Date.now() };
+    const item = { id: crypto.randomBytes(8).toString('hex'), provider: svc.key, title: svc.title, style, name, prefix, scope, inShells: scope === 'general' && !!body.inShells, notes: String(body.notes || '').slice(0, 500), fields, secretFields, labels, envMap, oauth, created: Date.now(), updated: Date.now() };
     // Avoid two entries exporting the same variable into the same scope.
     for (const existing of db.items.map(normalise)) {
         if (existing.scope !== scope) continue;
@@ -203,6 +203,7 @@ export function update(id, body) {
     if (body.name) it.name = String(body.name).trim().slice(0, 80);
     if (body.notes !== undefined) it.notes = String(body.notes).slice(0, 500);
     if (body.scope !== undefined) it.scope = validateScope(body.scope);
+    if (body.inShells !== undefined) it.inShells = !!body.inShells && it.scope === 'general';
     if (body.prefix && it.prefix) { const p = toEnv(body.prefix); if (!ENV_RE.test(p) || RESERVED.has(p)) throw httpError(400, 'Bad prefix.'); it.prefix = p; }
     if (body.envName && it.envMap?.value) { if (!ENV_RE.test(body.envName) || RESERVED.has(body.envName)) throw httpError(400, 'Bad environment name.'); it.envMap.value = body.envName; }
     if (body.fields && typeof body.fields === 'object') {
@@ -250,9 +251,11 @@ export async function reveal(id, who = '', field = null) {
 
 // Environment variables for a shell starting in `cwd` (absolute): general + matching project scope.
 // project: 'exact' → general + the project whose folder is exactly `cwd` (vault get, live services);
-//          'none'  → general only (exported into every new shell).
+//          'none'  → general only.
+// shells: only the general items marked "put into new shells" (1.21.0). Everything else is fetched per use with
+// `vault get` / `vault run`, so each use is in the audit log; a value sitting in a shell's environment is not.
 // A sub-folder of a project never qualifies: project credentials are read deliberately from the project's main folder.
-export async function envFor(cwd, { project = 'exact' } = {}) {
+export async function envFor(cwd, { project = 'exact', shells = false } = {}) {
     const rel = path.relative(config.root, cwd).split(path.sep).join('/');
     const db = load();
     const env = {};
@@ -260,7 +263,7 @@ export async function envFor(cwd, { project = 'exact' } = {}) {
     for (const raw of db.items) {
         const it = normalise(raw);
         const applies = it.scope === 'general' || (project === 'exact' && rel === it.scope);
-        if (!applies) continue;
+        if (!applies || (shells && !(it.scope === 'general' && it.inShells))) continue;
         try { if (await refreshIfNeeded(it, db, false)) dirty = true; } catch (e) { log('vault', `refresh failed for ${it.provider} "${it.name}": ${e.message}`); }
         for (const f of Object.keys(it.fields)) { try { env[envNameFor(it, f)] = decrypt(it.fields[f]); } catch { /* corrupt entry */ } }
     }

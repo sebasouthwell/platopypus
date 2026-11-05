@@ -145,8 +145,9 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         const a = runAs === 'agent' ? agentUser.info() : null;
         trustFolder(kind === 'remote-control' ? 'claude' : agent, dir, { home: a ? a.home : config.home, configDir: agentEnv.CLAUDE_CONFIG_DIR || null, owner: a ? { uid: a.uid, gid: a.gid } : null });
     }
-    // General-scope vault tokens become environment variables; project credentials: `vault get` from the project folder.
-    const secrets = await envFor(dir, { project: 'none' });
+    // Only general Vault values marked "put into new shells" become environment variables. The rest are fetched when
+    // needed (`vault run NAME -- cmd`, `vault get NAME`), and each fetch is logged with the command it was for.
+    const secrets = await envFor(dir, { project: 'none', shells: true });
     await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...sessionEnv, ...shellEnv });
     if (Object.keys(secrets).length) { log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`); record('credential', 'shell-export', { actor: `shell "${name}"`, via: `${kind}${runAs === 'agent' ? ' (agent user)' : ''}`, cwd: dir, names: Object.keys(secrets) }); }
     if (agent === 'antigravity' && agentEnv.PORTHOLE_FIRST_PROMPT) {

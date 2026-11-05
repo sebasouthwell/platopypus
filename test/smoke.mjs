@@ -503,6 +503,8 @@ if (r.body.available) {
     check('vault get works from the project main folder', out.includes('V=ag-777'), out.slice(-120));
     out = await typeIn('cd sub && vault get SMOKE_AGENT_KEY; echo RC=$?; cd ..', 'a4');
     check('vault get refuses from a sub-folder (real cwd)', out.includes('main folder') && out.includes('RC=1'), out.slice(-160));
+    out = await typeIn('vault run SMOKE_AGENT_KEY -- printenv SMOKE_AGENT_KEY | sed "s/^/RUN=/"; echo "SHELL_HAS=${SMOKE_AGENT_KEY:-none}"', 'a3r');
+    check('vault run works in an agent-user shell and leaves the shell without the value', out.includes('RUN=ag-777') && out.includes('SHELL_HAS=none'), out.slice(-160));
     out = await typeIn('curl -s -o /dev/null -w "files=%{http_code}" -c /tmp/aj -H "Content-Type: application/json" -H "X-Porthole: 1" -d "{\\"token\\":\\"$PORTHOLE_TOKEN\\"}" http://127.0.0.1:7331/api/login/token; curl -s -o /dev/null -w " %{http_code}" -b /tmp/aj -H "X-Porthole: 1" "http://127.0.0.1:7331/api/files?path=."', 'a5');
     check('shell token session is refused on the files API', /files=200 403/.test(out), out.slice(-80));
     keys('elevate --reason smoke -- id -u > /tmp/elev-out 2>&1; echo ELEV-RC=$? >> /tmp/elev-out');
@@ -525,6 +527,8 @@ if (r.body.available) {
         const ev = au.events || [];
         const req = ev.filter(e => e.type === 'elevate' && e.action === 'request');
         check('root requests are filed under the project, one entry each, with how they ended', req.length === 2 && req.some(e => e.status === 'done' && e.code === 0 && /id -u/.test(e.cmd) && e.reason === 'smoke' && e.actor === 'shell "smoke-agent"' && e.decidedBy === 'phone') && req.some(e => e.status === 'denied'), JSON.stringify(req).slice(0, 400));
+        const rr = ev.find(e => e.type === 'credential' && e.action === 'agent-run');
+        check('an agent\'s vault run is logged with the command it was for', rr?.names?.includes('SMOKE_AGENT_KEY') && /printenv SMOKE_AGENT_KEY/.test(rr.cmd || ''), JSON.stringify(rr));
         const rd = ev.find(e => e.type === 'credential' && e.action === 'agent-read');
         check('an agent reading a Vault value is recorded by name, never the value', rd?.names?.includes('SMOKE_AGENT_KEY') && !JSON.stringify(au).includes('ag-777'), JSON.stringify(rd));
         const srv = ev.find(e => e.type === 'activity' && e.action === 'server-run');
@@ -692,14 +696,21 @@ const envOut = await new Promise((resolve, reject) => {
     const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws/shell/smoke-vault?cols=120&rows=30`, { headers: { cookie, origin: BASE } });
     let buf = '';
     const t = setTimeout(() => { ws.close(); resolve(buf); }, 12000);
-    ws.on('open', () => setTimeout(() => ws.send(JSON.stringify({ type: 'input', data: `echo "G=$SMOKE_GENERAL P=$SMOKE_PROJECT"; vault ls; vault get SMOKE_PROJECT; echo; echo END-$((40+2))-${marker}\r` })), 2500));
+    ws.on('open', () => setTimeout(() => ws.send(JSON.stringify({ type: 'input', data: `echo "G=$SMOKE_GENERAL P=$SMOKE_PROJECT"; vault ls; vault get SMOKE_PROJECT; echo; vault run SMOKE_GENERAL -- printenv SMOKE_GENERAL | sed 's/^/R=/'; echo END-$((40+2))-${marker}\r` })), 2500));
     // "END-42-…" only appears once the command has actually run (the typed line shows "$((40+2))").
     ws.on('message', (d, isBinary) => { if (isBinary) buf += d.toString('utf8'); if (buf.includes(`END-42-${marker}`)) { clearTimeout(t); ws.close(); resolve(buf); } });
     ws.on('error', reject);
 });
 // tmux redraws can interleave cursor-movement escapes with text, so strip them before matching.
 const plainOut = envOut.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b[()][A-Z0-9]/g, '').replace(/\r/g, '');
-check('general tokens exported, project tokens not (vault get from the project folder instead)', plainOut.includes('G=general-secret-1234 P=') && !plainOut.includes('P={"access"') && plainOut.includes('{"access":"abc"'), plainOut.slice(-300));
+check('new shells get no Vault values by default (fetched per use instead)', /G= P=\s/.test(plainOut) && !plainOut.includes('G=general-secret-1234') && !plainOut.includes('P={"access"') && plainOut.includes('{"access":"abc"'), plainOut.slice(-300));
+check('vault run gives one command just the values it names', plainOut.includes('R=general-secret-1234'), plainOut.slice(-200));
+{
+    const au = (await call('/api/audit?type=credential')).body.events;
+    const run = au.find(e => e.action === 'root-run' && e.names?.includes('SMOKE_GENERAL'));
+    const get = au.find(e => e.action === 'root-read' && e.names?.includes('SMOKE_PROJECT'));
+    check('root shells\' vault run and vault get are logged with the command and the shell', run && /printenv SMOKE_GENERAL/.test(run.cmd) && run.actor === 'shell "smoke-vault"' && get && !JSON.stringify(au).includes('general-secret-1234'), JSON.stringify([run, get]).slice(0, 300));
+}
 { const { execFileSync } = await import('node:child_process'); let refused = false; try { execFileSync('bash', ['-lc', 'mkdir -p /smoke-proj/sub && cd /smoke-proj/sub && vault get SMOKE_PROJECT'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { refused = /main folder/.test(String(e.stderr)); } check('vault get refuses project credentials from a sub-folder', refused); }
 check('vault CLI lists and gets inside shell', /SMOKE_GENERAL\s+smoketest/.test(plainOut) && plainOut.includes('{"access":"abc","refresh":"def"}'), plainOut.slice(-400));
 r = await call(`/api/vault/${projectId}/reveal`, { method: 'POST' });
@@ -710,11 +721,28 @@ r = await call(`/api/vault/${generalId}`, { method: 'DELETE' });
 check('vault delete', r.status === 200);
 await call(`/api/vault/${projectId}`, { method: 'DELETE' });
 
+// 8b1. Audit retention: identical events in a burst merge into one line with a count; days past 90 are dropped.
+{
+    const { execFileSync } = await import('node:child_process');
+    const shx = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'smoketest', name: 'burst', envName: 'SMOKE_BURST', scope: 'general', value: 'b-1' } });
+    const burstId = r.body.id;
+    // One process, so the repeat window applies (each CLI run is its own process; the server merges its own bursts).
+    shx(`cd / && node --input-type=module -e "const a = await import('/opt/porthole/server/lib/audit.js'); for (let i = 0; i < 5; i++) a.record('credential', 'root-read', { actor: 'burst-test', names: ['SMOKE_BURST'], cwd: '/' });"`);
+    const ev = (await call('/api/audit?type=credential')).body.events.filter(e => e.actor === 'burst-test');
+    check('a burst of identical events is one line with a count', ev.length === 1 && ev[0].count === 5, JSON.stringify(ev).slice(0, 200));
+    shx(`mkdir -p /root/.porthole/audit && echo '{"at":1577836800000,"type":"activity","action":"tunnel-start"}' > /root/.porthole/audit/2020-01-01.jsonl`);
+    shx(`cd / && node --input-type=module -e "const a = await import('/opt/porthole/server/lib/audit.js'); a.prune();"`);
+    check('audit days older than the retention window are removed', !shx('ls /root/.porthole/audit').includes('2020-01-01'), shx('ls /root/.porthole/audit'));
+    check('the audit log keeps one file per day', /^\d{4}-\d{2}-\d{2}\.jsonl$/m.test(shx('ls /root/.porthole/audit')));
+    await call(`/api/vault/${burstId}`, { method: 'DELETE' });
+}
+
 // 8b2. Credential catalogue: typed fields, env prefixes, OAuth2 authorize URL.
 r = await call('/api/vault/catalog');
 check('vault catalogue lists services and styles', r.status === 200 && r.body.services.some(s => s.key === 'spotify') && r.body.styles.oauth2 && r.body.services.some(s => s.key === 'telegram-bot'), `services=${r.body.services?.length}`);
 for (const it of (await call('/api/vault')).body) if (['telegram-bot', 'discord-webhook', 'spotify'].includes(it.provider)) await call(`/api/vault/${it.id}`, { method: 'DELETE' });
-r = await call('/api/vault', { method: 'POST', body: { provider: 'telegram-bot', style: 'botChat', name: 'My bot', prefix: 'TELEGRAM', scope: 'general', fields: { botToken: '123:abc', chatId: '42' } } });
+r = await call('/api/vault', { method: 'POST', body: { provider: 'telegram-bot', style: 'botChat', name: 'My bot', prefix: 'TELEGRAM', scope: 'general', inShells: true, fields: { botToken: '123:abc', chatId: '42' } } });
 check('typed credential (telegram bot) saved with two env vars', r.status === 201 && r.body.fields.map(f => f.env).sort().join(',') === 'TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID', JSON.stringify(r.body.fields));
 const tgId = r.body.id;
 r = await call('/api/vault', { method: 'POST', body: { provider: 'discord-webhook', style: 'webhook', name: 'Alerts', scope: 'general', fields: { url: 'https://discord.com/api/webhooks/1/x' } } });
@@ -740,7 +768,11 @@ const envOut2 = await new Promise((resolve, reject) => {
     ws.on('error', reject);
 });
 const plain2 = envOut2.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '');
-check('typed credentials exported into shell env', plain2.includes('T=123:abc C=42 D=https://discord.com/api/webhooks/1/x S=cid'), plain2.slice(-200));
+check('only values switched to "put into new shells" reach a new shell', /T=123:abc C=42 D= S=\s/.test(plain2), plain2.slice(-200));
+r = await call(`/api/vault/${dcId}`, { method: 'PUT', body: { inShells: true } });
+check('the switch can be turned on for a general value', r.status === 200 && (await call('/api/vault')).body.find(i => i.id === dcId)?.inShells === true);
+r = await call(`/api/vault/${dcId}`, { method: 'PUT', body: { scope: 'smoke-proj' } });
+check('a project value never goes into shells, whatever the switch said', (await call('/api/vault')).body.find(i => i.id === dcId)?.inShells === false);
 await call('/api/shells/smoke-vault2', { method: 'DELETE' });
 for (const id of [tgId, dcId, spId]) await call(`/api/vault/${id}`, { method: 'DELETE' });
 

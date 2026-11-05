@@ -64,7 +64,7 @@ with mode 0600. Formats as of version 1.0:
 | `project-links.json` | upgrade.js | `{ links: [{ from, to, at, level, commit }] }` — "Upgrade repo" relationships between project folders (1.16.0) |
 | `portholerun.json` | portholerun.js | `{ "<run-slug>": { file, hash, at } }` — what each .portholerun server was started from, for restarts (1.18.4) |
 | `quick.json` | quick.js | `{ pins: [{ id, kind, project, key, action, group, item, itemLabel, at }], recents: [… , code] }` — Home shortcuts to live-service commands; matched by label (1.19.0) |
-| `audit.jsonl`, `audit.1.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); rotated at 4 MB, one old file kept (1.20.0) |
+| `audit/YYYY-MM-DD.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); one file per UTC day, kept 90 days, 200 MB cap; `count`/`lastAt` on merged repeats (1.21.0; `audit.jsonl`/`audit.1.jsonl` from 1.20.0 read until they age out) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -378,6 +378,15 @@ phone's Update button. Mechanism:
   git history, marked as an agent's by author or `Co-Authored-By`. Filters by kind and project, with a per-project
   summary. Never stores secret values or command output; agents cannot read it. New state: `audit.jsonl` (+ one
   rotated `audit.1.jsonl`, 4 MB each; additive). New API: `GET /api/audit?type=&project=&days=`.
+
+- **1.21.0** — Secrets are fetched per use. New shells no longer get general Vault values in their environment unless
+  that value's **Put into new shells** switch is on (off for every existing value: this is a behaviour change).
+  Agents use `vault run NAME[,NAME] -- command` (just those values, for one command) or `vault get NAME`; each use is
+  logged with the command it was for, including root shells' `vault get`/`run`/`env` (as a record: root can read
+  the key). Audit retention is by time: one file per UTC day under `audit/`, kept 90 days (`PORTHOLE_AUDIT_DAYS`),
+  a 200 MB cap (`PORTHOLE_AUDIT_MB`) that drops activity before root and credential lines; repeated identical events
+  within 2 minutes become one line with a count. The 1.20.0 files are still read until they age out. Vault items
+  gain `inShells` (additive; absent = off).
 
 ## Release checklist
 

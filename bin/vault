@@ -1,32 +1,56 @@
 #!/usr/bin/env node
 // Read tokens from the Porthole vault from a shell (or from Claude Code running in one).
-//   vault ls                 list what is available (never prints values)
-//   vault get <ENV_NAME>     print one value (for command substitution: TOKEN=$(vault get SPOTIFY_SECRET)).
-//                            Project credentials are only given out when the current folder IS that project's
-//                            main folder (not a sub-folder); general ones work anywhere.
-//   vault env [folder]       print `export NAME=value` lines for the general scope + the folder's project scope
-//                            use as: eval "$(vault env)"
-// Values are decrypted with the key in ~/.porthole/vault.key, which only this user can read.
+//   vault ls                          list what is available (never prints values)
+//   vault run NAME[,NAME] -- cmd ...  run one command with just those values in its environment (preferred: the
+//                                     values never sit in the shell, and the audit log says which command used them)
+//   vault get <ENV_NAME>              print one value (for command substitution: TOKEN=$(vault get SPOTIFY_SECRET)).
+//                                     Project credentials are only given out when the current folder IS that project's
+//                                     main folder (not a sub-folder); general ones work anywhere.
+//   vault env [folder]                print `export NAME=value` lines for the general scope + the folder's project scope
+//                                     use as: eval "$(vault env)"
+// Every get, run and env is written to the audit log (More → Audit log): names and the command, never values.
+// Values are decrypted with the key in ~/.porthole/vault.key, which only root can read.
 
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+
+const USAGE = 'usage: vault ls | vault run NAME[,NAME...] -- command [args...] | vault get <ENV_NAME> | vault env';
+const argv = process.argv.slice(2);
+const [cmd, arg] = argv;
+
+// vault run: names before `--`, the command after it.
+function parseRun() {
+    const i = argv.indexOf('--');
+    const names = (i > 1 ? argv.slice(1, i) : []).flatMap(a => a.split(',')).map(s => s.trim()).filter(Boolean);
+    const command = i >= 0 ? argv.slice(i + 1) : [];
+    if (!names.length || !command.length) { console.error('usage: vault run NAME[,NAME...] -- command [args...]'); process.exit(2); }
+    return { names, command, text: command.map(a => /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`).join(' ') };
+}
+function runWith(values, command) {
+    const r = spawnSync(command[0], command.slice(1), { stdio: 'inherit', env: { ...process.env, ...values } });
+    if (r.error) { console.error(`vault run: ${r.error.message}`); process.exit(127); }
+    process.exit(r.status ?? (r.signal ? 128 : 1));
+}
 
 // Agent-user shells cannot read the vault key: they ask Porthole, which checks the calling process and its folder.
 if (process.env.PORTHOLE_RUN_AS === 'agent' || (process.getuid && process.getuid() !== 0)) {
-    const [cmd, arg] = process.argv.slice(2);
     const port = process.env.PORTHOLE_PORT || '7331';
     const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
     const sq = s => `'${String(s).replace(/'/g, `'\''`)}'`;
+    let runPlan = null;
     try {
         const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token: process.env.PORTHOLE_TOKEN || '' }), signal: AbortSignal.timeout(5000) });
         if (!login.ok) throw new Error('this shell has no Porthole token (start it as an agent-user shell)');
         const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
         const call = async (p, method = 'GET', body) => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...headers, cookie }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15000) }); const d = await r.json().catch(() => ({})); if (!r.ok) { console.error(d.error || `HTTP ${r.status}`); process.exit(1); } return d; };
         if (cmd === 'ls') { for (const i of await call('/api/vault')) for (const f of i.fields) console.log(`${f.env.padEnd(28)}  ${i.provider.padEnd(16)}  ${i.scope === 'general' ? 'general' : 'project:' + i.scope}  ${i.name}`); }
+        else if (cmd === 'run') { const r = parseRun(); runPlan = { values: (await call('/api/agent/vault', 'POST', { names: r.names, cmd: r.text, pid: process.pid })).env, command: r.command }; }
         else if (cmd === 'get') { if (!arg) { console.error('usage: vault get <ENV_NAME>'); process.exit(2); } process.stdout.write(String((await call('/api/agent/vault', 'POST', { name: arg, pid: process.pid })).value)); }
         else if (cmd === 'env') { for (const [k, v] of Object.entries((await call('/api/agent/vault', 'POST', { pid: process.pid })).env)) console.log(`export ${k}=${sq(v)}`); }
-        else { console.log('usage: vault ls | vault get <ENV_NAME> | vault env'); process.exit(cmd ? 2 : 0); }
+        else { console.log(USAGE); process.exit(cmd ? 2 : 0); }
     } catch (e) { console.error(`vault: ${e.message}`); process.exit(1); }
+    if (runPlan) runWith(runPlan.values, runPlan.command);
     process.exit(0);
 }
 
@@ -34,38 +58,51 @@ process.env.PORTHOLE_STATE ||= path.join(process.env.HOME || '/root', '.porthole
 const lib = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'server', 'lib');
 const vault = await import(pathToFileURL(path.join(lib, 'vault.js')).href);
 const { config } = await import(pathToFileURL(path.join(lib, 'config.js')).href);
-
-const [cmd, arg] = process.argv.slice(2);
+// Root shells can read the key themselves, so this is a record, not a gate: it keeps the log honest about root use too.
+const audit = await import(pathToFileURL(path.join(lib, 'audit.js')).href).catch(() => null);
+const actor = process.env.PORTHOLE_SHELL_NAME ? `shell "${process.env.PORTHOLE_SHELL_NAME}"` : 'root, outside Porthole shells';
+const note = (action, ev) => { try { audit?.record('credential', action, { actor, via: 'vault (root)', cwd: process.cwd(), ...ev }); } catch { /* never block */ } };
 
 function sq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+function missing(name) {
+    const all = vault.list().find(i => i.fields.some(f => f.env === name));
+    return all ? `${name} belongs to project ${all.scope}; run vault from that project's main folder (/${all.scope}), not elsewhere or a sub-folder` : `no variable named ${name} (try: vault ls)`;
+}
 
 switch (cmd) {
     case 'ls': {
         const items = vault.list();
         if (!items.length) { console.log('vault is empty — add credentials from the Vault tab in Porthole'); break; }
-        const rows = items.flatMap(i => i.fields.map(f => [f.env, i.provider, i.style, i.scope === 'general' ? 'general' : 'project:' + i.scope, i.name + (i.oauth ? (i.oauth.connected ? ' (connected)' : ' (not connected)') : '')]));
+        const rows = items.flatMap(i => i.fields.map(f => [f.env, i.provider, i.style, i.scope === 'general' ? 'general' : 'project:' + i.scope, i.name + (i.oauth ? (i.oauth.connected ? ' (connected)' : ' (not connected)') : '') + (i.inShells ? ' · in new shells' : '')]));
         const w = Math.max(...rows.map(r => r[0].length));
         for (const r of rows) console.log(`${r[0].padEnd(w)}  ${r[1].padEnd(16)}  ${r[2].padEnd(9)}  ${r[3]}  ${r[4]}`);
         break;
     }
+    case 'run': {
+        const r = parseRun();
+        const env = await vault.envFor(process.cwd());
+        const gone = r.names.filter(n => !(n in env));
+        if (gone.length) { console.error(missing(gone[0])); process.exit(1); }
+        note('root-run', { names: r.names, cmd: r.text });
+        runWith(Object.fromEntries(r.names.map(n => [n, env[n]])), r.command);
+        break;
+    }
     case 'get': {
         if (!arg) { console.error('usage: vault get <ENV_NAME>'); process.exit(2); }
-        const cwd = process.cwd();
-        const env = await vault.envFor(cwd);
-        if (!(arg in env)) {
-            const all = vault.list().find(i => i.fields.some(f => f.env === arg));
-            console.error(all ? `${arg} belongs to project ${all.scope}; run vault get from that project's main folder (/${all.scope}), not elsewhere or a sub-folder` : `no variable named ${arg} (try: vault ls)`);
-            process.exit(1);
-        }
+        const env = await vault.envFor(process.cwd());
+        if (!(arg in env)) { console.error(missing(arg)); process.exit(1); }
+        note('root-read', { names: [arg] });
         process.stdout.write(env[arg]);
         break;
     }
     case 'env': {
         const dir = arg ? path.resolve(config.root, arg) : process.cwd();
-        for (const [k, v] of Object.entries(await vault.envFor(dir))) console.log(`export ${k}=${sq(v)}`);
+        const env = await vault.envFor(dir);
+        note('root-read', { names: Object.keys(env), cwd: dir, what: 'vault env' });
+        for (const [k, v] of Object.entries(env)) console.log(`export ${k}=${sq(v)}`);
         break;
     }
     default:
-        console.log('usage: vault ls | vault get <ENV_NAME> | vault env [folder]');
+        console.log(USAGE);
         process.exit(cmd ? 2 : 0);
 }
