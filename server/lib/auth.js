@@ -12,6 +12,10 @@ import { config } from './config.js';
 import { log } from './log.js';
 import * as totp from './totp.js';
 import { issueTicket, consumeTicket } from './credentials.js';
+import { EventEmitter } from 'node:events';
+
+// 'signin' and 'lockout' events, for alerts. Box CLI token logins are not sign-ins of a person.
+export const events = new EventEmitter();
 
 const COOKIE = 'porthole_session';
 const file = path.join(config.state, 'auth-sessions.json');
@@ -52,7 +56,7 @@ export function recordFailure(req, what) {
     const addr = clientAddr(req);
     const f = failures.get(addr) || { count: 0, until: 0 };
     const next = { count: f.count + 1, until: 0 };
-    if (next.count >= MAX_FAILS) { next.until = Date.now() + LOCK_MS; next.count = 0; log('auth', `LOCKOUT ${addr} for 15 min`); }
+    if (next.count >= MAX_FAILS) { next.until = Date.now() + LOCK_MS; next.count = 0; log('auth', `LOCKOUT ${addr} for 15 min`); events.emit('lockout', { type: 'lockout', addr }); }
     failures.set(addr, next);
     log('auth', `failed ${what} from ${addr}`);
 }
@@ -82,6 +86,7 @@ function newSession(req, how, extra = {}) {
     persist();
     clearFailures(req);
     log('auth', `signed in via ${how} from ${clientAddr(req)}`);
+    if (!extra.agent && how !== 'local token') events.emit('signin', { type: 'signin', how: extra.firstHow || how, addr: clientAddr(req), ua: (req.headers['user-agent'] || '').slice(0, 200) });
     return setCookie(sid);
 }
 

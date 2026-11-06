@@ -101,7 +101,7 @@ one at a time, and say why. Exit code 126 means it was denied or not answered: d
 needed instead. Never try to get root another way. Porthole's own files, other users' homes and the box token are off
 limits; the box CLIs (vault, credshare, svc, tunnel, live, project) work as usual.
 
-Every `elevate`, `vault run`, `vault get`, `credshare`, server and link you start is kept in an audit log the user reviews, filed
+Every `elevate`, `vault run`, `vault get`, `credshare`, server, link and new network destination you use is kept in an audit log the user reviews, filed
 under your project with the command as you wrote it. Put the real reason in `--reason`.
 
 ## Project credentials

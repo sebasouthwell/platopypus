@@ -738,6 +738,83 @@ await call(`/api/vault/${projectId}`, { method: 'DELETE' });
     await call(`/api/vault/${burstId}`, { method: 'DELETE' });
 }
 
+// 8b3. Alerts: a general Telegram bot from the Vault; messages go to a stand-in Bot API here.
+{
+    const http = await import('node:http');
+    const { execFile } = await import('node:child_process');
+    const got = [];
+    const tgMock = http.createServer((q, res) => {
+        let b = ''; q.on('data', d => b += d); q.on('end', () => {
+            const m = q.url.match(/^\/bot([^/]+)\/(\w+)/) || [];
+            if (m[2] === 'sendMessage') got.push({ token: m[1], ...JSON.parse(b || '{}') });
+            const result = m[2] === 'getUpdates' ? [{ update_id: 1, message: { chat: { id: 4242, type: 'private', first_name: 'Sam' } } }] : m[2] === 'getMe' ? { id: 1, username: 'smoke_bot' } : {};
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, result }));
+        });
+    });
+    await new Promise(ok => tgMock.listen(7398, '127.0.0.1', ok));
+    // A separate Porthole process that sends through the stand-in (the server itself talks to the real Bot API).
+    const viaMock = code => new Promise((ok, no) => execFile('node', ['--input-type=module', '-e', `const a = await import('/opt/porthole/server/lib/alerts.js'); ${code}`], { cwd: '/', env: { ...process.env, PORTHOLE_TELEGRAM_API: 'http://127.0.0.1:7398' }, timeout: 20000 }, (e, out, err) => e ? no(new Error(err || e.message)) : ok(out)));
+
+    r = await call('/api/alerts');
+    check('alerts start off, with the important kinds pre-selected', r.status === 200 && r.body.ready === false && r.body.on.root && r.body.on.signin && !r.body.on.commit, JSON.stringify(r.body).slice(0, 200));
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'telegram-bot', style: 'botChat', name: 'Alerts bot', prefix: 'ALERTBOT', scope: 'general', fields: { botToken: '123456:smoke-token-abcdefghijklmnopqrstuvwxyz', chatId: '42' } } });
+    const botId = r.body.id;
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'telegram-bot', style: 'botChat', name: 'Project bot', prefix: 'PROJBOT', scope: 'smoke-proj', fields: { botToken: '654321:smoke-token-abcdefghijklmnopqrstuvwxyz' } } });
+    const projBotId = r.body.id;
+    r = await call('/api/alerts');
+    check('only general Telegram bots are offered', r.body.bots.some(b => b.id === botId) && !r.body.bots.some(b => b.id === projBotId), JSON.stringify(r.body.bots));
+    r = await call('/api/alerts', { method: 'PUT', body: { itemId: projBotId } });
+    check('a project-scoped bot cannot be picked', r.status === 400);
+    r = await call('/api/alerts', { method: 'PUT', body: { itemId: botId } });
+    check('picking a bot with a chat saved makes alerts ready', r.status === 200 && r.body.ready && r.body.botChatId === '42', JSON.stringify(r.body).slice(0, 200));
+    r = await call('/api/alerts', { method: 'PUT', body: { chatId: 'not a chat' } });
+    check('a bad chat ID is refused', r.status === 400);
+    check('the bot token is never in the alerts settings', !JSON.stringify((await call('/api/alerts')).body).includes('smoke-token'));
+    const chats = JSON.parse(await viaMock(`console.log(JSON.stringify(await a.chats(${JSON.stringify(botId)})));`));
+    check('chats the bot has seen are listed for picking', chats.bot === '@smoke_bot' && chats.chats[0]?.id === '4242', JSON.stringify(chats));
+    r = await call('/api/alerts', { method: 'PUT', body: { chatId: '4242', on: { commit: true } } });
+    check('a chat and the kinds can be chosen', r.body.chatId === '4242' && r.body.on.commit === true);
+    await viaMock(`a.fromAudit({ type: 'elevate', action: 'request', cmd: 'apt-get install -y jq', reason: 'need jq', actor: 'shell "smoke-agent"', project: 'smoke-agent' }); a.fromAudit({ type: 'elevate', action: 'request', cmd: 'id', actor: 'x', auto: true }); a.fromAuth({ type: 'lockout', addr: '203.0.113.9' }); await new Promise(r => setTimeout(r, 2600));`);
+    const root = got.find(g => /Root request/.test(g.text));
+    check('a root request is sent with the project and the command, to the chosen chat with the Vault token', root && root.chat_id === '4242' && root.token.startsWith('123456:smoke') && /smoke-agent/.test(root.text) && /apt-get install -y jq/.test(root.text) && /need jq/.test(root.text), JSON.stringify(got).slice(0, 400));
+    check('requests run under a standing grant are not sent', got.filter(g => /Root request/.test(g.text)).length === 1);
+    check('lockouts are sent', got.some(g => /locked/.test(g.text) && /203\.0\.113\.9/.test(g.text)));
+    got.length = 0;
+    await viaMock(`const fake = alive => ({ list: async () => [{ slug: 'smoke-x', name: 'smoke-x', port: 8199, alive }, { slug: 'smoke-y', name: 'smoke-y', alive, stoppedAt: alive ? 0 : Date.now() + 1000 }] }); await a.checkServers(fake(true)); await a.checkServers(fake(true)); await a.checkServers(fake(false)); await new Promise(r => setTimeout(r, 1800));`);
+    check('a server that stops by itself is sent; one stopped on purpose is not', got.length === 1 && /smoke-x/.test(got[0].text) && /8199/.test(got[0].text), JSON.stringify(got).slice(0, 300));
+    got.length = 0;
+    r = await call('/api/alerts', { method: 'PUT', body: { pauseMinutes: 60 } });
+    await viaMock(`a.fromAuth({ type: 'signin', how: 'password', addr: '198.51.100.1' }); await new Promise(r => setTimeout(r, 1500));`);
+    check('nothing is sent while paused', r.body.pausedUntil > Date.now() && got.length === 0, JSON.stringify(got));
+    r = await call('/api/alerts', { method: 'PUT', body: { pauseMinutes: 0, itemId: null } });
+    check('alerts can be resumed and turned off', r.body.pausedUntil === null && r.body.ready === false);
+    const al = (await call('/api/audit?type=activity')).body.events.find(e => e.action === 'alerts-changed');
+    check('changing alerts is in the audit log', !!al, JSON.stringify(al));
+    await call(`/api/vault/${botId}`, { method: 'DELETE' }); await call(`/api/vault/${projBotId}`, { method: 'DELETE' });
+    tgMock.close();
+}
+
+// 8b4. Network egress: kernel log lines from the agent user, named from the resolver's answers.
+{
+    const { execFileSync } = await import('node:child_process');
+    const shx = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    r = await call('/api/egress');
+    check('the egress log says whether it is recording and why', r.status === 200 && typeof r.body.status?.on === 'boolean' && r.body.status.detail, JSON.stringify(r.body.status));
+    const uid = shx('id -u agent').trim();
+    const dns = JSON.stringify({ state: 'success', question: [{ class: 1, type: 1, name: 'smoke-egress.test' }], answer: [{ rr: { key: { class: 1, type: 1, name: 'smoke-egress.test' }, address: [203, 0, 113, 77] } }] });
+    const kline = `PH-EGRESS IN= OUT=eth0 SRC=172.17.0.2 DST=203.0.113.77 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF PROTO=TCP SPT=45555 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0 UID=${uid} GID=${uid}`;
+    const k6 = `PH-EGRESS IN= OUT=eth0 SRC=fd00:0000:0000:0000:0000:0000:0000:0002 DST=2001:0db8:0000:0000:0000:0000:0000:0077 LEN=80 PROTO=TCP SPT=45556 DPT=443 UID=${uid} GID=${uid}`;
+    shx(`cd / && node --input-type=module -e ${JSON.stringify(`const e = await import('/opt/porthole/server/lib/egress.js'); e.ingestDns(${JSON.stringify(dns)}); for (let i = 0; i < 3; i++) await e.ingestKernel(${JSON.stringify(kline)}); await e.ingestKernel(${JSON.stringify(k6)}); await e.ingestKernel('PH-EGRESS DST=127.0.0.53 PROTO=UDP SPT=5000 DPT=53 UID=${uid}'); e.flush();`)}`);
+    r = await call('/api/egress');
+    const row = r.body.rows.find(x => x.host === 'smoke-egress.test');
+    check('connections are counted per host and port, named from the lookup, with who made them', row && row.port === 443 && row.count === 3 && row.ip === '203.0.113.77' && row.who === 'agent user', JSON.stringify(r.body.rows).slice(0, 300));
+    check('IPv6 destinations are recorded too', r.body.rows.some(x => /^2001:db8:/.test(x.ip)), JSON.stringify(r.body.rows.map(x => x.ip)));
+    check('lookups to the box resolver are not destinations', !r.body.rows.some(x => x.ip === '127.0.0.53'));
+    const nw = (await call('/api/audit?type=network')).body.events.filter(e => e.action === 'egress-new' && e.host === 'smoke-egress.test');
+    check('the first connection to a new host is one audit line, repeats are not', nw.length === 1 && nw[0].port === 443, JSON.stringify(nw).slice(0, 200));
+    shx('rm -f /root/.porthole/egress/*.json');
+}
+
 // 8b2. Credential catalogue: typed fields, env prefixes, OAuth2 authorize URL.
 r = await call('/api/vault/catalog');
 check('vault catalogue lists services and styles', r.status === 200 && r.body.services.some(s => s.key === 'spotify') && r.body.styles.oauth2 && r.body.services.some(s => s.key === 'telegram-bot'), `services=${r.body.services?.length}`);

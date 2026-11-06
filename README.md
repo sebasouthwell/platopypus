@@ -95,7 +95,7 @@ Porthole is root-level control of a box, so every layer assumes the one before i
 | Vault | AES-256-GCM, key file 0600, values never listed, reveal is explicit and logged, reserved env names blocked, project scope only reaches shells in that folder. |
 | Docker | Arguments validated and exec'd without a shell; containers bind to loopback. |
 | Process | Runs as root by default (`PORTHOLE_USER=ubuntu` for a confined install). Loopback-only token sign-in remains for the box's own `vault`/`tunnel` CLIs; requests through the reverse proxy can never use it. |
-| Audit | Every auth event and every shell, tunnel, vault, docker, git and editor action goes to stdout → journald. Root use, credential use and activity also go to a browsable audit log (More → Audit log), one file per day, kept 90 days. |
+| Audit | Every auth event and every shell, tunnel, vault, docker, git and editor action goes to stdout → journald. Root use, credential use and activity also go to a browsable audit log (More → Audit log), one file per day, kept 90 days, with new outbound connections by agents and services under Network. Telegram alerts (More → Alerts) for root requests, sign-ins, public links and crashed servers. |
 
 Every route is listed with its gate in `server/server.js`; the endpoint audit is summarised at the bottom of
 this file.

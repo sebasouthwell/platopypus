@@ -36,7 +36,11 @@ let last = null;   // { key, file, start, end, line }
 const repeatKey = l => JSON.stringify([l.type, l.action, l.project, l.actor, l.what, l.cmd, l.names, l.via, l.code, l.cwd]);
 let pruned = '';
 
-// type: 'elevate', 'credential' or 'activity'. action: what happened. Everything else is optional context.
+// Listeners for new lines (alerts). Only this process's lines; a merged repeat is not a new line.
+const listeners = [];
+export function onRecord(fn) { listeners.push(fn); }
+
+// type: 'elevate', 'credential', 'activity' or 'network'. action: what happened. Everything else is optional context.
 export function record(type, action, ev = {}) {
     try {
         const line = {
@@ -46,7 +50,7 @@ export function record(type, action, ev = {}) {
             reason: clip(ev.reason, 300), decidedBy: clip(ev.decidedBy, 80), code: typeof ev.code === 'number' ? ev.code : undefined,
             minutes: typeof ev.minutes === 'number' ? ev.minutes : undefined, auto: ev.auto ? true : undefined,
             what: clip(ev.what, 200), names: Array.isArray(ev.names) && ev.names.length ? ev.names.slice(0, 60).map(n => String(n).slice(0, 80)) : undefined,
-            via: clip(ev.via, 80),
+            via: clip(ev.via, 80), host: clip(ev.host, 253), port: typeof ev.port === 'number' ? ev.port : undefined,
         };
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         const f = fileFor(dayOf(line.at));
@@ -65,6 +69,7 @@ export function record(type, action, ev = {}) {
         let start = 0; try { start = fs.statSync(f).size; } catch { /* new day */ }
         fs.appendFileSync(f, JSON.stringify(line) + '\n', { mode: 0o600 });
         last = { key, file: f, start, end: fs.statSync(f).size, line };
+        for (const fn of listeners) { try { fn(line); } catch { /* a listener never breaks the record */ } }
         if (pruned !== dayOf(line.at)) { pruned = dayOf(line.at); prune(); }
     } catch { /* auditing must never break the action it records; journald has the line regardless */ }
 }
@@ -81,7 +86,7 @@ export function prune(now = Date.now()) {
         if (size() <= CAP_BYTES) return;
         for (const n of days.slice(0, -1)) {   // never thin today
             const fp = path.join(dir, n);
-            const keep = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l && !/"type":"activity"/.test(l));
+            const keep = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l && !/"type":"(activity|network)"/.test(l));
             fs.writeFileSync(fp, keep.length ? keep.join('\n') + '\n' : '', { mode: 0o600 });
             if (size() <= CAP_BYTES) return;
         }
@@ -128,10 +133,11 @@ export function query({ type = null, project = null, limit = 300, days = 30 } = 
     const sum = new Map();
     for (const e of all) {
         const k = e.project || '';
-        const s = sum.get(k) || { project: e.project || null, elevate: 0, rootRuns: 0, credential: 0, activity: 0, names: new Set(), last: 0 };
+        const s = sum.get(k) || { project: e.project || null, elevate: 0, rootRuns: 0, credential: 0, activity: 0, network: 0, names: new Set(), last: 0 };
         const c = e.count || 1;
         if (e.type === 'elevate') { s.elevate++; if (e.action === 'request' && (e.status === 'done' || e.status === 'running')) s.rootRuns++; }
         if (e.type === 'activity') s.activity += c;
+        if (e.type === 'network') s.network += c;
         if (e.type === 'credential') { s.credential += c; (e.names || []).forEach(n => s.names.add(n)); }
         s.last = Math.max(s.last, e.at); sum.set(k, s);
     }

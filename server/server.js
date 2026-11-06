@@ -33,6 +33,8 @@ import * as derive from './lib/derive.js';
 import * as live from './lib/live.js';
 import * as quick from './lib/quick.js';
 import * as audit from './lib/audit.js';
+import * as alerts from './lib/alerts.js';
+import * as egress from './lib/egress.js';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
 import * as portholerun from './lib/portholerun.js';
@@ -92,6 +94,7 @@ const ACTIVITY = [
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|restart|hostname)$/, m => `service-${m[3]}`, m => ({ what: `${decodeURIComponent(m[1])}/${m[2]}`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(actions|groups)\//, 'service-action', (m, b, r) => ({ what: `${r?.label || 'action'}${b.item ? ` · ${b.item}` : ''}`, project: decodeURIComponent(m[1]), code: r?.code })],
     ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
+    ['PUT', /^\/api\/alerts$/, 'alerts-changed', (m, b, r) => ({ what: `Telegram alerts${r?.botName ? ` via ${r.botName}` : ''}: ${r ? Object.entries(r.on).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : ''}${r?.pausedUntil ? ' (paused)' : ''}` })],
     ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
 ];
 function actorOf(session) {
@@ -600,10 +603,17 @@ const server = http.createServer(async (req, res) => {
         // Audit: escalations, credential use, activity (never values or output)
         if (p === '/api/audit' && method === 'GET') {
             const type = url.searchParams.get('type'), project = url.searchParams.get('project');
-            const r = audit.query({ type: ['elevate', 'credential', 'activity'].includes(type) ? type : null, project: project === null ? null : project, limit: url.searchParams.get('limit'), days: url.searchParams.get('days') });
+            const r = audit.query({ type: ['elevate', 'credential', 'activity', 'network'].includes(type) ? type : null, project: project === null ? null : project, limit: url.searchParams.get('limit'), days: url.searchParams.get('days') });
             if (!type || type === 'activity') r.commits = await audit.commits({ project: project === null ? null : project, days: Number(url.searchParams.get('days')) || 14 });
             return send(res, 200, r);
         }
+
+        // Push alerts (Telegram bot from the Vault) and the network egress log
+        if (p === '/api/alerts' && method === 'GET') return send(res, 200, alerts.settings());
+        if (p === '/api/alerts' && method === 'PUT') return send(res, 200, alerts.configure(await readJson(req, 8 * 1024), req.headers.origin || null));
+        if (p === '/api/alerts/test' && method === 'POST') return send(res, 200, await alerts.test());
+        if (p === '/api/alerts/chats' && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await alerts.chats(String(b.itemId || ''))); }
+        if (p === '/api/egress' && method === 'GET') { const pr = url.searchParams.get('project'); return send(res, 200, egress.query({ days: url.searchParams.get('days'), project: pr === null ? null : pr })); }
 
         // Pins and recents for live-service actions (Home)
         if (p === '/api/quick' && method === 'GET') return send(res, 200, quick.get());
@@ -730,6 +740,14 @@ zoned.ensure().catch(e => console.error(e));
 setInterval(() => shells.reapOneshots().catch(e => console.error(e)), 15_000);
 setInterval(() => zoned.ensure().catch(e => console.error(e)), 60_000);
 
+// Alerts: audit lines (root requests, links, credential use, new connections), sign-ins, crashed servers, commits.
+audit.onRecord(alerts.fromAudit);
+auth.events.on('signin', alerts.fromAuth);
+auth.events.on('lockout', alerts.fromAuth);
+setInterval(() => alerts.checkServers(services).catch(() => {}), 30_000);
+setInterval(() => alerts.checkCommits(audit).catch(() => {}), 5 * 60_000);
+for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.stop(); } catch { /* exiting */ } process.exit(0); });
+
 // Daily update check against the public repo (first one a minute after boot).
 update.schedule();
 
@@ -738,6 +756,7 @@ server.listen(config.port, config.bind, () => {
     log('porthole', `listening on http://${config.bind}:${config.port}  root=${config.root}  state=${config.state}`);
     // iptables rules do not survive a reboot: put the service-account limits back before any live service starts.
     import('./lib/svcuser.js').then(m => { try { if (groupExists(m.GROUP)) m.applyFirewall(); } catch { /* no group yet */ } });
+    egress.start().catch(e => log('egress', `not started: ${e.message}`));
     if (config.bind !== '127.0.0.1' && config.bind !== '::1') {
         log('porthole', `WARNING: bound to ${config.bind}. Make sure only your private network can reach this port.`);
     }

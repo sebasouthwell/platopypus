@@ -249,6 +249,17 @@ export async function reveal(id, who = '', field = null) {
     return { id: it.id, values: out, envName: first, value: first ? out[first] : undefined };
 }
 
+// Decrypted fields of one entry, by field name, for Porthole's own use (alerts send with the Telegram bot token).
+// Never returned by an API route.
+export function valuesOf(id) {
+    const raw = load().items.find(i => i.id === id);
+    if (!raw) return null;
+    const it = normalise(raw);
+    const fields = {};
+    for (const f of Object.keys(it.fields || {})) fields[f] = safeDecrypt(it.fields[f]);
+    return { id: it.id, name: it.name, provider: it.provider, style: it.style, scope: it.scope, fields };
+}
+
 // Environment variables for a shell starting in `cwd` (absolute): general + matching project scope.
 // project: 'exact' → general + the project whose folder is exactly `cwd` (vault get, live services);
 //          'none'  → general only.

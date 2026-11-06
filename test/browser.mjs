@@ -54,7 +54,28 @@ await page.screenshot({ path: process.env.SHOT || 'browser-probe.png', fullPage:
     await page.click('#audit-list [data-ae]'); await page.waitForTimeout(600);
     check('an entry opens with its details', await page.isVisible('#dialog') && /Who/.test(await page.textContent('#dialog') || ''));
     await page.click('#dialog [data-close]'); await page.waitForTimeout(200);
+    await page.click('#audit-seg [data-at="network"]'); await page.waitForTimeout(900);
+    check('the Network filter says whether connections are being recorded', /recording/i.test(await page.textContent('#audit-list') || '') && errors.length === before, errors.slice(before).join(' | ').slice(0, 200));
+    if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace(/\.png$/, '-network.png') });
+    await page.click('#audit-seg [data-at=""]'); await page.waitForTimeout(500);
     await page.click('#page-audit [data-back]'); await page.waitForTimeout(300);
+}
+
+// Alerts: opens from More; without a bot it offers to add one; kinds switch on and off.
+{
+    const before = errors.length;
+    await page.click('#more-list [data-page="alerts"]'); await page.waitForTimeout(1000);
+    const text = await page.textContent('#alerts-body') || '';
+    check('the Alerts page offers to add a Telegram bot and lists what can be sent', await page.isVisible('#page-alerts') && /Add a Telegram bot/.test(text) && (await page.$$('#alerts-body [data-kind]')).length === 7 && errors.length === before, errors.slice(before).join(' | ').slice(0, 200));
+    const was = await page.getAttribute('#alerts-body [data-kind="commit"]', 'aria-checked');
+    await page.click('#alerts-body [data-kind="commit"]'); await page.waitForTimeout(800);
+    check('a kind can be switched', (await page.getAttribute('#alerts-body [data-kind="commit"]', 'aria-checked')) !== was);
+    await page.click('#alerts-body [data-kind="commit"]'); await page.waitForTimeout(600);
+    if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace(/\.png$/, '-alerts.png'), fullPage: true });
+    await page.click('#alerts-body [data-addbot]'); await page.waitForTimeout(900);
+    check('Add a Telegram bot opens the Telegram form', /Telegram/.test(await page.textContent('#dialog') || ''));
+    await page.click('#dialog [data-close]').catch(() => {}); await page.waitForTimeout(300);
+    await page.click('#page-alerts [data-back]'); await page.waitForTimeout(300);
 }
 
 // Pins on Home: a pin whose service has gone shows as gone, opens an explanation, and can be removed there.

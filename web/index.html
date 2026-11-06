@@ -144,6 +144,7 @@
       <button class="row" data-page="vault"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Vault</div><div class="sub" id="more-vault-sub">Tokens for Claude and your projects</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="creds"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Shared credentials</div><div class="sub" id="more-creds-sub">Logins agents handed to you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="security"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Security</div><div class="sub" id="more-security-sub">Two-step codes, signed-in devices</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="alerts"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-bell"/></svg></span><div class="main"><div class="title">Alerts</div><div class="sub" id="more-alerts-sub">Telegram messages when something needs you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="audit"><span class="ico flare"><svg class="i"><use href="/sprite.svg#i-history"/></svg></span><div class="main"><div class="title">Audit log</div><div class="sub" id="more-audit-sub">Root use, credentials and what agents did, by project</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">Remote Control</div><div class="sub" id="more-remote-sub">Drive this box from the Claude app</div></div><button class="switch" id="remote-switch" role="switch" aria-checked="false" aria-label="Remote Control"><span></span></button></div>
       <button class="row" data-page="agents"><span class="ico"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">AI agents</div><div class="sub" id="more-claude-sub">Claude Code, Codex, Gemini · profiles</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
@@ -186,6 +187,15 @@
     <p class="note gap">This app is root-level control of the box. Keep two-step codes on and sign out of devices you no longer use. Lost your authenticator? Run <span class="mono">box.ps1 reset-totp</span> from the laptop.</p>
   </section>
 
+  <section id="page-alerts" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>Alerts</h1><span class="spacer"></span>
+    </header>
+    <div id="alerts-body"></div>
+    <p class="note gap">Alerts say what happened and link back here. Allowing or denying root is only ever done in Porthole after you sign in, never from Telegram. Messages carry project names, and for root requests the command as asked; never Vault values, output or logs. Porthole reads the bot token itself to send; agents never get it.</p>
+  </section>
+
   <section id="page-audit" class="tab page" hidden>
     <header class="topbar compact">
       <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
@@ -193,12 +203,12 @@
       <button class="icon-btn" id="audit-refresh" aria-label="Refresh"><svg class="i"><use href="/sprite.svg#i-refresh"/></svg></button>
     </header>
     <div class="seg" id="audit-seg" role="tablist">
-      <button data-at="" class="on">Everything</button><button data-at="elevate">Root</button><button data-at="credential">Credentials</button><button data-at="activity">Activity</button>
+      <button data-at="" class="on">Everything</button><button data-at="elevate">Root</button><button data-at="credential">Credentials</button><button data-at="activity">Activity</button><button data-at="network">Network</button>
     </div>
     <div class="audit-projects" id="audit-projects"></div>
     <div id="audit-summary"></div>
     <div id="audit-list"></div>
-    <p class="note gap">Kept on the box in <span class="mono">~/.porthole/audit.jsonl</span>: who asked, from which project, commands as asked and the names of Vault values. Never secret values or command output. Agents cannot read it. Commits come from each project's git history (last 14 days). The page shows 30 days; the box keeps 90.</p>
+    <p class="note gap">Kept on the box in <span class="mono">~/.porthole/audit/</span>, one file per day: who asked, from which project, commands as asked and the names of Vault values. Never secret values or command output. Agents cannot read it. Commits come from each project's git history (last 14 days). Network lists new connections made by the agent user and service accounts (not root), last 7 days. The page shows 30 days; the box keeps 90.</p>
   </section>
 
   <section id="page-agents" class="tab page" hidden>
@@ -237,6 +247,7 @@
       <div class="nav-label">Box</div>
       <button data-nav-page="vault" title="Vault"><svg class="i"><use href="/sprite.svg#i-key"/></svg><span>Vault</span></button>
       <button data-nav-page="creds" title="Shared credentials"><svg class="i"><use href="/sprite.svg#i-link"/></svg><span>Shared credentials</span></button>
+      <button data-nav-page="alerts" title="Alerts"><svg class="i"><use href="/sprite.svg#i-bell"/></svg><span>Alerts</span></button>
       <button data-nav-page="audit" title="Audit log"><svg class="i"><use href="/sprite.svg#i-history"/></svg><span>Audit log</span></button>
       <button data-nav-page="security" title="Security"><svg class="i"><use href="/sprite.svg#i-shield"/></svg><span>Security</span></button>
       <button data-nav-page="agents" title="AI agents"><svg class="i"><use href="/sprite.svg#i-claude"/></svg><span>AI agents</span></button>

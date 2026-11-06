@@ -24,7 +24,7 @@ export const ICONS = {
     link: 'link', globe: 'globe', server: 'server', container: 'container', compose: 'boxes', devserver: 'code-xml',
     database: 'database', terminal: 'terminal', claude: 'bot', remote: 'smartphone', key: 'key-round', shield: 'shield-check',
     lock: 'lock', logout: 'log-out', cpu: 'cpu', disk: 'hard-drive', network: 'network', cloud: 'cloud', zap: 'zap',
-    activity: 'activity', pin: 'star', info: 'info', settings: 'settings', package: 'package', anchor: 'anchor',
+    activity: 'activity', pin: 'star', bell: 'bell', egress: 'radio-tower', info: 'info', settings: 'settings', package: 'package', anchor: 'anchor',
     // files
     file: 'file', 'file-text': 'file-text', 'file-code': 'file-code', 'file-image': 'file-image', 'file-archive': 'file-archive',
     'file-json': 'file-json', 'file-pdf': 'file-type', image: 'image', 'file-plus': 'file-plus', save: 'save', mouse: 'mouse', pointer: 'mouse-pointer-2', branch: 'git-branch', commit: 'git-commit-horizontal', pullreq: 'git-pull-request-arrow', fork: 'git-fork', 'cloud-up': 'cloud-upload', 'cloud-down': 'cloud-download', user: 'user-round', login: 'log-in', rocket: 'rocket', pencil: 'pencil', download: 'download', 'wrap-text': 'wrap-text',

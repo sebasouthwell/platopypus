@@ -65,6 +65,8 @@ with mode 0600. Formats as of version 1.0:
 | `portholerun.json` | portholerun.js | `{ "<run-slug>": { file, hash, at } }` — what each .portholerun server was started from, for restarts (1.18.4) |
 | `quick.json` | quick.js | `{ pins: [{ id, kind, project, key, action, group, item, itemLabel, at }], recents: [… , code] }` — Home shortcuts to live-service commands; matched by label (1.19.0) |
 | `audit/YYYY-MM-DD.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); one file per UTC day, kept 90 days, 200 MB cap; `count`/`lastAt` on merged repeats (1.21.0; `audit.jsonl`/`audit.1.jsonl` from 1.20.0 read until they age out) |
+| `alerts.json` | alerts.js | `{ itemId, chatId, on: { root, signin, link, crash, egress, credential, commit }, pausedUntil, origin, lastSent, lastError }` — Telegram alerts; the bot is a general Vault entry referenced by id, its token is never copied here (1.22.0) |
+| `egress/YYYY-MM-DD.json`, `egress/seen.json` | egress.js | new outbound connections by the agent user and service accounts, one row per (who, project, host, port) with count/first/last/procs, kept 90 days; `seen.json` = first time each project reached each host:port (1.22.0) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
 | `code-server.json` | codeserver.js | `{ password, folder, startedAt, projects: { "code-<slug>": { password, folder } } }` |
@@ -387,6 +389,16 @@ phone's Update button. Mechanism:
   a 200 MB cap (`PORTHOLE_AUDIT_MB`) that drops activity before root and credential lines; repeated identical events
   within 2 minutes become one line with a count. The 1.20.0 files are still read until they age out. Vault items
   gain `inShells` (additive; absent = off).
+- **1.22.0** — **Alerts** (More → Alerts): Telegram messages through a bot you pick from the Vault (general "Telegram
+  bot + chat" entries; add one from the page), to its saved chat or one picked from the chats the bot has seen. On by
+  default once set up: root requests waiting, sign-ins and lockouts, agents opening public links, servers stopping by
+  themselves. Off by default: new connections, agent Vault use, agent commits. Pause 1 h / 8 h. Messages link back to
+  Porthole; nothing can be approved from Telegram. At most 20 per 10 minutes, the rest summarised. **Network egress
+  log** (Audit log → Network): an iptables chain `PORTHOLE-EGRESS` (jumped to from OUTPUT, IPv4 and IPv6) logs new
+  connections from the agent user, `porthole-svc` and the `porthole-svcs` group to the kernel log; Porthole follows
+  `journalctl -k` and `resolvectl monitor` to name them. Root processes are not logged. The first connection from a
+  project to a host is an audit line of the new type `network`. `PORTHOLE_EGRESS=0` turns it off; without journald
+  it reports itself off. New state: `alerts.json`, `egress/` (additive). Porthole now exits cleanly on SIGTERM.
 
 ## Release checklist
 

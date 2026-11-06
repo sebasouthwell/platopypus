@@ -243,6 +243,7 @@ function push(page) {
     if (page === 'creds') loadCredsPage().catch(e => toast(e.message, true));
     if (page === 'security') loadSecurity().catch(e => toast(e.message, true));
     if (page === 'audit') loadAudit().catch(e => toast(e.message, true));
+    if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -2575,6 +2576,7 @@ async function loadMore() {
         </div>`;
     $('#box-refresh').onclick = () => loadMore().catch(e => toast(e.message, true));
     loadUpdate().catch(() => {});
+    api('/api/alerts').then(a => { const el = $('#more-alerts-sub'); if (el) el.textContent = alertsSub(a); }).catch(() => {});
     const c = s.claude;
     $('#more-claude-sub').textContent = `Claude ${c.version ? c.version.replace(/\s*\(Claude Code\)/, '') : 'not installed'} · Codex · Antigravity · profiles`;
     $('#more-remote-sub').textContent = c.remoteControl ? 'Running — open the Claude app' : c.signedIn ? 'Off' : 'Sign in to Claude first';
@@ -3008,6 +3010,7 @@ function credentialForm(svc, cat, styleKey = null) {
         try {
             const created = await api('/api/vault', { method: 'POST', body });
             close(); toast('Saved');
+            if (afterVaultSave) { const f = afterVaultSave; afterVaultSave = null; f(created); return; }
             if (isOAuth) { const r = await api(`/api/vault/${created.id}/oauth/start`, { method: 'POST' }); location.href = r.url; return; }
             loadVault();
         } catch (ex) { toast(ex.message, true); btn.disabled = false; }
@@ -3042,6 +3045,62 @@ async function credentialFormFromLegacy(preset) {
 
 // ---------- security ----------
 
+// ---------- alerts ----------
+// Telegram messages for things that need you (root requests, sign-ins, public links, crashed servers) and, if you
+// want them, the busier ones (new connections, Vault use, commits). The bot is a general Vault entry.
+let afterVaultSave = null;
+async function addTelegramBot() {
+    const cat = await getCatalog().catch(ex => { toast(ex.message, true); return null; });
+    const svc = cat?.services.find(s => s.key === 'telegram-bot');
+    if (!svc) return toast('The Telegram service is missing from the catalogue.', true);
+    afterVaultSave = async created => { try { await api('/api/alerts', { method: 'PUT', body: { itemId: created.id } }); } catch { /* pick it by hand */ } push('alerts'); };
+    credentialForm(svc, cat, 'botChat');
+}
+function alertsSub(s) {
+    if (!s.ready) return s.itemId ? 'Pick a chat to finish setting up' : 'Off · Telegram messages when something needs you';
+    const n = Object.values(s.on).filter(Boolean).length;
+    return s.pausedUntil ? `Paused until ${new Date(s.pausedUntil).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : `On · ${s.botName} · ${n} kind${n === 1 ? '' : 's'}`;
+}
+async function loadAlerts() {
+    const s = await api('/api/alerts');
+    const sub = $('#more-alerts-sub'); if (sub) sub.textContent = alertsSub(s);
+    const body = $('#alerts-body');
+    const chat = s.chatId || s.botChatId;
+    let html = '<h2 class="section">Send to</h2>';
+    if (!s.bots.length) {
+        html += `<div class="card"><p style="margin:0 0 12px">Alerts go to you on Telegram through a bot you own. Add one to the Vault: a token from @BotFather, and your chat.</p><button class="primary" data-addbot>${icon('plus')}Add a Telegram bot</button></div>`;
+    } else {
+        html += `<div class="list">${s.bots.map(b => `<button class="row" data-bot="${esc(b.id)}"><span class="ico ${b.id === s.itemId ? 'kelp' : ''}">${icon(b.id === s.itemId ? 'check' : 'zap')}</span><div class="main"><div class="title">${esc(b.name)}</div><div class="sub">${b.incomplete ? 'No bot token yet: edit it in the Vault' : b.chatId ? `Its chat: ${esc(b.chatId)}` : 'No chat saved with it'}</div></div></button>`).join('')}
+            <button class="row" data-addbot><span class="ico">${icon('plus')}</span><div class="main"><div class="title">Add another bot</div><div class="sub">Saved to the Vault as General</div></div></button></div>`;
+        if (s.itemId) html += `<div class="list gap"><div class="row"><div class="main"><div class="title">Chat</div><div class="sub">${chat ? `${esc(chat)}${s.chatId ? ' (chosen here)' : ' (saved with the bot)'}` : 'None yet: send your bot a message on Telegram, then tap Find'}</div></div><button class="text-btn" data-findchat>Find</button><button class="text-btn" data-typechat>Type</button></div></div>
+            <div class="list gap"><button class="row" data-test ${s.ready ? '' : 'disabled'}><span class="ico brass">${icon('send')}</span><div class="main"><div class="title">Send a test</div><div class="sub">${s.lastError ? `<span style="color:var(--flare)">Last send failed: ${esc(s.lastError.message)}</span>` : s.lastSent ? `Last sent ${new Date(s.lastSent).toLocaleString()}` : 'Check that messages arrive'}</div></div></button>
+            <div class="row"><div class="main"><div class="title">${s.pausedUntil ? `Paused until ${new Date(s.pausedUntil).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Pause'}</div><div class="sub">Nothing is sent while paused; the audit log keeps everything</div></div>${s.pausedUntil ? '<button class="text-btn" data-pause="0">Resume</button>' : '<button class="text-btn" data-pause="60">1 h</button><button class="text-btn" data-pause="480">8 h</button>'}</div></div>`;
+    }
+    html += `<h2 class="section">What to send</h2><div class="list">${s.kinds.map(k => `<div class="row"><div class="main"><div class="title">${esc(k.title)}</div><div class="sub" style="white-space:normal">${esc(k.sub)}</div></div><button class="switch ${s.on[k.key] ? 'on' : ''}" data-kind="${k.key}" role="switch" aria-checked="${!!s.on[k.key]}" aria-label="${esc(k.title)}"><span></span></button></div>`).join('')}</div>`;
+    body.innerHTML = html;
+    const put = async b => { try { await api('/api/alerts', { method: 'PUT', body: b }); } catch (ex) { toast(ex.message, true); } loadAlerts().catch(() => {}); };
+    $$('[data-addbot]', body).forEach(b => b.onclick = () => addTelegramBot());
+    $$('[data-bot]', body).forEach(b => b.onclick = () => put({ itemId: b.dataset.bot }));
+    $$('[data-kind]', body).forEach(b => b.onclick = () => put({ on: { [b.dataset.kind]: !s.on[b.dataset.kind] } }));
+    $$('[data-pause]', body).forEach(b => b.onclick = () => put({ pauseMinutes: Number(b.dataset.pause) }));
+    const t = $('[data-test]', body); if (t) t.onclick = async () => { t.disabled = true; try { await api('/api/alerts/test', { method: 'POST' }); toast('Sent. Check Telegram'); } catch (ex) { toast(ex.message, true); } loadAlerts().catch(() => {}); };
+    const tc = $('[data-typechat]', body); if (tc) tc.onclick = () => {
+        const { panel, close } = openDialog(`<h2>${icon('zap')}Chat ID</h2><p class="muted">Your own chat with the bot is your user ID (a number). A group's ID starts with -. Leave empty to use the chat saved with the bot.</p>
+            <div class="field"><input id="al-chat" type="text" inputmode="text" autocapitalize="off" autocorrect="off" value="${esc(s.chatId || '')}" placeholder="123456789"></div>
+            <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+        $('[data-ok]', panel).onclick = async () => { try { await api('/api/alerts', { method: 'PUT', body: { chatId: $('#al-chat', panel).value.trim() } }); close(); loadAlerts().catch(() => {}); } catch (ex) { toast(ex.message, true); } };
+    };
+    const fc = $('[data-findchat]', body); if (fc) fc.onclick = async () => {
+        fc.disabled = true;
+        let r; try { r = await api('/api/alerts/chats', { method: 'POST', body: { itemId: s.itemId } }); } catch (ex) { fc.disabled = false; return toast(ex.message, true); }
+        fc.disabled = false;
+        const { panel, close } = openDialog(`<h2>${icon('zap')}Pick a chat</h2>
+            ${r.chats.length ? `<div class="list">${r.chats.map(c => `<button class="row" data-c="${esc(c.id)}"><div class="main"><div class="title">${esc(c.title)}</div><div class="sub mono">${esc(c.type)} · ${esc(c.id)}</div></div></button>`).join('')}</div>` : `<p class="muted">The bot has not seen any messages yet. Open Telegram, send ${r.bot ? esc(r.bot) : 'your bot'} a message (or add it to a group), then try again.</p>`}
+            <div class="buttons"><button data-close>Close</button></div>`);
+        $$('[data-c]', panel).forEach(b => b.onclick = async () => { close(); await put({ chatId: b.dataset.c }); });
+    };
+}
+
 // ---------- audit log ----------
 // Root use (requests, grants, services allowed to run as root), credential use (which Vault values went where) and
 // activity (tunnels, servers, hostnames, git, commits), per project. From /api/audit; never values or output.
@@ -3058,6 +3117,7 @@ const AUDIT_TITLES = {
         'vault-revealed': e => `Revealed on the phone: ${e.what}`, 'service-revealed': e => `Revealed on the phone: ${e.what}`,
         shared: e => `Shared with you: ${e.what}`, 'shared-revealed': e => `Opened shared card: ${e.what}`,
     },
+    network: { 'egress-new': e => `First connection to ${e.host || e.what}${e.port ? `:${e.port}` : ''}` },
     activity: {
         'tunnel-start': e => `Quick link opened · ${e.what}`, 'tunnel-stop': e => `Quick link closed · ${e.what}`,
         'hostname-add': e => `Hostname added · ${e.what}`, 'hostname-remove': e => `Hostname removed · ${e.what}`,
@@ -3066,7 +3126,7 @@ const AUDIT_TITLES = {
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
         'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };
@@ -3074,6 +3134,8 @@ const auditTitle = e => (AUDIT_TITLES[e.type]?.[e.action] || (() => `${e.action}
 function auditIcon(e) {
     if (e.type === 'elevate') return ['shield', 'flare'];
     if (e.type === 'credential') return ['key', 'brass'];
+    if (e.type === 'network') return ['egress', 'dock'];
+    if (e.action === 'alerts-changed') return ['bell', 'brass'];
     if (e.action === 'commit' || e.action.startsWith('git-')) return ['commit', e.agent ? 'brass' : 'dim'];
     if (/tunnel|hostname/.test(e.action)) return ['link', 'kelp'];
     return [/service|portholerun/.test(e.action) ? 'globe' : 'server', 'dock'];
@@ -3105,13 +3167,14 @@ async function loadAudit() {
     for (const c of allCommits) { const x = proj.get(c.project) || { project: c.project, elevate: 0, rootRuns: 0, credential: 0, activity: 0, names: [], last: 0, commits: 0, agentCommits: 0 }; x.commits++; if (c.agent) x.agentCommits++; x.last = Math.max(x.last, c.at); proj.set(c.project, x); }
     if (auditState.project === null) auditState.chips = [...proj.values()].sort((a, b) => b.last - a.last);
     const chips = auditState.chips || [];
-    $('#audit-projects').innerHTML = `<button class="chip ${auditState.project === null ? 'on' : ''}" data-ap="*">All projects</button>` + chips.map(x => `<button class="chip ${auditState.project === (x.project || '') ? 'on' : ''}" data-ap="${esc(x.project || '')}">${esc(x.project || 'Box')}<span class="n">${x.elevate + x.credential + x.activity + (x.commits || 0)}</span></button>`).join('');
+    $('#audit-projects').innerHTML = `<button class="chip ${auditState.project === null ? 'on' : ''}" data-ap="*">All projects</button>` + chips.map(x => `<button class="chip ${auditState.project === (x.project || '') ? 'on' : ''}" data-ap="${esc(x.project || '')}">${esc(x.project || 'Box')}<span class="n">${x.elevate + x.credential + x.activity + (x.network || 0) + (x.commits || 0)}</span></button>`).join('');
     $$('#audit-projects [data-ap]').forEach(b => b.onclick = () => { auditState.project = b.dataset.ap === '*' ? null : b.dataset.ap; loadAudit().catch(e => toast(e.message, true)); });
     // Summary for one project: how much root, which Vault values, what agents did.
     const one = auditState.project !== null ? (chips.find(x => (x.project || '') === auditState.project) || null) : null;
     $('#audit-summary').innerHTML = one ? `<div class="card audit-sum">
         <div class="audit-stats"><div><b>${one.elevate}</b><span>root entr${one.elevate === 1 ? 'y' : 'ies'}${one.rootRuns ? `, ${one.rootRuns} ran` : ''}</span></div><div><b>${one.credential}</b><span>credential use${one.credential === 1 ? '' : 's'}</span></div><div><b>${one.activity}</b><span>activity</span></div><div><b>${one.commits || 0}</b><span>commit${one.commits === 1 ? '' : 's'}${one.agentCommits ? `, ${one.agentCommits} by agents` : ''}</span></div></div>
         ${one.names?.length ? `<p class="sub" style="margin-top:10px">Vault values used: ${one.names.map(n => `<span class="mono">${esc(n)}</span>`).join(', ')}</p>` : ''}</div>` : '';
+    if (auditState.type === 'network') return loadEgress();
     if (!events.length) { $('#audit-list').innerHTML = `<p class="empty">Nothing recorded${auditState.type ? ' of this kind' : ''}${auditState.project !== null ? ` for ${esc(auditState.project || 'the box')}` : ''} yet.</p>`; return; }
     // Grouped by day, newest first.
     const day = ts => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -3125,10 +3188,29 @@ async function loadAudit() {
     $('#audit-list').innerHTML = html + '</div>';
     $$('#audit-list [data-ae]').forEach(b => b.onclick = () => auditDetail(events[Number(b.dataset.ae)]));
 }
+// Network: where the agent user and the service accounts connect, one row per host and port, last 7 days.
+async function loadEgress() {
+    const q = new URLSearchParams({ days: '7' });
+    if (auditState.project !== null) q.set('project', auditState.project);
+    const r = await api(`/api/egress?${q}`);
+    const ago = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+    let html = `<div class="card" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;font-weight:600"><span class="dot ${r.status.on ? 'live' : ''}"></span>${r.status.on ? 'Recording' : 'Not recording'}</div><p class="sub" style="margin:6px 0 0;white-space:normal">${esc(r.status.detail)}</p></div>`;
+    if (!r.rows.length) html += `<p class="empty">No connections recorded in the last ${r.days} days${auditState.project !== null ? ` for ${esc(auditState.project || 'the box')}` : ''}.</p>`;
+    else {
+        const fresh = Date.now() - 86400_000;
+        html += `<h2 class="section">Last ${r.days} days · ${r.total} destination${r.total === 1 ? '' : 's'}</h2><div class="list">${r.rows.map((x, n) => `<button class="row" data-eg="${n}"><span class="ico dock">${icon('egress')}</span><div class="main"><div class="title audit-t">${esc(x.host)}${x.port ? `<span class="muted">:${x.port}</span>` : ''}${x.first > fresh ? '<span class="tag" style="color:var(--brass)">new</span>' : ''}<span class="tag dim">×${x.count}</span></div><div class="sub">${esc(x.who)}${x.project && auditState.project === null ? ` · ${esc(x.project)}` : ''}${x.procs?.length ? ` · ${esc(x.procs.join(', '))}` : ''} · ${ago(x.last)}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>`;
+    }
+    $('#audit-list').innerHTML = html;
+    $$('#audit-list [data-eg]').forEach(b => b.onclick = () => {
+        const x = r.rows[Number(b.dataset.eg)];
+        const rows = [['Host', x.host], ['Address', x.ip !== x.host ? x.ip : null], ['Port', x.port ? `${x.port} (${x.proto})` : x.proto], ['Who', x.who], ['Account', x.user], ['Project', x.project || 'the box (not in a project)'], ['Programs', x.procs?.join(', ')], ['Connections', `${x.count} on ${x.days} day${x.days === 1 ? '' : 's'}`], ['First', new Date(x.first).toLocaleString()], ['Last', new Date(x.last).toLocaleString()]].filter(([, v]) => v);
+        openDialog(`<h2>${icon('egress')}${esc(x.host)}</h2><div class="list">${rows.map(([k, v]) => `<div class="row"><div class="main"><div class="sub">${esc(k)}</div><div class="title" style="font-size:14.5px;white-space:normal">${esc(String(v))}</div></div></div>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);
+    });
+}
 function auditDetail(e) {
     const rows = [
         ['When', new Date(e.at).toLocaleString()], ['Who', auditWho(e)], ['Through', e.via], ['Project', e.project || (e.type === 'activity' && e.action === 'commit' ? null : 'the box (not in a project)')],
-        ['Folder', e.cwd], ['Repeated', e.count > 1 ? `${e.count} times, last at ${new Date(e.lastAt).toLocaleTimeString()}` : null], ['Reason', e.reason], ['Decided by', e.decidedBy], ['Exit code', e.code ?? null], ['Minutes', e.minutes], ['Agent', e.agent],
+        ['Folder', e.cwd], ['Host', e.host ? `${e.host}${e.port ? `:${e.port}` : ''}` : null], ['Repeated', e.count > 1 ? `${e.count} times, last at ${new Date(e.lastAt).toLocaleTimeString()}` : null], ['Reason', e.reason], ['Decided by', e.decidedBy], ['Exit code', e.code ?? null], ['Minutes', e.minutes], ['Agent', e.agent],
     ].filter(([, v]) => v !== undefined && v !== null && v !== '');
     openDialog(`<h2>${icon(auditIcon(e)[0])}${esc(auditTitle(e))}</h2>
         <div class="list">${rows.map(([k, v]) => `<div class="row"><div class="main"><div class="sub">${esc(k)}</div><div class="title" style="font-size:14.5px;white-space:normal">${esc(String(v))}</div></div></div>`).join('')}</div>
