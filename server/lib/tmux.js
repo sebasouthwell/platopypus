@@ -6,6 +6,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config, tmuxConfPath } from './config.js';
+import { log } from './log.js';
 
 const run = promisify(execFile);
 const conf = tmuxConfPath();
@@ -48,7 +49,7 @@ const haveSystemd = () => fs.existsSync('/run/systemd/system') && ['/usr/bin/sys
 function launcher() {
     const out = [];
     const prio = (() => { try { return os.getPriority(); } catch { return 0; } })();
-    const pre = haveSystemd() ? ['systemd-run', '--quiet', '--scope', '--collect', `--unit=porthole-shells-${Date.now().toString(36)}`, '-p', 'CPUWeight=100', '-p', 'IOWeight=100', '-p', 'OOMScoreAdjust=500', '--'] : [];
+    const pre = haveSystemd() ? ['systemd-run', '--quiet', '--scope', '--collect', `--unit=porthole-shells-${Date.now().toString(36)}`, '-p', 'CPUWeight=100', '-p', 'IOWeight=100', '--'] : [];
     if (prio < 0) out.push('nice', '-n', String(-prio));   // children at normal priority, not Porthole's raised one
     return [...pre, ...out];
 }
@@ -61,7 +62,7 @@ export async function newSession(name, cwd, command, env = {}) {
     const pre = launcher();
     if (pre.length) {
         try { await run(pre[0], [...pre.slice(1), 'tmux', ...tmuxBase, ...args], { maxBuffer: 4 * 1024 * 1024 }); return; }
-        catch (err) { if (!/systemd-run|Failed to|scope/i.test(err.stderr || err.message)) throw new Error((err.stderr || err.message).trim()); /* no systemd after all: plain tmux below */ }
+        catch (err) { log('tmux', `systemd-run scope failed (${String(err.stderr || err.message).trim().split(String.fromCharCode(10))[0]}); starting plain`); /* whatever went wrong with the scope, the session itself must start: plain tmux below */ }
     }
     await tmux(...args);
     // tmux swallows OSC sequences it does not know (credshare's card announcement); allow DCS-wrapped passthrough.

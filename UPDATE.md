@@ -426,6 +426,9 @@ phone's Update button. Mechanism:
   `systemd-run --scope` (CPUWeight 100, OOMScoreAdjust 500) at nice 0, so shells, servers and tunnels live outside
   Porthole's cgroup at normal priority and survive its restarts as before. Existing tmux servers are untouched until
   they next exit (end every shell once, or reboot, for the new scope).
+- **1.25.1** — Shell scope: `systemd-run --scope` was given `OOMScoreAdjust`, which scopes refuse, so on a systemd box no
+  new shell or service could start under 1.25.0. Scopes now carry `CPUWeight`/`IOWeight` only, and any scope failure
+  falls back to plain tmux (logged) instead of failing the start.
 
 ## Release checklist
 
