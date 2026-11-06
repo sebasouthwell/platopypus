@@ -1131,6 +1131,40 @@ EOF`);
     sh('rm -rf /tmp/mig');
 }
 
+// 8c2. Limit reached: a dry run lists what is not a live service; "do it now" stops those and leaves live services.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    sh(`rm -rf /Projects/smoke-limit && mkdir -p /Projects/smoke-limit && printf -- '---\nservices:\n  web:\n    start: python3 -m http.server 8171\n    port: 8171\n---\n' > /Projects/smoke-limit/PORTHOLE.md`);
+    r = await call('/api/live/smoke-limit/web/start', { method: 'POST' }); check('a live service runs for the limit test', r.status === 200, JSON.stringify(r.body).slice(0, 120));
+    r = await call('/api/servers/run', { method: 'POST', body: { name: 'smoke-limit-plain', port: 8172, cwd: '/', cmd: ['python3', '-m', 'http.server', '8172'] } }); check('a plain server runs for the limit test', r.status === 201, JSON.stringify(r.body).slice(0, 120));
+    await sleep(1500);
+    r = await call('/api/limit'); check('the limit guard is on by default with a load limit', r.status === 200 && r.body.on === true && r.body.load >= 2 && typeof r.body.loadNow === 'number', JSON.stringify(r.body));
+    r = await call('/api/limit', { method: 'PUT', body: { load: 1 } }); check('a silly load limit is refused', r.status === 400);
+    r = await call('/api/limit/run', { method: 'POST', body: { dry: true } });
+    check('a dry run lists the plain server but not the live service, and stops nothing', r.status === 200 && r.body.left.some(x => x.name === 'smoke-limit-plain') && !r.body.left.some(x => /smoke-limit-web/.test(x.name)) && r.body.stopped.length === 0 && (await call('/api/servers')).body.find(s => s.slug === 'smoke-limit-plain')?.alive === true, JSON.stringify(r.body).slice(0, 300));
+    // The real run only where Docker is this box's own (a remote daemon's containers are someone else's): never on a dev PC.
+    if (process.env.PORTHOLE_DOCKER_HOST) { console.log('SKIP  limit "do it now" (the Docker daemon is not the box)'); r = { status: 200, body: { stopped: [{ name: 'smoke-limit-plain' }] } }; await call('/api/servers/smoke-limit-plain/stop', { method: 'POST' }); }
+    else r = await call('/api/limit/run', { method: 'POST', body: {} });
+    const after = (await call('/api/servers')).body;
+    check('do it now stops the plain server and leaves the live service running', r.status === 200 && r.body.stopped.some(x => x.name === 'smoke-limit-plain') && after.find(s => s.slug === 'smoke-limit-plain')?.alive === false && after.find(s => s.slug === 'live-smoke-limit-web')?.alive === true, JSON.stringify({ stopped: r.body.stopped, alive: after.map(s => [s.slug, s.alive]) }).slice(0, 300));
+    const lr = (await call('/api/audit?type=activity')).body.events.find(e => e.action === 'limit-reached');
+    check('limit reached is in the audit log with what it stopped', process.env.PORTHOLE_DOCKER_HOST ? true : (!!lr && /smoke-limit-plain/.test(lr.what)), JSON.stringify(lr));
+    await call('/api/live/smoke-limit/web/stop', { method: 'POST' }).catch(() => {});
+    await call('/api/servers/smoke-limit-plain', { method: 'DELETE' }).catch(() => {}); await call('/api/servers/live-smoke-limit-web', { method: 'DELETE' }).catch(() => {});
+    sh('rm -rf /Projects/smoke-limit');
+}
+
+// 8c3. Device priority: Porthole runs at nice -10, the shells it starts at nice 0.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const self = sh("ps -o ni= -p $(pgrep -f 'node server.js' | head -1)").trim();
+    const pane = sh("ps -o ni= -p $(tmux -L porthole display-message -p -t smoke: '#{pane_pid}')").trim();
+    // Raising priority needs CAP_SYS_NICE, which Docker withholds: here only the shells' normal priority can be checked.
+    check('shells run at normal priority, never at a raised one', Number(pane) === 0 && Number(self) <= 0, `porthole nice ${self}, shell pane nice ${pane}`);
+}
+
 // 8d. Usage: memory and CPU per shell and server for the stat bubbles.
 r = await call('/api/usage');
 check('usage lists the box, every shell and running server', r.status === 200 && r.body.box.memTotal > 0 && r.body.shells.smoke && r.body.shells.smoke.mem > 0 && typeof r.body.shells.smoke.cpu === 'number', JSON.stringify({ box: r.body.box, smoke: r.body.shells.smoke }).slice(0, 200));

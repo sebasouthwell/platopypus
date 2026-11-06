@@ -283,13 +283,26 @@ RestartSec=2
 KillMode=process
 # Shells need a full environment, so no sandboxing beyond running unprivileged.
 NoNewPrivileges=no
+# The phone must stay responsive whatever the agents do: Porthole goes first for CPU and disk, keeps 256 MB of its
+# memory out of reclaim, and is the last thing the OOM killer picks. Shells, servers and tunnels run in their own
+# scope (see server/lib/tmux.js) at normal priority, so this covers Porthole's own process only.
+Nice=-10
+CPUWeight=1000
+IOWeight=1000
+MemoryLow=256M
+OOMScoreAdjust=-900
 
 [Install]
 WantedBy=multi-user.target
 EOF
+    # Memory protection only counts when the parent slice carries it too; nginx (the only way in) gets a share.
+    mkdir -p /etc/systemd/system/system.slice.d /etc/systemd/system/nginx.service.d
+    printf '[Slice]\nMemoryLow=384M\n' > /etc/systemd/system/system.slice.d/porthole.conf
+    printf '[Service]\nNice=-5\nCPUWeight=500\nIOWeight=500\nMemoryLow=64M\nOOMScoreAdjust=-500\n' > /etc/systemd/system/nginx.service.d/porthole.conf
     systemctl daemon-reload
     systemctl enable --now porthole
     systemctl restart porthole
+    systemctl try-restart nginx 2>/dev/null || true
 
     # ---------- nginx + let's encrypt ----------
     # nginx config is rendered by Porthole on every run (safe for updates); certbot only obtains/renews the

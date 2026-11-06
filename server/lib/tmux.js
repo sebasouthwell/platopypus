@@ -1,6 +1,8 @@
 // Thin wrapper around the dedicated tmux server (`tmux -L porthole`). Every shell and every
 // tunnel is a tmux session, so they outlive the web server and can also be attached from an SSH app.
 
+import fs from 'node:fs';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config, tmuxConfPath } from './config.js';
@@ -38,11 +40,29 @@ export async function hasSession(name) {
     }
 }
 
+// The tmux server (and so every shell, server, live service and tunnel under it) runs in its own systemd scope at
+// normal priority, outside Porthole's service cgroup: Porthole keeps its Nice/CPUWeight/MemoryLow to itself, the
+// OOM killer prefers the shells, and the scope outlives a Porthole restart. The scope is created by whichever
+// new-session call starts the server; later clients just talk to it. Without systemd (Docker mode) this is plain tmux.
+const haveSystemd = () => fs.existsSync('/run/systemd/system') && ['/usr/bin/systemd-run', '/bin/systemd-run'].some(f => fs.existsSync(f));
+function launcher() {
+    const out = [];
+    const prio = (() => { try { return os.getPriority(); } catch { return 0; } })();
+    const pre = haveSystemd() ? ['systemd-run', '--quiet', '--scope', '--collect', `--unit=porthole-shells-${Date.now().toString(36)}`, '-p', 'CPUWeight=100', '-p', 'IOWeight=100', '-p', 'OOMScoreAdjust=500', '--'] : [];
+    if (prio < 0) out.push('nice', '-n', String(-prio));   // children at normal priority, not Porthole's raised one
+    return [...pre, ...out];
+}
+
 // Create a detached session. `command` is optional; without it the user's shell starts.
 export async function newSession(name, cwd, command, env = {}) {
     const args = ['new-session', '-d', '-s', name, '-c', cwd, '-x', '100', '-y', '40'];
     for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
     if (command) args.push(command);
+    const pre = launcher();
+    if (pre.length) {
+        try { await run(pre[0], [...pre.slice(1), 'tmux', ...tmuxBase, ...args], { maxBuffer: 4 * 1024 * 1024 }); return; }
+        catch (err) { if (!/systemd-run|Failed to|scope/i.test(err.stderr || err.message)) throw new Error((err.stderr || err.message).trim()); /* no systemd after all: plain tmux below */ }
+    }
     await tmux(...args);
     // tmux swallows OSC sequences it does not know (credshare's card announcement); allow DCS-wrapped passthrough.
     try { await tmux('set-option', '-g', 'allow-passthrough', 'on'); } catch { /* older tmux: the WS push below still works */ }

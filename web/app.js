@@ -3101,10 +3101,27 @@ async function loadAlerts() {
             <div class="list gap"><button class="row" data-test ${s.ready ? '' : 'disabled'}><span class="ico brass">${icon('send')}</span><div class="main"><div class="title">Send a test</div><div class="sub">${s.lastError ? `<span style="color:var(--flare)">Last send failed: ${esc(s.lastError.message)}</span>` : s.lastSent ? `Last sent ${new Date(s.lastSent).toLocaleString()}` : 'Check that messages arrive'}</div></div></button>
             <div class="row"><div class="main"><div class="title">${s.pausedUntil ? `Paused until ${new Date(s.pausedUntil).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Pause'}</div><div class="sub">Nothing is sent while paused; the audit log keeps everything</div></div>${s.pausedUntil ? '<button class="text-btn" data-pause="0">Resume</button>' : '<button class="text-btn" data-pause="60">1 h</button><button class="text-btn" data-pause="480">8 h</button>'}</div></div>`;
     }
+    const lim = await api('/api/limit').catch(() => null);
+    if (lim) html += `<h2 class="section">Limit reached</h2><div class="list">
+        <div class="row"><div class="main"><div class="title">Overload guard</div><div class="sub" style="white-space:normal">When the load stays over ${lim.load} (now ${lim.loadNow} on ${lim.cpus} vCPU) for a minute: close every public quick link, then stop servers, runs and containers that are not live services, the heaviest and newest first, until it comes down. Live services and shells are never touched.${lim.last ? ` Last fired ${new Date(lim.last.at).toLocaleString()}: ${lim.last.stopped} stopped, ${lim.last.links} link${lim.last.links === 1 ? '' : 's'} closed.` : ''}</div></div><button class="switch ${lim.on ? 'on' : ''}" data-limit-on role="switch" aria-checked="${lim.on}" aria-label="Overload guard"><span></span></button></div>
+        <div class="row"><div class="main"><div class="title">Load limit</div><div class="sub">Fires when the 1-minute load is over this</div></div><input type="number" min="2" max="500" step="1" value="${lim.load}" data-limit-load style="width:72px;text-align:right"></div>
+        <button class="row" data-limit-preview><span class="ico brass">${icon('info')}</span><div class="main"><div class="title">What would it stop now?</div><div class="sub">A list, nothing is touched</div></div></button>
+        <button class="row" data-limit-now><span class="ico flare">${icon('stop')}</span><div class="main"><div class="title">Do it now</div><div class="sub">Close public links and stop everything that is not a live service</div></div></button></div>`;
     html += `<h2 class="section">What to send</h2><div class="list">${s.kinds.map(k => `<div class="row"><div class="main"><div class="title">${esc(k.title)}</div><div class="sub" style="white-space:normal">${esc(k.sub)}</div></div><button class="switch ${s.on[k.key] ? 'on' : ''}" data-kind="${k.key}" role="switch" aria-checked="${!!s.on[k.key]}" aria-label="${esc(k.title)}"><span></span></button></div>`).join('')}</div>`;
     body.innerHTML = html;
     const put = async b => { try { await api('/api/alerts', { method: 'PUT', body: b }); } catch (ex) { toast(ex.message, true); } loadAlerts().catch(() => {}); };
     $$('[data-addbot]', body).forEach(b => b.onclick = () => addTelegramBot());
+    const lo = $('[data-limit-on]', body); if (lo) lo.onclick = async () => { try { await api('/api/limit', { method: 'PUT', body: { on: lo.getAttribute('aria-checked') !== 'true' } }); } catch (ex) { toast(ex.message, true); } loadAlerts().catch(() => {}); };
+    const ll = $('[data-limit-load]', body); if (ll) ll.onchange = async () => { try { await api('/api/limit', { method: 'PUT', body: { load: Number(ll.value) } }); toast('Load limit saved'); } catch (ex) { toast(ex.message, true); } };
+    const showPlan = (r, done) => openDialog(`<h2>${icon(done ? 'stop' : 'info')}${done ? 'Limit reached: done' : 'What would stop now'}</h2><p class="muted">Load ${r.load}. ${r.links.length ? `${r.links.length} public link${r.links.length === 1 ? '' : 's'}${done ? ' closed' : ' would close'}.` : 'No public links open.'}</p>
+        ${(done ? r.stopped : r.left).length ? `<div class="list">${(done ? r.stopped : r.left).map(x => `<div class="row"><div class="main"><div class="title">${esc(x.title)}<span class="tag dim">${esc(x.kind)}</span></div><div class="sub">${x.mem} MB · ${x.cpu}% · started ${x.created ? new Date(x.created).toLocaleString() : '?'}</div></div></div>`).join('')}</div>` : `<p class="empty">${done ? 'Nothing had to be stopped.' : 'Nothing to stop: only live services and shells are running.'}</p>`}
+        ${done && r.left.length ? `<p class="sub">Left running (the load came down): ${r.left.map(x => esc(x.title)).join(', ')}</p>` : ''}
+        <div class="buttons"><button data-close>Close</button></div>`);
+    const lp = $('[data-limit-preview]', body); if (lp) lp.onclick = async () => { lp.disabled = true; try { showPlan(await api('/api/limit/run', { method: 'POST', body: { dry: true } }), false); } catch (ex) { toast(ex.message, true); } lp.disabled = false; };
+    const ln = $('[data-limit-now]', body); if (ln) ln.onclick = async () => {
+        if (!(await confirmDialog({ title: 'Close links and stop everything that is not a live service?', text: 'Public quick links close; registered servers, .portholerun runs and containers stop (they can be started again). Live services and shells stay.', action: 'Do it now' }))) return;
+        ln.disabled = true; try { showPlan(await api('/api/limit/run', { method: 'POST', body: {} }), true); loadServices().catch(() => {}); } catch (ex) { toast(ex.message, true); } ln.disabled = false; loadAlerts().catch(() => {});
+    };
     $$('[data-bot]', body).forEach(b => b.onclick = () => put({ itemId: b.dataset.bot }));
     $$('[data-kind]', body).forEach(b => b.onclick = () => put({ on: { [b.dataset.kind]: !s.on[b.dataset.kind] } }));
     $$('[data-pause]', body).forEach(b => b.onclick = () => put({ pauseMinutes: Number(b.dataset.pause) }));
@@ -3151,7 +3168,7 @@ const AUDIT_TITLES = {
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
         'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };
@@ -3161,6 +3178,7 @@ function auditIcon(e) {
     if (e.type === 'credential') return ['key', 'brass'];
     if (e.type === 'network') return ['egress', 'dock'];
     if (e.action === 'alerts-changed') return ['bell', 'brass'];
+    if (e.action.startsWith('limit-')) return ['stop', 'flare'];
     if (e.action === 'commit' || e.action.startsWith('git-')) return ['commit', e.agent ? 'brass' : 'dim'];
     if (/tunnel|hostname/.test(e.action)) return ['link', 'kelp'];
     return [/service|portholerun/.test(e.action) ? 'globe' : 'server', 'dock'];

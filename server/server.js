@@ -36,6 +36,8 @@ import * as audit from './lib/audit.js';
 import * as alerts from './lib/alerts.js';
 import * as egress from './lib/egress.js';
 import * as usage from './lib/usage.js';
+import * as limit from './lib/limit.js';
+import os from 'node:os';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
 import * as portholerun from './lib/portholerun.js';
@@ -96,6 +98,7 @@ const ACTIVITY = [
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(actions|groups)\//, 'service-action', (m, b, r) => ({ what: `${r?.label || 'action'}${b.item ? ` · ${b.item}` : ''}`, project: decodeURIComponent(m[1]), code: r?.code })],
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/pull$/, 'image-pull', (m, b, r) => ({ what: `${decodeURIComponent(m[1])}/${m[2]} · ${r?.image || ''} (${r?.changed ? (r.restarted ? 'new image, restarted' : 'new image') : 'no change'})`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
+    ['PUT', /^\/api\/limit$/, 'limit-changed', (m, b, r) => ({ what: `Limit reached guard ${r?.on ? 'on' : 'off'}, load over ${r?.load}` })],
     ['PUT', /^\/api\/alerts$/, 'alerts-changed', (m, b, r) => ({ what: `Telegram alerts${r?.botName ? ` via ${r.botName}` : ''}: ${r ? Object.entries(r.on).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : ''}${r?.pausedUntil ? ' (paused)' : ''}` })],
     ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
 ];
@@ -625,6 +628,10 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Push alerts (Telegram bot from the Vault) and the network egress log
+        // Limit reached: the overload guard (settings, a dry run of what it would stop, and "do it now").
+        if (p === '/api/limit' && method === 'GET') return send(res, 200, limit.settings());
+        if (p === '/api/limit' && method === 'PUT') return send(res, 200, limit.configure(await readJson(req, 4096)));
+        if (p === '/api/limit/run' && method === 'POST') { const b = await readJson(req, 4096).catch(() => ({})); return send(res, 200, await limit.act({ reason: b.dry ? 'preview' : 'asked from the phone', dry: !!b.dry, force: !b.dry })); }
         if (p === '/api/alerts' && method === 'GET') return send(res, 200, alerts.settings());
         if (p === '/api/alerts' && method === 'PUT') return send(res, 200, alerts.configure(await readJson(req, 8 * 1024), req.headers.origin || null));
         if (p === '/api/alerts/test' && method === 'POST') return send(res, 200, await alerts.test());
@@ -762,6 +769,7 @@ audit.onRecord(alerts.fromAudit);
 auth.events.on('signin', alerts.fromAuth);
 auth.events.on('lockout', alerts.fromAuth);
 setInterval(() => alerts.checkServers(services).catch(() => {}), 30_000);
+setInterval(() => limit.check().catch(() => {}), 30_000);
 setInterval(() => alerts.checkCommits(audit).catch(() => {}), 5 * 60_000);
 for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.stop(); } catch { /* exiting */ } process.exit(0); });
 
@@ -769,6 +777,8 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.
 update.schedule();
 
 function groupExists(name) { try { return fs.readFileSync('/etc/group', 'utf8').split('\n').some(l => l.startsWith(name + ':')); } catch { return false; } }
+// Porthole first: raise its own priority (the systemd unit does this too; this covers Docker mode and old units).
+try { if (os.getPriority() > -10) os.setPriority(process.pid, -10); } catch { /* not allowed: fine */ }
 server.listen(config.port, config.bind, () => {
     log('porthole', `listening on http://${config.bind}:${config.port}  root=${config.root}  state=${config.state}`);
     // iptables rules do not survive a reboot: put the service-account limits back before any live service starts.

@@ -66,6 +66,7 @@ with mode 0600. Formats as of version 1.0:
 | `quick.json` | quick.js | `{ pins: [{ id, kind, project, key, action, group, item, itemLabel, at }], recents: [â€¦ , code] }` â€” Home shortcuts to live-service commands; matched by label (1.19.0) |
 | `audit/YYYY-MM-DD.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); one file per UTC day, kept 90 days, 200 MB cap; `count`/`lastAt` on merged repeats (1.21.0; `audit.jsonl`/`audit.1.jsonl` from 1.20.0 read until they age out) |
 | `alerts.json` | alerts.js | `{ itemId, chatId, on: { root, signin, link, crash, egress, credential, commit }, pausedUntil, origin, lastSent, lastError }` â€” Telegram alerts; the bot is a general Vault entry referenced by id, its token is never copied here (1.22.0) |
+| `limit.json` | limit.js | `{ on, load, last: { at, reason, load, stopped, links } }` — the overload guard (1.25.0) |
 | `egress/YYYY-MM-DD.json`, `egress/seen.json` | egress.js | new outbound connections by the agent user and service accounts, one row per (who, project, host, port) with count/first/last/procs, kept 90 days; `seen.json` = first time each project reached each host:port (1.22.0) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
@@ -413,6 +414,18 @@ phone's Update button. Mechanism:
   swapped, over the whole process tree; containers from `docker stats`) and CPU (% of one core): amber past 400 MB or
   60 %, red past 900 MB. The Shells tab opens with a box line (memory, swap, load) that turns amber when the box is
   short. New route `GET /api/usage` (lib/usage.js, sampled from /proc at most every 3 s). No new state.
+- **1.25.0** — **Limit reached** (More → Alerts): when the 1-minute load stays over the limit (10, `PORTHOLE_LIMIT_LOAD`
+  or the page) for two 30 s checks, Porthole closes every public quick link, then stops what is not a live service,
+  worst first (CPU + memory incl. swap, newest first on a tie): registered servers, `.portholerun` runs, containers.
+  It stops one, waits 30 s, and goes on only while the load is still over 70 % of the limit; 10-minute cooldown.
+  Live services, hostnames on your domain and shells are never touched; nothing is deleted. Alert kind `limit` (on
+  by default), audit `limit-reached` / `limit-changed`, routes `GET/PUT /api/limit`, `POST /api/limit/run` (`dry`
+  for a preview). New state `limit.json` (`{ on, load, last }`). **Device priority:** the systemd unit gets
+  `Nice=-10 CPUWeight=1000 IOWeight=1000 MemoryLow=256M OOMScoreAdjust=-900` (plus `system.slice` `MemoryLow=384M` and an
+  nginx drop-in), Porthole raises its own nice at start in Docker mode, and the tmux server is started through
+  `systemd-run --scope` (CPUWeight 100, OOMScoreAdjust 500) at nice 0, so shells, servers and tunnels live outside
+  Porthole's cgroup at normal priority and survive its restarts as before. Existing tmux servers are untouched until
+  they next exit (end every shell once, or reboot, for the new scope).
 
 ## Release checklist
 
