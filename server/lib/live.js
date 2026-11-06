@@ -557,11 +557,13 @@ export async function credentials(project, key, index) {
     return view;
 }
 
-export async function putOnHostname(project, key) {
+export async function putOnHostname(project, key, { takeOver = false } = {}) {
     const { s } = findService(project, key);
     if (!s.port) throw httpError(400, 'A worker has no port to serve.');
     if (!s.hostname) throw httpError(400, 'Set hostname: in PORTHOLE.md first (or use Share on your domain).');
-    return zoned.create({ port: Number(s.port), hostname: String(s.hostname).toLowerCase(), name: s.title || `${project} ${key}` });
+    const r = await zoned.create({ port: Number(s.port), hostname: String(s.hostname).toLowerCase(), name: s.title || `${project} ${key}`, takeOver });
+    if (takeOver) record('activity', 'hostname-moved', { project, actor: 'phone', what: `${String(s.hostname).toLowerCase()} → this box` });
+    return r;
 }
 
 export function check(root) {

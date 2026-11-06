@@ -19,12 +19,13 @@ export const KINDS = [
     { key: 'signin', title: 'Sign-ins and lockouts', sub: 'Someone signed in to Porthole, or an address was locked out after failed attempts.', def: true },
     { key: 'link', title: 'Agents opening public links', sub: 'A quick link or a hostname on your domain, started by an agent.', def: true },
     { key: 'limit', title: 'Limit reached', sub: 'The box was overloaded and Porthole closed public links and stopped servers and containers that are not live services.', def: true },
+    { key: 'backup', title: 'A backup fails', sub: 'A project backup to S3 did not complete.', def: true },
     { key: 'crash', title: 'A server stops by itself', sub: 'A registered server or live service was running and is not any more, without anyone stopping it.', def: true },
     { key: 'egress', title: 'Connections to somewhere new', sub: 'An agent or a service connected to a host it has not used before.', def: false },
     { key: 'credential', title: 'Agents using Vault values', sub: 'Every vault run and vault get by an agent. Can be busy.', def: false },
     { key: 'commit', title: 'Agent commits', sub: 'A commit by an agent in a project under /Projects.', def: false },
 ];
-const ICON = { root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
+const ICON = { root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', backup: '💾', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
 
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 function load() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } }

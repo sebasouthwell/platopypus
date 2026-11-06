@@ -67,6 +67,7 @@ with mode 0600. Formats as of version 1.0:
 | `audit/YYYY-MM-DD.jsonl` | audit.js | one JSON line per escalation, credential use or activity (names and commands, never values or output); one file per UTC day, kept 90 days, 200 MB cap; `count`/`lastAt` on merged repeats (1.21.0; `audit.jsonl`/`audit.1.jsonl` from 1.20.0 read until they age out) |
 | `alerts.json` | alerts.js | `{ itemId, chatId, on: { root, signin, link, crash, egress, credential, commit }, pausedUntil, origin, lastSent, lastError }` â€” Telegram alerts; the bot is a general Vault entry referenced by id, its token is never copied here (1.22.0) |
 | `limit.json` | limit.js | `{ on, load, last: { at, reason, load, stopped, links } }` — the overload guard (1.25.0) |
+| `backups.json`, `backup-tmp/` | backup.js | backup settings and per-project last run; archives in flight (1.26.0) |
 | `egress/YYYY-MM-DD.json`, `egress/seen.json` | egress.js | new outbound connections by the agent user and service accounts, one row per (who, project, host, port) with count/first/last/procs, kept 90 days; `seen.json` = first time each project reached each host:port (1.22.0) |
 | `logos/` | logos.js | cached Docker Hub image logos (`<hash>.png`, `<hash>.none` = none, retried after a week) (1.16.0) |
 | `update-plan.json` | bin/porthole-update | `{ from, to, pending: [manifest entries] }` written before each install (1.15.0) |
@@ -429,6 +430,17 @@ phone's Update button. Mechanism:
 - **1.25.1** — Shell scope: `systemd-run --scope` was given `OOMScoreAdjust`, which scopes refuse, so on a systemd box no
   new shell or service could start under 1.25.0. Scopes now carry `CPUWeight`/`IOWeight` only, and any scope failure
   falls back to plain tmux (logged) instead of failing the start.
+- **1.26.0** — **Backups to S3** (More → Backups; Back up now / Backups… on a service page). Storage is the new Vault
+  service *Backup storage (S3)* (style `s3Bucket`: key, secret, bucket, region, optional prefix and endpoint). One
+  `tar.zst` per run of `backup.paths` plus container volumes (rw), owners/ACLs kept, service frozen (SIGSTOP / docker
+  pause) while read; keys `<prefix>/<project>/<ISO time>.tar.zst`; retention keeps the last N (14); optional daily
+  hour with per-project switches. Restore stops the service, moves the current folders to
+  `.porthole/restore-undo-<ts>`, extracts, starts again. Own SigV4 client (lib/s3.js, no SDK; single PUT ≤ 5 GB).
+  Routes `GET/PUT /api/backups`, `POST /api/backups/check`, `GET/POST /api/backups/:project`,
+  `POST /api/backups/:project/restore`. Audit `backup` / `backup-failed` / `restore`; alert kind `backup` (failures).
+  New state `backups.json` (`{ keep, daily, projects: { name: { daily, last, lastError } } }`) and a scratch folder
+  `backup-tmp/`. install.sh now installs `zstd` (backups need it; a box updated from an older release gets it on
+  update). A spawn failure in a backup fails that backup, never the server.
 
 ## Release checklist
 

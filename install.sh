@@ -45,7 +45,7 @@ say "base packages"
 apt-get -o DPkg::Lock::Timeout=600 update -q
 apt-get -o DPkg::Lock::Timeout=600 install -y -q --no-install-recommends \
     ca-certificates curl gnupg git tmux jq unzip zip ripgrep iproute2 procps less nano \
-    build-essential python3 python3-pip python3-venv sudo locales openssl ncurses-term rsync acl iptables
+    build-essential python3 python3-pip python3-venv sudo locales openssl ncurses-term rsync acl iptables zstd
 locale-gen en_GB.UTF-8 en_US.UTF-8 >/dev/null 2>&1 || true
 
 # ---------- node 22 ----------

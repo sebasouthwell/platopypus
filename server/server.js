@@ -37,6 +37,7 @@ import * as alerts from './lib/alerts.js';
 import * as egress from './lib/egress.js';
 import * as usage from './lib/usage.js';
 import * as limit from './lib/limit.js';
+import * as backups from './lib/backup.js';
 import os from 'node:os';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
@@ -628,6 +629,13 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Push alerts (Telegram bot from the Vault) and the network egress log
+        // Backups to S3: settings, a storage check, back up / list / restore per project.
+        if (p === '/api/backups' && method === 'GET') return send(res, 200, backups.settings());
+        if (p === '/api/backups' && method === 'PUT') return send(res, 200, backups.configure(await readJson(req, 8 * 1024)));
+        if (p === '/api/backups/check' && method === 'POST') return send(res, 200, await backups.check());
+        if ((m = p.match(/^\/api\/backups\/([^/]{1,80})$/)) && method === 'GET') return send(res, 200, await backups.list(decodeURIComponent(m[1])));
+        if ((m = p.match(/^\/api\/backups\/([^/]{1,80})$/)) && method === 'POST') return send(res, 200, await backups.backup(decodeURIComponent(m[1])));
+        if ((m = p.match(/^\/api\/backups\/([^/]{1,80})\/restore$/)) && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await backups.restore(decodeURIComponent(m[1]), String(b.name || ''))); }
         // Limit reached: the overload guard (settings, a dry run of what it would stop, and "do it now").
         if (p === '/api/limit' && method === 'GET') return send(res, 200, limit.settings());
         if (p === '/api/limit' && method === 'PUT') return send(res, 200, limit.configure(await readJson(req, 4096)));
@@ -649,7 +657,8 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/live/check' && method === 'GET') return send(res, 200, live.check(url.searchParams.get('abs') || files.resolveInRoot(url.searchParams.get('path') || '.')));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|restart|hostname)$/)) && method === 'POST') {
             const [proj, key, act] = [decodeURIComponent(m[1]), m[2], m[3]];
-            return send(res, 200, act === 'hostname' ? await live.putOnHostname(proj, key) : await live[act](proj, key));
+            const hb = act === 'hostname' ? await readJson(req, 4096).catch(() => ({})) : {};
+            return send(res, 200, act === 'hostname' ? await live.putOnHostname(proj, key, { takeOver: !!hb.takeOver }) : await live[act](proj, key));
         }
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3], b?.inputs || {})); }
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/groups\/(\d{1,3})$/)) && method === 'GET') return send(res, 200, await live.groupItems(decodeURIComponent(m[1]), m[2], m[3]));
@@ -682,7 +691,7 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
         const status = err.status || 500;
         if (status >= 500) console.error(err);
-        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.', ...(err.needProfile ? { needProfile: true } : {}) });
+        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.', ...(err.needProfile ? { needProfile: true } : {}), ...(err.existing ? { existing: err.existing } : {}) });
         else res.end();
     }
 });
@@ -770,6 +779,7 @@ auth.events.on('signin', alerts.fromAuth);
 auth.events.on('lockout', alerts.fromAuth);
 setInterval(() => alerts.checkServers(services).catch(() => {}), 30_000);
 setInterval(() => limit.check().catch(() => {}), 30_000);
+setInterval(() => backups.tick().catch(() => {}), 60_000);
 setInterval(() => alerts.checkCommits(audit).catch(() => {}), 5 * 60_000);
 for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.stop(); } catch { /* exiting */ } process.exit(0); });
 

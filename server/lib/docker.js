@@ -133,7 +133,7 @@ function parsePorts(str) {
 
 export async function action(name, verb) {
     if (!ID_RE.test(name)) throw httpError(400, 'Bad container name.');
-    if (!['start', 'stop', 'restart', 'remove'].includes(verb)) throw httpError(400, 'Unknown action.');
+    if (!['start', 'stop', 'restart', 'remove', 'pause', 'unpause'].includes(verb)) throw httpError(400, 'Unknown action.');
     if (verb === 'remove') await docker(['rm', '-f', name], 60_000);
     else await docker([verb, name], 60_000);
     log('docker', `${verb} ${name}`);

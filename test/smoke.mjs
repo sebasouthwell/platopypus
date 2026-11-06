@@ -1131,6 +1131,51 @@ EOF`);
     sh('rm -rf /tmp/mig');
 }
 
+// 8c1. Backups: a project's data folders to a stand-in S3 (SigV4 PUT/GET/LIST/DELETE), list, restore.
+{
+    const http = await import('node:http');
+    const { execFileSync } = await import('node:child_process');
+    const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const store = new Map(); const seen = [];
+    const fake = http.createServer((q, res) => {
+        const u = new URL(q.url, 'http://x'); const key = decodeURIComponent(u.pathname.replace(/^\/smoke-bucket\/?/, ''));
+        seen.push(`${q.method} ${key || '/'} auth=${/^AWS4-HMAC-SHA256 Credential=AKIASMOKE\//.test(q.headers.authorization || '')}`);
+        const chunks = []; q.on('data', d => chunks.push(d)); q.on('end', () => {
+            if (q.method === 'PUT') { store.set(key, Buffer.concat(chunks)); res.writeHead(200); return res.end(); }
+            if (q.method === 'GET' && !key) { const pre = u.searchParams.get('prefix') || ''; const items = [...store.entries()].filter(([k]) => k.startsWith(pre)).map(([k, v]) => `<Contents><Key>${k}</Key><Size>${v.length}</Size><LastModified>2026-11-09T00:00:00.000Z</LastModified></Contents>`).join(''); res.writeHead(200, { 'Content-Type': 'application/xml' }); return res.end(`<ListBucketResult>${items}</ListBucketResult>`); }
+            if (q.method === 'GET') { const v = store.get(key); if (!v) { res.writeHead(404); return res.end('<Error><Code>NoSuchKey</Code></Error>'); } res.writeHead(200); return res.end(v); }
+            if (q.method === 'DELETE') { store.delete(key); res.writeHead(204); return res.end(); }
+            res.writeHead(400); res.end();
+        });
+    });
+    await new Promise(ok => fake.listen(7397, '127.0.0.1', ok));
+    sh(`rm -rf /Projects/smoke-bk && mkdir -p /Projects/smoke-bk/data /Projects/smoke-bk/uploads && echo one > /Projects/smoke-bk/data/a.txt && echo two > /Projects/smoke-bk/uploads/b.txt && printf -- '---\nservices:\n  web:\n    start: python3 -m http.server 8173\n    port: 8173\n    volumes: [data:/x]\nbackup:\n  paths: [uploads]\n---\n' > /Projects/smoke-bk/PORTHOLE.md`);
+    r = await call('/api/backups/smoke-bk', { method: 'POST' }); check('backing up without storage says what to add', r.status === 412 && /Backup storage/.test(r.body.error), `${r.status} ${r.body.error}`);
+    r = await call('/api/vault', { method: 'POST', body: { provider: 'backup-storage', style: 's3Bucket', name: 'Smoke bucket', prefix: 'BACKUP', scope: 'general', fields: { accessKeyId: 'AKIASMOKE', secretAccessKey: 'smoke-secret-key-0000000000000000', bucket: 'smoke-bucket', region: 'eu-west-2', prefix: 'box1', endpoint: 'http://127.0.0.1:7397' } } });
+    const storeId = r.body.id; check('backup storage saves as a Vault credential', r.status === 201, JSON.stringify(r.body).slice(0, 120));
+    r = await call('/api/backups/check', { method: 'POST' }); check('the storage test reaches the bucket with a signed request', r.status === 200 && r.body.ok && seen.some(s => /^GET \/ auth=true/.test(s)), JSON.stringify(r.body) + ' ' + seen.slice(-1));
+    r = await call('/api/live/smoke-bk/web/start', { method: 'POST' }); await sleep(1200);
+    r = await call('/api/backups/smoke-bk', { method: 'POST' });
+    check('a backup freezes the running service, archives backup.paths plus container-style volumes, and uploads one object', r.status === 200 && r.body.size > 100 && r.body.paths.sort().join() === 'data,uploads' && r.body.frozen.includes('live-smoke-bk-web') && [...store.keys()].some(k => /^box1\/smoke-bk\/\d{4}-.*\.tar\.zst$/.test(k)), JSON.stringify(r.body).slice(0, 240) + ' keys=' + [...store.keys()]);
+    check('the service is running again after the backup', (await call('/api/live')).body.find(p => p.project === 'smoke-bk')?.services[0]?.running === true);
+    r = await call('/api/backups/smoke-bk'); const first = r.body[0];
+    check('backups of a project are listed newest first', r.status === 200 && r.body.length === 1 && /\.tar\.zst$/.test(first.name) && first.size > 100, JSON.stringify(r.body));
+    sh('echo changed > /Projects/smoke-bk/data/a.txt && rm /Projects/smoke-bk/uploads/b.txt');
+    r = await call('/api/backups/smoke-bk/restore', { method: 'POST', body: { name: first.name } });
+    check('restore puts the folders back, keeps the current copy aside, and restarts the service', r.status === 200 && sh('cat /Projects/smoke-bk/data/a.txt').trim() === 'one' && sh('cat /Projects/smoke-bk/uploads/b.txt').trim() === 'two' && sh('cat /Projects/smoke-bk/.porthole/restore-undo-*/data/a.txt').trim() === 'changed' && r.body.restarted.includes('web'), JSON.stringify(r.body));
+    r = await call('/api/backups/smoke-bk/restore', { method: 'POST', body: { name: '../../etc/passwd' } }); check('restore only accepts a listed archive name', r.status === 400);
+    r = await call('/api/backups', { method: 'PUT', body: { keep: 1, daily: 3, project: { name: 'smoke-bk', daily: true } } });
+    check('retention and the daily hour can be set per project', r.status === 200 && r.body.keep === 1 && r.body.daily === 3 && r.body.projects['smoke-bk'].daily === true, JSON.stringify(r.body).slice(0, 200));
+    await call('/api/backups/smoke-bk', { method: 'POST' });
+    check('older archives beyond "keep" are removed after a run', [...store.keys()].filter(k => k.startsWith('box1/smoke-bk/')).length === 1, [...store.keys()].join());
+    const au = (await call('/api/audit?type=activity')).body.events.filter(e => e.project === 'smoke-bk' && /^(backup|restore)/.test(e.action));
+    check('backups and restores are in the audit log', au.some(e => e.action === 'backup') && au.some(e => e.action === 'restore'), JSON.stringify(au.map(e => e.action)));
+    check('the bucket key never appears in the Vault listing or the backups page', !JSON.stringify((await call('/api/vault')).body).includes('smoke-secret') && !JSON.stringify((await call('/api/backups')).body).includes('smoke-secret'));
+    await call('/api/backups', { method: 'PUT', body: { keep: 14, daily: null } });
+    await call('/api/live/smoke-bk/web/stop', { method: 'POST' }).catch(() => {}); await call('/api/servers/live-smoke-bk-web', { method: 'DELETE' }).catch(() => {});
+    await call(`/api/vault/${storeId}`, { method: 'DELETE' }); sh('rm -rf /Projects/smoke-bk'); fake.close();
+}
+
 // 8c2. Limit reached: a dry run lists what is not a live service; "do it now" stops those and leaves live services.
 {
     const { execFileSync } = await import('node:child_process');

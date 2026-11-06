@@ -244,6 +244,7 @@ function push(page) {
     if (page === 'security') loadSecurity().catch(e => toast(e.message, true));
     if (page === 'audit') loadAudit().catch(e => toast(e.message, true));
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
+    if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -1544,6 +1545,7 @@ async function livePage(p, key) {
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
           ${v.host ? `<a class="row" href="${esc(openLink(v.host.url, v.port, allCreds))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
           ${v.image ? `<button data-a="pull">${icon('cloud-down')}Update image</button>` : ''}
+          <button data-a="backup">${icon('cloud-up')}Back up now</button><button data-a="backups">${icon('history')}Backups…</button>
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
         ${v.image ? `<p class="sub" style="margin-top:8px">Container <span class="mono">${esc(v.image)}</span> · the app runs as <span class="mono">${esc(v.account || '')}</span> inside it, with its data folders from this project, reachable from this box only.</p>` : ''}
@@ -1563,9 +1565,22 @@ async function livePage(p, key) {
         try {
             if (a === 'start' || a === 'stop' || a === 'restart') { b.disabled = true; const r = await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : a === 'restart' ? 'Restarted' : 'Started'); return refresh_(); }
             if (a === 'root') { if (!(await confirmDialog({ title: `Run ${v.title} as root?`, text: 'Its start command and every action run with full control of the box, until they or the project’s code change.', action: 'Allow as root' }))) return; await api(url('root'), { method: 'POST' }); toast('Allowed as root'); return refresh_(); }
+            if (a === 'backup') { b.disabled = true; b.textContent = 'Backing up…'; const r = await api(`/api/backups/${encodeURIComponent(p.project)}`, { method: 'POST' }); toast(`Backed up ${(r.size / 1048576).toFixed(1)} MB in ${(r.ms / 1000).toFixed(0)} s`); return refresh_(); }
+            if (a === 'backups') { close(); return backupsDialog(p.project, () => livePage(p, key)); }
             if (a === 'pull') { b.disabled = true; b.textContent = 'Pulling…'; const r = await api(url('pull'), { method: 'POST' }); toast(r.changed ? (r.restarted ? 'New image pulled and restarted' : 'New image pulled; start it to use it') : 'Already the latest image'); return refresh_(); }
             if (a === 'unroot') { await api(url('root'), { method: 'DELETE' }); toast('Root revoked; restart it to run as porthole-svc'); return refresh_(); }
-            if (a === 'hostname') { b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…'; await api(url('hostname'), { method: 'POST' }); toast(`${v.hostname} is set up`); return refresh_(); }
+            if (a === 'hostname') {
+                b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…';
+                try { await api(url('hostname'), { method: 'POST' }); }
+                catch (ex) {
+                    if (ex.status !== 409 || !/already points at/.test(ex.message)) throw ex;
+                    b.disabled = false; b.textContent = 'Put on hostname';
+                    if (!(await confirmDialog({ title: `Move ${v.hostname} to this box?`, text: `${ex.message} Its current records are removed and the name points here; whatever answers there now stops being reachable at this name.`, action: 'Move it here' }))) return;
+                    b.disabled = true; b.textContent = 'Moving the name here…';
+                    await api(url('hostname'), { method: 'POST', body: { takeOver: true } });
+                }
+                toast(`${v.hostname} is set up`); return refresh_();
+            }
             if (a === 'share') { close(); return shareDialog(v.port, v.title); }
             if (a === 'logs') { const res = await api(url('logs') + '?tail=400', { raw: true }); const text = await res.text(); close(); const d = openDialog(`<h2>${esc(v.title)} · log</h2><pre style="max-height:60vh">${esc(text || '(empty — start the service first)')}</pre><div class="buttons"><button data-copy-all>${icon('copy')}Copy</button><button data-close>Close</button></div>`); $('[data-copy-all]', d.panel).onclick = () => copyText(text, 'Copied'); }
         } catch (ex) { toast(ex.message, true); b.disabled = false; }
@@ -3070,6 +3085,54 @@ async function credentialFormFromLegacy(preset) {
 
 // ---------- security ----------
 
+// ---------- backups ----------
+let afterStorageSave = null;
+async function addBackupStorage() {
+    const cat = await getCatalog().catch(ex => { toast(ex.message, true); return null; });
+    const svc = cat?.services.find(s => s.key === 'backup-storage');
+    if (!svc) return toast('The Backup storage service is missing from the catalogue.', true);
+    afterVaultSave = () => push('backups');
+    credentialForm(svc, cat, 's3Bucket');
+}
+function fmtMB(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
+async function loadBackups() {
+    const s = await api('/api/backups');
+    const sub = $('#more-backups-sub'); if (sub) sub.textContent = s.storage ? `${s.storage.bucket} · keep ${s.keep}${s.daily !== null ? ` · daily at ${String(s.daily).padStart(2, '0')}:00` : ''}` : 'Not set up · project data to your private S3 bucket';
+    const body = $('#backups-body');
+    const live = (await api('/api/live').catch(() => [])).filter(p => !p.errors.length);
+    let html = '<h2 class="section">Storage</h2>';
+    if (!s.storage) html += `<div class="card"><p style="margin:0 0 12px">Backups go to an S3 bucket of yours. Add its key, secret, bucket and region to the Vault as <b>Backup storage (S3)</b>; a key that can only use that one bucket is enough.</p><button class="primary" data-addstorage>${icon('plus')}Add backup storage</button></div>`;
+    else html += `<div class="list"><div class="row"><span class="ico kelp">${icon('cloud-up')}</span><div class="main"><div class="title">${esc(s.storage.name)}</div><div class="sub mono">${esc(s.storage.bucket)} · ${esc(s.storage.region)}</div></div><button class="text-btn" data-checkstorage>Test</button></div>
+        <div class="row"><div class="main"><div class="title">Keep</div><div class="sub">Archives kept per project; older ones are removed after each run</div></div><input type="number" min="1" max="365" value="${s.keep}" data-keep style="width:72px;text-align:right"></div>
+        <div class="row"><div class="main"><div class="title">Daily backup</div><div class="sub">${s.daily === null ? 'Off: only when you tap Back up' : `Every day at ${String(s.daily).padStart(2, '0')}:00 box time, for the projects switched on below`}</div></div><select data-daily><option value="">Off</option>${[...Array(24).keys()].map(h => `<option value="${h}" ${s.daily === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></div></div>`;
+    html += `<h2 class="section">Projects</h2>`;
+    if (!live.length) html += '<p class="empty">No project with a PORTHOLE.md yet.</p>';
+    else html += `<div class="list">${live.map(p => { const st = s.projects[p.project] || {}; return `<div class="row"><span class="ico ${st.last ? 'kelp' : ''}">${icon('folder')}</span><div class="main"><div class="title">${esc(p.name)}</div><div class="sub" style="white-space:normal">${st.lastError ? `<span style="color:var(--flare)">Failed ${new Date(st.lastError.at).toLocaleString()}: ${esc(st.lastError.message)}</span><br>` : ''}${st.last ? `Last: ${new Date(st.last.at).toLocaleString()} · ${fmtMB(st.last.size)} · ${esc(st.last.paths.join(', '))}` : 'Never backed up'}</div></div>${s.daily !== null ? `<button class="switch ${st.daily ? 'on' : ''}" data-pdaily="${esc(p.project)}" role="switch" aria-checked="${!!st.daily}" aria-label="Daily"><span></span></button>` : ''}<button class="text-btn" data-pbackup="${esc(p.project)}" ${s.storage ? '' : 'disabled'}>Back up</button><button class="text-btn" data-plist="${esc(p.project)}" ${s.storage ? '' : 'disabled'}>List</button></div>`; }).join('')}</div>`;
+    body.innerHTML = html;
+    const put = async b => { try { await api('/api/backups', { method: 'PUT', body: b }); } catch (ex) { toast(ex.message, true); } loadBackups().catch(() => {}); };
+    $$('[data-addstorage]', body).forEach(b => b.onclick = () => addBackupStorage());
+    const cs = $('[data-checkstorage]', body); if (cs) cs.onclick = async () => { cs.disabled = true; try { const r = await api('/api/backups/check', { method: 'POST' }); toast(`Bucket ${r.bucket} works`); } catch (ex) { toast(ex.message, true); } cs.disabled = false; };
+    const k = $('[data-keep]', body); if (k) k.onchange = () => put({ keep: Number(k.value) });
+    const d = $('[data-daily]', body); if (d) d.onchange = () => put({ daily: d.value === '' ? null : Number(d.value) });
+    $$('[data-pdaily]', body).forEach(b => b.onclick = () => put({ project: { name: b.dataset.pdaily, daily: b.getAttribute('aria-checked') !== 'true' } }));
+    $$('[data-pbackup]', body).forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Backing up…'; try { const r = await api(`/api/backups/${encodeURIComponent(b.dataset.pbackup)}`, { method: 'POST' }); toast(`Backed up ${fmtMB(r.size)} in ${(r.ms / 1000).toFixed(0)} s`); } catch (ex) { toast(ex.message, true); } loadBackups().catch(() => {}); });
+    $$('[data-plist]', body).forEach(b => b.onclick = () => backupsDialog(b.dataset.plist, () => {}));
+}
+async function backupsDialog(project, back) {
+    let list; try { list = await api(`/api/backups/${encodeURIComponent(project)}`); } catch (ex) { return toast(ex.message, true); }
+    const { panel, close } = openDialog(`<h2>${icon('history')}Backups · ${esc(project)}</h2>
+        ${list.length ? `<div class="list">${list.map((x, i) => `<div class="row"><span class="ico kelp">${icon('cloud-up')}</span><div class="main"><div class="title">${new Date(x.at).toLocaleString()}</div><div class="sub">${fmtMB(x.size)} · <span class="mono">${esc(x.name)}</span></div></div><button class="text-btn" data-restore="${i}">Restore</button></div>`).join('')}</div>` : '<p class="empty">No backups of this project yet.</p>'}
+        <div class="buttons"><button data-bnow>${icon('cloud-up')}Back up now</button><button data-close>Close</button></div>`);
+    $('[data-bnow]', panel).onclick = async b => { b.target.disabled = true; try { const r = await api(`/api/backups/${encodeURIComponent(project)}`, { method: 'POST' }); toast(`Backed up ${fmtMB(r.size)}`); close(); backupsDialog(project, back); } catch (ex) { toast(ex.message, true); b.target.disabled = false; } };
+    $$('[data-restore]', panel).forEach(b => b.onclick = async () => {
+        const x = list[Number(b.dataset.restore)];
+        if (!(await confirmDialog({ title: `Restore ${project} from ${new Date(x.at).toLocaleString()}?`, text: 'The service stops, the backed-up folders replace what is there now (the current copy is kept in .porthole/restore-undo-…), then the service starts again.', action: 'Restore' }))) return backupsDialog(project, back);
+        b.disabled = true; b.textContent = 'Restoring…';
+        try { const r = await api(`/api/backups/${encodeURIComponent(project)}/restore`, { method: 'POST', body: { name: x.name } }); close(); toast(`Restored ${r.restored.join(', ')}${r.restarted.length ? ' and restarted' : ''}`); loadServices().catch(() => {}); back(); }
+        catch (ex) { toast(ex.message, true); b.disabled = false; b.textContent = 'Restore'; }
+    });
+}
+
 // ---------- alerts ----------
 // Telegram messages for things that need you (root requests, sign-ins, public links, crashed servers) and, if you
 // want them, the busier ones (new connections, Vault use, commits). The bot is a general Vault entry.
@@ -3168,7 +3231,7 @@ const AUDIT_TITLES = {
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
         'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, backup: e => `Backed up · ${e.what}`, 'hostname-moved': e => `Hostname moved here · ${e.what}`, 'backup-failed': e => `Backup failed · ${e.what}`, restore: e => `Restored · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };
@@ -3179,6 +3242,7 @@ function auditIcon(e) {
     if (e.type === 'network') return ['egress', 'dock'];
     if (e.action === 'alerts-changed') return ['bell', 'brass'];
     if (e.action.startsWith('limit-')) return ['stop', 'flare'];
+    if (/^(backup|restore)/.test(e.action)) return ['cloud-up', e.action === 'backup-failed' ? 'flare' : 'kelp'];
     if (e.action === 'commit' || e.action.startsWith('git-')) return ['commit', e.agent ? 'brass' : 'dim'];
     if (/tunnel|hostname/.test(e.action)) return ['link', 'kelp'];
     return [/service|portholerun/.test(e.action) ? 'globe' : 'server', 'dock'];

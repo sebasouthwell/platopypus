@@ -208,7 +208,7 @@ export async function list() {
     return out.sort((a, b) => b.created - a.created);
 }
 
-export async function create({ port, hostname, name = '' }) {
+export async function create({ port, hostname, name = '', takeOver = false }) {
     const p = Number(port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) throw httpError(400, 'Port must be between 1 and 65535.');
     if (p === config.port) throw httpError(403, 'Porthole itself cannot be exposed this way.');
@@ -224,7 +224,12 @@ export async function create({ port, hostname, name = '' }) {
 
     const zone = await findZone(token, host);
     const existing = await cf(token, 'GET', `/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}`);
-    if (existing.length) throw httpError(409, `${host} already has a DNS record (${existing[0].type}). Pick another name or remove it in Cloudflare.`);
+    if (existing.length && !takeOver) {
+        const e = httpError(409, `${host} already points at ${existing.map(r => `${r.content} (${r.type})`).join(', ')}, not this box.`);
+        e.existing = existing.map(r => ({ type: r.type, content: r.content, proxied: !!r.proxied })); throw e;
+    }
+    // Moving here: the old records go first (the user confirmed on the phone), then this box's record is made.
+    for (const r of existing) { await cf(token, 'DELETE', `/zones/${zone.id}/dns_records/${r.id}`); log('zoned', `${host}: removed old ${r.type} record → ${r.content} (moved here)`); }
 
     const mode = (await directAvailable()) ? 'direct' : 'tunnel';
     const it = { slug, hostname: host, port: p, name: String(name || '').slice(0, 60) || host, mode, zoneId: zone.id, zoneName: zone.name, accountId: zone.accountId, tunnelId: null, dnsRecordId: null, via: null, origin: '127.0.0.1', created: Date.now(), token: null };

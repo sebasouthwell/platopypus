@@ -67,7 +67,7 @@ await page.screenshot({ path: process.env.SHOT || 'browser-probe.png', fullPage:
     const before = errors.length;
     await page.click('#more-list [data-page="alerts"]'); await page.waitForTimeout(1000);
     const text = await page.textContent('#alerts-body') || '';
-    check('the Alerts page offers to add a Telegram bot and lists what can be sent', await page.isVisible('#page-alerts') && /Add a Telegram bot/.test(text) && (await page.$$('#alerts-body [data-kind]')).length === 8 && errors.length === before, errors.slice(before).join(' | ').slice(0, 200));
+    check('the Alerts page offers to add a Telegram bot and lists what can be sent', await page.isVisible('#page-alerts') && /Add a Telegram bot/.test(text) && (await page.$$('#alerts-body [data-kind]')).length === (await page.evaluate(() => fetch('/api/alerts').then(r => r.json()).then(a => a.kinds.length))) && errors.length === before, errors.slice(before).join(' | ').slice(0, 200));
     const was = await page.getAttribute('#alerts-body [data-kind="commit"]', 'aria-checked');
     await page.click('#alerts-body [data-kind="commit"]'); await page.waitForTimeout(800);
     check('a kind can be switched', (await page.getAttribute('#alerts-body [data-kind="commit"]', 'aria-checked')) !== was);
