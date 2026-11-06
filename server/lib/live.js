@@ -369,7 +369,10 @@ async function containerArgv(p, key, s, account, env, port) {
         if (!asImage && !pv.ro) { try { if (fs.statSync(host).uid !== a.uid) await run('chown', ['-R', `${a.uid}:${a.gid}`, host], { timeout: 120_000 }); } catch (e) { log('live', `chown ${host}: ${e.message}`); } }
         args.push('-v', `${host}:${pv.cont}${pv.ro ? ':ro' : ''}`);
     }
-    for (const k of Object.keys(env)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) args.push('-e', k);
+    // Settings from the file (not secret) go in by value; Vault values and Porthole's names by name only, so they are
+    // taken from the pane's environment and never appear on the command line. PATH stays the image's own.
+    const fixed = s.env && typeof s.env === 'object' ? s.env : {};
+    for (const k of Object.keys(env)) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || k === 'PATH') continue; args.push('-e', k in fixed ? `${k}=${env[k]}` : k); }
     args.push(String(s.image));
     const extra = Array.isArray(s.command) ? s.command.map(String) : typeof s.command === 'string' && s.command.trim() ? s.command.trim().split(/\s+/) : [];
     return ['docker', ...args, ...extra];
