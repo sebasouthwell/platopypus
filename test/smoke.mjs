@@ -1131,6 +1131,10 @@ EOF`);
     sh('rm -rf /tmp/mig');
 }
 
+// 8d. Usage: memory and CPU per shell and server for the stat bubbles.
+r = await call('/api/usage');
+check('usage lists the box, every shell and running server', r.status === 200 && r.body.box.memTotal > 0 && r.body.shells.smoke && r.body.shells.smoke.mem > 0 && typeof r.body.shells.smoke.cpu === 'number', JSON.stringify({ box: r.body.box, smoke: r.body.shells.smoke }).slice(0, 200));
+
 // 9. Status + cleanup + logout.
 r = await call('/api/status');
 check('status', r.status === 200 && r.body.hostname, `claude=${r.body.claude?.version ?? 'none'} cloudflared=${r.body.cloudflared ?? 'none'}`);

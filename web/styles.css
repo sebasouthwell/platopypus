@@ -110,6 +110,11 @@ button.row:active { background: var(--hull-2); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 5px; background: rgba(111,177,240,.16); color: var(--dock); font-weight: 500; }
 .tag.brass { background: rgba(240,184,64,.16); color: var(--brass); }
 .tag.dim { background: var(--sea-2); color: var(--mist); }
+.tag.use { background: var(--sea-2); color: var(--mist); font-variant-numeric: tabular-nums; margin-left: 6px; white-space: nowrap; }
+.tag.use.brass { background: rgba(240,184,64,.16); color: var(--brass); }
+.tag.use.flare { background: rgba(244,106,92,.16); color: var(--flare); }
+.boxline { margin: 0 14px 10px; }
+.boxline.warn { color: var(--brass); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; display: inline-block; }
 .dot.live { background: var(--kelp); box-shadow: 0 0 0 3px rgba(63,211,154,.18); }
 .dot.warn { background: var(--brass); }

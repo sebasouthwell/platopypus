@@ -413,20 +413,36 @@ $('#home-search').addEventListener('click', async () => {
 
 // ---------- shells ----------
 
+// Stat bubble: resident+swapped memory and CPU (% of one core) of a shell, server or container. Amber past 400 MB
+// or 60 %, red past 900 MB; the box line on the Shells tab says how much is left.
+let usageSeen = { shells: {}, servers: {}, containers: {}, box: null };
+async function loadUsage() { try { usageSeen = await api('/api/usage'); } catch { /* keep the last */ } return usageSeen; }
+function useBubble(u) {
+    if (!u) return '';
+    const hot = u.mem >= 900 ? 'flare' : (u.mem >= 400 || u.cpu >= 60) ? 'brass' : '';
+    return `<span class="tag use ${hot}" title="memory incl. swap · CPU">${u.mem >= 1024 ? (u.mem / 1024).toFixed(1) + ' GB' : u.mem + ' MB'}${u.cpu ? ` · ${u.cpu}%` : ''}</span>`;
+}
+const liveSlug = (project, key) => `live ${project} ${key}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+function boxLine(b) {
+    if (!b) return '';
+    const swap = b.swapTotal ? ` · swap ${b.swapUsed >= 1024 ? (b.swapUsed / 1024).toFixed(1) + ' GB' : b.swapUsed + ' MB'} of ${(b.swapTotal / 1024).toFixed(0)} GB` : '';
+    const tight = b.memUsed / b.memTotal > 0.9 || (b.swapTotal && b.swapUsed / b.swapTotal > 0.8) || b.load[0] > b.cpus * 2;
+    return `<p class="sub boxline ${tight ? 'warn' : ''}">${tight ? 'The box is short of memory: ' : ''}${(b.memUsed / 1024).toFixed(1)} of ${(b.memTotal / 1024).toFixed(1)} GB used${swap} · load ${b.load[0]} on ${b.cpus} vCPU</p>`;
+}
 async function loadShells() {
-    const shells = await api('/api/shells');
+    const [shells] = await Promise.all([api('/api/shells'), loadUsage()]);
     state.shells = shells; renderNavShells(shells);
     $('#shell-empty').hidden = shells.length > 0;
     const groups = new Map();
     for (const s of shells) { const k = s.cwd; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
-    $('#shell-groups').innerHTML = [...groups.entries()].map(([cwd, list]) => `<div class="shell-group">
+    $('#shell-groups').innerHTML = boxLine(usageSeen.box) + [...groups.entries()].map(([cwd, list]) => `<div class="shell-group">
         <div class="group-title">${icon('folder')}${esc(shortPath(cwd))}</div>
         <div class="list">${list.map(shellRow).join('')}</div></div>`).join('');
     $$('#shell-groups .shell-row').forEach(row => row.addEventListener('click', () => openTerminal(row.dataset.name, 'Shells')));
 }
 function shellRow(s) {
     return `<button class="shell-row" data-name="${esc(s.name)}">
-        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}${s.runAs === 'agent' ? '<span class="tag">agent user</span>' : s.kind === 'agent' ? '<span class="tag dim" style="color:var(--flare)">root</span>' : ''}${s.security ? `<span class="tag dim">${esc(s.security === 'control' ? 'control' : s.security.replace('-', ' · '))}</span>` : ''}</div>
+        <div class="shell-head"><span class="dot ${s.attached ? 'live' : ''}"></span><span class="name">${esc(s.name)}</span>${useBubble(usageSeen.shells[s.name])}${s.kind === 'agent' ? `<span class="tag brass">${esc(agentTitle(s.agent))}${s.profile && s.profile !== 'default' ? ' · ' + esc(s.profile) : ''}</span>${s.yolo ? '<span class="tag dim">auto</span>' : ''}${s.scratch ? '<span class="tag dim">scratch</span>' : ''}` : `<span class="tag dim">${s.kind === 'remote-control' ? 'Remote Control' : 'shell'}</span>${s.scratch ? '<span class="tag dim">scratch</span>' : ''}`}${s.runAs === 'agent' ? '<span class="tag">agent user</span>' : s.kind === 'agent' ? '<span class="tag dim" style="color:var(--flare)">root</span>' : ''}${s.security ? `<span class="tag dim">${esc(s.security === 'control' ? 'control' : s.security.replace('-', ' · '))}</span>` : ''}</div>
         ${s.preview?.length ? `<pre class="shell-preview">${esc(s.preview.join('\n'))}</pre>` : ''}
       </button>`;
 }
@@ -723,7 +739,13 @@ function partControls(x, credChip) {
 }
 function partRow(x, credChip) {
     return `<div class="row prow">${partIcon(x)}<div class="main"><div class="title">${esc(x.title)}<span class="tag dim">${PART_LABEL[x.type] || x.type}</span></div>
-        <div class="sub">${x.running ? '<span class="live">● running</span>' : `stopped${x.status && x.type === 'container' ? ` · ${esc(x.status.toLowerCase())}` : ''}`}${x.port ? ` · <span class="mono">:${x.port}</span>` : ''}${partLink(x)}</div></div>${partControls(x, credChip)}</div>`;
+        <div class="sub">${x.running ? '<span class="live">● running</span>' + useBubble(partUsage(x)) : `stopped${x.status && x.type === 'container' ? ` · ${esc(x.status.toLowerCase())}` : ''}`}${x.port ? ` · <span class="mono">:${x.port}</span>` : ''}${partLink(x)}</div></div>${partControls(x, credChip)}</div>`;
+}
+function partUsage(x) {
+    if (x.type === 'container' || x.type === 'editor') return usageSeen.containers[x.name];
+    if (x.type === 'live') return usageSeen.servers[liveSlug(x.project, x.key)];
+    if (x.slug) return usageSeen.servers[x.slug];
+    return null;
 }
 function partsHtml(parts, credChip) {
     // Containers from one compose project fold into a single row that opens to show them.
@@ -1312,7 +1334,7 @@ $('#services-new').addEventListener('click', startSomethingDialog);
 var credsSeen = []; // var: read before this line runs (no TDZ)
 async function loadCreds() { credsSeen = await api('/api/creds').catch(() => credsSeen); return credsSeen; }
 async function loadServices() {
-    const s = await api('/api/services');
+    const [s] = await Promise.all([api('/api/services'), loadUsage()]);
     liveSeen = s.live || [];
     const shared = await loadCreds();
     const credChip = port => { const list = shared.filter(c => c.port === port); return list.length ? `<button class="pill" data-credport="${port}" title="Shared credentials">${icon('key')}${list.length > 1 ? list.length : ''}</button>` : ''; };
@@ -1329,7 +1351,7 @@ async function loadServices() {
                 for (const v of p.services) html += `
                 <div class="row"><span class="ico ${v.running ? 'kelp' : 'dim'}${p.icon ? ' fav' : ''}">${p.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(p.icon)}" alt="" loading="lazy" data-fb="${v.worker ? 'cpu' : 'globe'}">` : icon(v.worker ? 'cpu' : 'globe')}</span>
                   <div class="main"><div class="title">${esc(v.title)}<span class="tag dim">${esc(p.name)}</span>${v.worker ? '<span class="tag dim">worker</span>' : ''}</div>
-                    <div class="sub">${v.running ? `<span class="live">● running</span>` : 'stopped'}${v.host ? ` · <a href="${esc(openLink(v.host.url, v.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
+                    <div class="sub">${v.running ? `<span class="live">● running</span>` + useBubble(usageSeen.servers[v.slug || liveSlug(p.project, v.key)]) : 'stopped'}${v.host ? ` · <a href="${esc(openLink(v.host.url, v.port, shared))}" target="_blank" rel="noopener" style="color:var(--kelp)">${esc(v.host.hostname)}</a>` : v.hostname ? ` · ${esc(v.hostname)} not set up` : v.port ? ` · <span class="mono">:${v.port}</span> local` : ''}</div></div>
                   ${v.running ? `<button class="pill" data-live="stop" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('stop')}Stop</button>` : `<button class="pill" data-live="start" data-p="${esc(p.project)}" data-k="${esc(v.key)}">${icon('play')}Start</button>`}
                   <button class="more" data-live-page="${esc(p.project)}" data-k="${esc(v.key)}" aria-label="Service page">${icon('more_h')}</button>
                 </div>`;
@@ -1410,7 +1432,7 @@ async function loadServices() {
                 ...s.containers.map(c => `
                 <div class="row"><span class="ico ${c.state === 'running' ? 'dock' : 'dim'} logo"><img src="/api/docker/logo?image=${encodeURIComponent(c.image)}" alt="" loading="lazy" data-fb="${c.app === 'postgres' || c.image.startsWith('postgres') || c.image.startsWith('redis') ? 'database' : 'container'}"><span class="badge">${icon('container')}</span></span>
                   <div class="main"><div class="title">${esc(c.title)}${c.app ? '<span class="tag">app</span>' : ''}${c.compose ? `<span class="tag dim">${esc(c.compose)}</span>` : ''}${c.tunnel && ownedPorts.has(c.tunnel.port || c.ports[0]?.host) ? `<span class="tag">${linkFor(c.ports[0]?.host)?.kind === 'zoned' ? 'your domain' : 'shared'}</span>` : ''}</div>
-                    <div class="sub">${c.state === 'running' ? `<span class="live">● ${esc(c.status.replace(/^Up /, 'up '))}</span>` : esc(c.status.toLowerCase())}${c.ports.length ? ` · <span class="mono">:${c.ports.map(p => p.host).join(' :')}</span>` : ''}${c.tunnel?.url ? '' : c.ports.length && c.state === 'running' ? ' · local only' : ''}</div>
+                    <div class="sub">${c.state === 'running' ? `<span class="live">● ${esc(c.status.replace(/^Up /, 'up '))}</span>` + useBubble(usageSeen.containers[c.name]) : esc(c.status.toLowerCase())}${c.ports.length ? ` · <span class="mono">:${c.ports.map(p => p.host).join(' :')}</span>` : ''}${c.tunnel?.url ? '' : c.ports.length && c.state === 'running' ? ' · local only' : ''}</div>
                     ${ownedPorts.size ? c.ports.map(pp => linkLine(linkFor(pp.host))).join('') : ''}</div>
                   ${c.ports[0] ? credChip(c.ports[0].host) : ''}${c.state !== 'running' ? `<button class="pill" data-cact="start" data-c="${esc(c.name)}">${icon('play')}Start</button>`
                     : c.tunnel?.url ? `<a class="pill kelp" href="${esc(openLink(c.tunnel.url, c.ports[0]?.host, shared))}" target="_blank" rel="noopener">${icon('external')}Open</a>`

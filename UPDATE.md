@@ -409,6 +409,10 @@ phone's Update button. Mechanism:
   again 15 s after boot. Egress: `DOCKER-USER` gets a LOG rule for new connections off `docker0` (rows say
   `container "<name>"`) and a REJECT for 169.254.169.254. Root volume default 50 GB in Terraform. No new state.
 - **1.23.1** — Container services: settings under `env:` reach the container by value (`-e K=V`), Vault values and Porthole's own names by name only; `PATH` is never passed. Needed so an image can be given `HOME` or its own settings.
+- **1.24.0** — **Stat bubbles.** Every shell, live service, server and container shows its memory (resident plus
+  swapped, over the whole process tree; containers from `docker stats`) and CPU (% of one core): amber past 400 MB or
+  60 %, red past 900 MB. The Shells tab opens with a box line (memory, swap, load) that turns amber when the box is
+  short. New route `GET /api/usage` (lib/usage.js, sampled from /proc at most every 3 s). No new state.
 
 ## Release checklist
 

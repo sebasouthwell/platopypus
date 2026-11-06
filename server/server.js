@@ -35,6 +35,7 @@ import * as quick from './lib/quick.js';
 import * as audit from './lib/audit.js';
 import * as alerts from './lib/alerts.js';
 import * as egress from './lib/egress.js';
+import * as usage from './lib/usage.js';
 import * as logos from './lib/logos.js';
 import * as upgrade from './lib/upgrade.js';
 import * as portholerun from './lib/portholerun.js';
@@ -343,6 +344,20 @@ const server = http.createServer(async (req, res) => {
 
         // Shells
         if (p === '/api/shells' && method === 'GET') return send(res, 200, await shells.list());
+        // Memory and CPU per shell, server and container (the stat bubbles). Shells and servers by their pane's tree.
+        if (p === '/api/usage' && method === 'GET') {
+            usage.sample();
+            const [shellList, servers, ctrs] = await Promise.all([shells.list(), services.list().catch(() => []), usage.containers()]);
+            const out = { at: Date.now(), box: usage.box(), shells: {}, servers: {}, containers: Object.fromEntries(ctrs) };
+            for (const s of shellList) { const t = usage.tree(await shells.panePid(s.name)); if (t) out.shells[s.name] = t; }
+            for (const r of servers) {
+                if (!r.alive) continue;
+                const c = r.runAs === 'container' ? ctrs.get(r.slug) : null;
+                const t = c || usage.tree(r.pid);
+                if (t) out.servers[r.slug] = t;
+            }
+            return send(res, 200, out);
+        }
         if (p === '/api/shells' && method === 'POST') return send(res, 201, await shells.create(await readJson(req)));
         let m;
         if ((m = p.match(/^\/api\/shells\/([^/]+)\/mouse$/)) && (method === 'GET' || method === 'POST')) {

@@ -1,6 +1,6 @@
 {
   "name": "porthole",
-  "version": "1.23.1",
+  "version": "1.24.0",
   "description": "Phone-first web console for a personal dev box: tmux-backed Claude Code shells, file browser with uploads, one-tap Cloudflare tunnels.",
   "type": "module",
   "private": true,
