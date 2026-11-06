@@ -399,6 +399,15 @@ phone's Update button. Mechanism:
   `journalctl -k` and `resolvectl monitor` to name them. Root processes are not logged. The first connection from a
   project to a host is an audit line of the new type `network`. `PORTHOLE_EGRESS=0` turns it off; without journald
   it reports itself off. New state: `alerts.json`, `egress/` (additive). Porthole now exits cleanly on SIGTERM.
+- **1.23.0** — **Container services.** A `PORTHOLE.md` service may give `image:` instead of `start:` (with
+  `container_port`, `volumes: [<folder in the project>:<path in the container>[:ro]]`, `command`, `memory`, `user:
+  service|image`). It runs through the service registry as `docker run --rm` attached in the pane (registry `runAs:
+  container`, `account` set); the app inside runs as the project's account (`--user`, `--cap-drop ALL`,
+  `no-new-privileges`, `--init`, loopback port). Vault values pass by name (`-e NAME`) from the pane environment.
+  Stop sends `docker stop -t 15` first. New route `POST /api/live/:project/:key/pull` (audit `image-pull`) and an
+  **Update image** button. Live services that were running at shutdown (`stoppedAt` null, session gone) are started
+  again 15 s after boot. Egress: `DOCKER-USER` gets a LOG rule for new connections off `docker0` (rows say
+  `container "<name>"`) and a REJECT for 169.254.169.254. Root volume default 50 GB in Terraform. No new state.
 
 ## Release checklist
 

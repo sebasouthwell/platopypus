@@ -280,7 +280,48 @@ EOF`);
     r = await call('/api/services'); check('registered-servers list does not repeat live services', !r.body.servers.some(x => x.slug.startsWith('live-')) && r.body.live.some(p => p.project === 'smoke-live'));
     r = await call('/api/live/smoke-live/web/stop', { method: 'POST' }); await sleep(800);
     check('live stop stops it', r.status === 200 && (await call('/api/live')).body.find(p => p.project === 'smoke-live')?.services[0]?.running === false);
-    sh(`printf -- '---\nservices:\n  Bad Key:\n    port: 99999\n---\n' > /Projects/smoke-live/PORTHOLE.md`);
+    // Container services: image: instead of start:. The manifest checks need no Docker; the run does.
+    sh(`cat > /Projects/smoke-live/PORTHOLE.md <<'EOF'
+---
+services:
+  box:
+    image: nginx:alpine
+    port: 8141
+    container_port: 80
+    volumes: [www:/usr/share/nginx/html:ro, ../escape:/x]
+    memory: 12345
+    start: echo no
+  ok:
+    image: nginx:alpine
+    port: 8142
+    container_port: 80
+    volumes: [www:/usr/share/nginx/html:ro]
+    memory: 64m
+    user: image
+---
+EOF
+mkdir -p /Projects/smoke-live/www && echo smoke-container > /Projects/smoke-live/www/index.html`);
+    r = await call('/api/live/check?path=Projects/smoke-live');
+    check('container manifests are checked: volumes stay in the project, memory is a size, image and start exclude each other', r.body.ok === false && r.body.errors.some(e => /volumes\[1\]/.test(e)) && r.body.errors.some(e => /memory/.test(e)) && r.body.errors.some(e => /image and start/.test(e)) && !r.body.errors.some(e => /services\.ok/.test(e)), JSON.stringify(r.body.errors));
+    sh(`python3 -c "import re;p='/Projects/smoke-live/PORTHOLE.md';s=open(p).read();open(p,'w').write(re.sub(r'  box:.*?\\n  ok:','  ok:',s,flags=re.S))"`);
+    const lv0 = (await call('/api/live')).body.find(p => p.project === 'smoke-live')?.services[0];
+    check('a container service is listed with its image and runs as the project account', lv0?.image === 'nginx:alpine' && lv0.runAs === 'container' && /^ps-/.test(lv0.account || ''), JSON.stringify(lv0).slice(0, 200));
+    const dk = (await call('/api/docker')).body;
+    if (dk.available && process.env.DOCKER !== '0') {
+        const remoteDocker = !!process.env.PORTHOLE_DOCKER_HOST;   // the daemon is on another machine: mounts and ports are not visible from here
+        r = await call('/api/live/smoke-live/ok/start', { method: 'POST' });
+        check('a container service starts', r.status === 200 && r.body.alive === true, `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+        let body = ''; for (let i = 0; i < 20 && !/smoke-container/.test(body); i++) { await sleep(1000); try { body = remoteDocker ? sh('docker ps --format "{{.Names}} {{.Ports}}" | grep live-smoke-live-ok') : sh('curl -s http://127.0.0.1:8142/'); } catch { /* not yet */ } if (remoteDocker && /127\.0\.0\.1:8142/.test(body)) break; }
+        check('the container serves the project folder on its port, loopback only', remoteDocker ? /127\.0\.0\.1:8142->80/.test(body) : (/smoke-container/.test(body) && /127\.0\.0\.1:8142/.test(sh('docker port live-smoke-live-ok'))), body.slice(0, 120));
+        r = await call('/api/live/smoke-live/ok/pull', { method: 'POST' });
+        check('update image pulls, says whether anything changed, and restarts the running service when it did', r.status === 200 && r.body.image === 'nginx:alpine' && (r.body.changed ? r.body.restarted === true : r.body.restarted === false) && (await call('/api/live')).body.find(p => p.project === 'smoke-live')?.services[0]?.running === true, JSON.stringify(r.body));
+        r = await call('/api/live/smoke-live/ok/stop', { method: 'POST' });
+        await sleep(2000);
+        check('stopping removes the container', r.status === 200 && !sh('docker ps -a --format "{{.Names}}"').includes('live-smoke-live-ok'));
+        const ip = (await call('/api/audit?type=activity')).body.events.find(e => e.action === 'image-pull');
+        check('checking for a new image is in the audit log', !!ip && /smoke-live\/ok/.test(ip.what), JSON.stringify(ip));
+    } else console.log('SKIP  container service run (no Docker here)');
+    sh(`printf -- '---\\nservices:\\n  Bad Key:\n    port: 99999\n---\n' > /Projects/smoke-live/PORTHOLE.md`);
     r = await call('/api/live/check?path=Projects/smoke-live'); check('live check reports manifest errors', r.status === 200 && r.body.ok === false && r.body.errors.length >= 2, JSON.stringify(r.body.errors));
     await call(`/api/vault/${liveVaultId}`, { method: 'DELETE' }); await call('/api/servers/live-smoke-live-web', { method: 'DELETE' }).catch(() => {});
     sh('rm -rf /Projects/smoke-live');
@@ -804,10 +845,11 @@ await call(`/api/vault/${projectId}`, { method: 'DELETE' });
     const dns = JSON.stringify({ state: 'success', question: [{ class: 1, type: 1, name: 'smoke-egress.test' }], answer: [{ rr: { key: { class: 1, type: 1, name: 'smoke-egress.test' }, address: [203, 0, 113, 77] } }] });
     const kline = `PH-EGRESS IN= OUT=eth0 SRC=172.17.0.2 DST=203.0.113.77 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF PROTO=TCP SPT=45555 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0 UID=${uid} GID=${uid}`;
     const k6 = `PH-EGRESS IN= OUT=eth0 SRC=fd00:0000:0000:0000:0000:0000:0000:0002 DST=2001:0db8:0000:0000:0000:0000:0000:0077 LEN=80 PROTO=TCP SPT=45556 DPT=443 UID=${uid} GID=${uid}`;
-    shx(`cd / && node --input-type=module -e ${JSON.stringify(`const e = await import('/opt/porthole/server/lib/egress.js'); e.ingestDns(${JSON.stringify(dns)}); for (let i = 0; i < 3; i++) await e.ingestKernel(${JSON.stringify(kline)}); await e.ingestKernel(${JSON.stringify(k6)}); await e.ingestKernel('PH-EGRESS DST=127.0.0.53 PROTO=UDP SPT=5000 DPT=53 UID=${uid}'); e.flush();`)}`);
+    shx(`cd / && node --input-type=module -e ${JSON.stringify(`const e = await import('/opt/porthole/server/lib/egress.js'); e.ingestDns(${JSON.stringify(dns)}); for (let i = 0; i < 3; i++) await e.ingestKernel(${JSON.stringify(kline)}); await e.ingestKernel(${JSON.stringify(k6)}); await e.ingestKernel('PH-EGRESS IN=docker0 OUT=eth0 SRC=172.17.0.9 DST=203.0.113.78 LEN=60 PROTO=TCP SPT=40000 DPT=443'); await e.ingestKernel('PH-EGRESS DST=127.0.0.53 PROTO=UDP SPT=5000 DPT=53 UID=${uid}'); e.flush();`)}`);
     r = await call('/api/egress');
     const row = r.body.rows.find(x => x.host === 'smoke-egress.test');
     check('connections are counted per host and port, named from the lookup, with who made them', row && row.port === 443 && row.count === 3 && row.ip === '203.0.113.77' && row.who === 'agent user', JSON.stringify(r.body.rows).slice(0, 300));
+    check('connections from containers are recorded by the bridge address when the container is gone', r.body.rows.some(x => x.ip === '203.0.113.78' && /^container/.test(x.who)), JSON.stringify(r.body.rows.map(x => [x.ip, x.who])));
     check('IPv6 destinations are recorded too', r.body.rows.some(x => /^2001:db8:/.test(x.ip)), JSON.stringify(r.body.rows.map(x => x.ip)));
     check('lookups to the box resolver are not destinations', !r.body.rows.some(x => x.ip === '127.0.0.53'));
     const nw = (await call('/api/audit?type=network')).body.events.filter(e => e.action === 'egress-new' && e.host === 'smoke-egress.test');

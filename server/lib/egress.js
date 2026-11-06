@@ -16,6 +16,8 @@ import { promisify } from 'node:util';
 import { config } from './config.js';
 import { log } from './log.js';
 import { record } from './audit.js';
+import * as dockerMgr from './docker.js';
+import * as servicesMgr from './services.js';
 
 const execFileP = promisify(execFile);
 const dir = path.join(config.state, 'egress');
@@ -113,20 +115,30 @@ function loadSeen() {
 function dayFile(day) { return path.join(dir, `${day}.json`); }
 function loadDay(day) { try { return JSON.parse(fs.readFileSync(dayFile(day), 'utf8')); } catch { return {}; } }
 
-const KERNEL_RE = /PH-EGRESS .*?\bDST=(\S+).*?\bPROTO=(\w+)(?:.*?\bSPT=(\d+))?(?:.*?\bDPT=(\d+))?.*?\bUID=(\d+)/;
+const KERNEL_RE = /PH-EGRESS (?:.*?\bSRC=(\S+))?.*?\bDST=(\S+).*?\bPROTO=(\w+)(?:.*?\bSPT=(\d+))?(?:.*?\bDPT=(\d+))?(?:.*?\bUID=(\d+))?/;
+
+// Containers (live services with image:) are not uid-owned on the host: their packets are logged from the docker
+// bridge and named by the container's address.
+let bridge = { at: 0, list: [] };
+async function containerOf(ip) {
+    if (Date.now() - bridge.at > 30_000) { bridge = { at: Date.now(), list: await dockerMgr.bridgeContainers().catch(() => bridge.list) }; }
+    return bridge.list.find(c => c.ip === ip) || null;
+}
 
 // One kernel log line. Returns the row it counted towards (tests use this).
 export async function ingestKernel(line, at = Date.now()) {
     const m = KERNEL_RE.exec(String(line));
     if (!m) return null;
-    const [, dstRaw, proto, sport, dport, uid] = m;
+    const [, src, dstRaw, proto, sport, dport, uid] = m;
     const dst = canon6(dstRaw);
-    const user = userOf(uid);
+    const fromBridge = uid === undefined;
+    const c = fromBridge && src ? await containerOf(src) : null;
+    const user = fromBridge ? (c ? `container ${c.name}` : 'container') : userOf(uid);
     // DNS to the box resolver is how names are found; it is not a destination.
     if (dport === '53' && (dst === '127.0.0.53' || dst === '127.0.0.54')) return null;
-    const p = sport ? await procOf(proto, sport) : null;
-    const project = projectOf(p?.cwd) || (user.startsWith('ps-') ? user.slice(3) : null);
-    const who = p?.shell ? `shell "${p.shell}"` : user.startsWith('ps-') || user === 'porthole-svc' ? `service account ${user}` : user === 'agent' ? 'agent user' : user;
+    const p = fromBridge || !sport ? null : await procOf(proto, sport);
+    const project = fromBridge ? (c ? servicesMgr.ownerProject(c.name) : null) : projectOf(p?.cwd) || (user.startsWith('ps-') ? user.slice(3) : null);
+    const who = fromBridge ? (c ? `container "${c.name}"` : `container ${src}`) : p?.shell ? `shell "${p.shell}"` : user.startsWith('ps-') || user === 'porthole-svc' ? `service account ${user}` : user === 'agent' ? 'agent user' : user;
     const host = ipNames.get(dst) || dst;
     const port = dport ? Number(dport) : null;
     const day = dayOf(at);
@@ -198,6 +210,14 @@ export async function applyRules() {
     if (has('porthole-svc')) owners.push(['--uid-owner', 'porthole-svc']);
     if (hasGroup('porthole-svcs')) owners.push(['--gid-owner', 'porthole-svcs']);
     if (!owners.length) throw new Error('no agent user or service accounts on this box yet');
+    // Containers: log new connections leaving the docker bridge, and keep them off the metadata service.
+    try {
+        try { await ipt('iptables', ['-N', 'DOCKER-USER']); } catch { /* docker made it */ }
+        const imds = ['DOCKER-USER', '-i', 'docker0', '-d', '169.254.169.254', '-j', 'REJECT'];
+        try { await ipt('iptables', ['-C', ...imds]); } catch { await ipt('iptables', ['-I', ...imds]); }
+        const spec = ['DOCKER-USER', '-i', 'docker0', '!', '-o', 'docker0', '-m', 'conntrack', '--ctstate', 'NEW', '-m', 'limit', '--limit', '50/second', '--limit-burst', '200', '-j', 'LOG', '--log-prefix', PREFIX, '--log-level', '6'];
+        try { await ipt('iptables', ['-C', ...spec]); } catch { await ipt('iptables', ['-I', ...spec]); }
+    } catch { /* no docker on this box */ }
     for (const bin of ['iptables', 'ip6tables']) {
         try { await ipt(bin, ['-N', CHAIN]); } catch { /* exists */ }
         await ipt(bin, ['-F', CHAIN]);

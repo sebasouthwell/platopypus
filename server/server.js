@@ -93,6 +93,7 @@ const ACTIVITY = [
     ['DELETE', /^\/api\/servers\/([a-z0-9-]{1,40})$/, 'server-remove', m => ({ what: m[1] })],
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(start|stop|restart|hostname)$/, m => `service-${m[3]}`, m => ({ what: `${decodeURIComponent(m[1])}/${m[2]}`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(actions|groups)\//, 'service-action', (m, b, r) => ({ what: `${r?.label || 'action'}${b.item ? ` · ${b.item}` : ''}`, project: decodeURIComponent(m[1]), code: r?.code })],
+    ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/pull$/, 'image-pull', (m, b, r) => ({ what: `${decodeURIComponent(m[1])}/${m[2]} · ${r?.image || ''} (${r?.changed ? (r.restarted ? 'new image, restarted' : 'new image') : 'no change'})`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
     ['PUT', /^\/api\/alerts$/, 'alerts-changed', (m, b, r) => ({ what: `Telegram alerts${r?.botName ? ` via ${r.botName}` : ''}: ${r ? Object.entries(r.on).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : ''}${r?.pausedUntil ? ' (paused)' : ''}` })],
     ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
@@ -631,6 +632,7 @@ const server = http.createServer(async (req, res) => {
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); return send(res, 200, await live.action(decodeURIComponent(m[1]), m[2], m[3], b?.inputs || {})); }
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/groups\/(\d{1,3})$/)) && method === 'GET') return send(res, 200, await live.groupItems(decodeURIComponent(m[1]), m[2], m[3]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/groups\/(\d{1,3})\/actions\/(\d{1,3})$/)) && method === 'POST') { const b = await readJson(req, 64 * 1024).catch(() => ({})); if (typeof b?.item !== 'string' || !b.item) return send(res, 400, { error: 'item: an id from the list, or * for all' }); return send(res, 200, await live.groupAction(decodeURIComponent(m[1]), m[2], m[3], m[4], b.item, b?.inputs || {})); }
+        if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/pull$/)) && method === 'POST') return send(res, 200, await live.pull(decodeURIComponent(m[1]), m[2]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/root$/)) && (method === 'POST' || method === 'DELETE')) return send(res, 200, method === 'POST' ? live.approveRoot(decodeURIComponent(m[1]), m[2]) : live.revokeRoot(decodeURIComponent(m[1]), m[2]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/credentials\/(\d{1,3})$/)) && method === 'POST') return send(res, 200, await live.credentials(decodeURIComponent(m[1]), m[2], m[3]));
         if ((m = p.match(/^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/logs$/)) && method === 'GET') return send(res, 200, services.logs(services.slugify(`live ${decodeURIComponent(m[1])} ${m[2]}`), url.searchParams.get('tail') || 300));
@@ -757,6 +759,8 @@ server.listen(config.port, config.bind, () => {
     // iptables rules do not survive a reboot: put the service-account limits back before any live service starts.
     import('./lib/svcuser.js').then(m => { try { if (groupExists(m.GROUP)) m.applyFirewall(); } catch { /* no group yet */ } });
     egress.start().catch(e => log('egress', `not started: ${e.message}`));
+    // Live services that were running when the box went down come back (tmux survives a Porthole restart, not a reboot).
+    setTimeout(() => live.autostart().catch(e => log('live', `autostart: ${e.message}`)), 15_000).unref();
     if (config.bind !== '127.0.0.1' && config.bind !== '::1') {
         log('porthole', `WARNING: bound to ${config.bind}. Make sure only your private network can reach this port.`);
     }

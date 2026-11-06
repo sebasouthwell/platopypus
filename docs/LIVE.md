@@ -62,6 +62,16 @@ services:
       - label: Admin login
         username: admin
         password: $ADMIN_PASSWORD
+  notes:                          # a container instead of a command: same page, log, account, hostname, actions
+    title: Trilium
+    image: triliumnext/notes:latest
+    port: 8081                    # on the box, bound to 127.0.0.1 (the container's own port if different:)
+    container_port: 8080
+    volumes: [data:/home/node/trilium-data]   # <folder in the project>:<path in the container>[:ro]
+    memory: 512m                  # optional cap
+    env: { TRILIUM_DATA_DIR: /home/node/trilium-data }
+    needs: []                     # Vault names reach the container as environment, never on the command line
+    # user: image                 # only if the image must start as its own user (default: the project's account)
 data:
   - engine: postgres              # postgres | redis | mysql | mongo | sqlite
     version: "16"
@@ -84,6 +94,7 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 |---|---|
 | **Live services section** | Every service in every project's `PORTHOLE.md` is listed, with running/stopped, the live address, the pinned git commit and whether dev is ahead. |
 | **Start / Stop** | `start` runs in its own logged session (the `svc` registry) with the service's `env` and the Vault entries named in `needs` for the project's scope. Stop kills the whole process group. |
+| **Containers** | A service with `image:` instead of `start:` runs as a Docker container through the same registry: Start/Stop, the log, the hostname, actions, pins and alerts all work the same. Porthole composes the `docker run` from the checked fields (image, port, volumes, memory, command), so nothing written in the file runs as root. Inside, the app runs as the project's account with all capabilities dropped, sees only the folders under `volumes:` (inside the project), and is bound to loopback. **Update image** on the service page pulls the image again and restarts the service if it changed. Containers are logged in the Network tab by name and are kept off the metadata service. Live services that were running when the box went down are started again at boot. |
 | **Hostname** | Setting `hostname` (or tapping Share on your domain) provisions it **before** the app exists: DNS record to the box, nginx block, Let's Encrypt certificate, with Porthole's own placeholder page answering on https. Once the service is running and healthy, nginx is switched to its port. Removing the service removes the nginx block, the certificate and the DNS record. |
 | **Actions** | Each action is a button on the service page. It runs in the service's folder, the output is shown on the phone and kept in the service log. `confirm: true` asks first. |
 | **Groups** | `groups:` under a service lists things the service manages: rooms, sessions, users. Each group has a `label`, a `list` command that prints the current items (one id per line, `id<TAB>label` for a name, or JSON `[{"id","label","sub"}]`), and `actions` that run for one item with `$GROUP_ITEM` set to its id (and `$GROUP` to the label). On the service page each group is a dropdown, closed until opened, under the main actions; tapping an item opens its commands, and **All N** runs an action once per item (`all: false` keeps an action to single items; a `restart`/`stop_first` happens once at the end). Ids must come from the list: the phone cannot send one that is not in it, ids are limited to letters, digits and `._:@+-=/`, and inputs are checked as for actions. Example: `groups: [{ label: Rooms, item: room, list: node scripts/rooms.js, actions: [{ label: Close, run: node scripts/room.js close "$GROUP_ITEM", confirm: true }] }]` |

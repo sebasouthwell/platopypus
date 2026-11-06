@@ -120,6 +120,7 @@ export async function list() {
 }
 
 export function ownerOf(slug) { return load().items[slug]?.owner || null; }
+export function ownerProject(slug) { return load().items[slug]?.project || null; }
 
 export async function get(slug) {
     const it = load().items[slug];
@@ -129,10 +130,12 @@ export async function get(slug) {
 
 // Start a command in its own tmux session and register it.
 export async function runServer({ name, port, cwd, cmd, project = null, env = {}, owner = null, live = null, runAs = null, account = null }) {
-    // Agent-started servers run as the agent user. Live services run as porthole-svc (no logins, no secrets) unless
-    // their manifest's root run was approved; Porthole, as root, keeps the log and the stop/kill.
+    // Agent-started servers run as the agent user. Live services run as their project account (no logins, no secrets)
+    // unless their manifest's root run was approved; Porthole, as root, keeps the log and the stop/kill. A container
+    // service's pane runs the docker CLI as Porthole, with argv composed by live.js; the app inside runs as the account.
     const asAgent = !!owner;
     const asService = !asAgent && runAs === 'service';
+    const asContainer = !asAgent && runAs === 'container';
     if (asService && !account) throw httpError(500, 'A live service needs its project account; start it from the Live section.');
     const slug = slugify(name);
     if (!Array.isArray(cmd) || !cmd.length || cmd.some(c => typeof c !== 'string')) throw httpError(400, 'Command is required.');
@@ -159,7 +162,7 @@ export async function runServer({ name, port, cwd, cmd, project = null, env = {}
     await newSession(session, dir, shellCmd, { ...env, PORTHOLE_SERVICE: slug });
     let pid = null;
     try { pid = Number((await tmux('display-message', '-p', '-t', `${session}:`, '#{pane_pid}')).trim()) || null; } catch { /* no pane yet */ }
-    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false, ...(owner ? { owner } : {}), ...(live ? { live } : {}), runAs: asAgent ? 'agent' : asService ? 'service' : 'root', ...(asService ? { account } : {}) };
+    db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false, ...(owner ? { owner } : {}), ...(live ? { live } : {}), runAs: asAgent ? 'agent' : asService ? 'service' : asContainer ? 'container' : 'root', ...(asService || asContainer ? { account } : {}) };
     save(db);
     log('svc', `started "${slug}" (${cmd.join(' ')}) in ${dir}${p ? ` on :${p}` : ''}`);
     // A server that dies straight away (port taken, syntax error) is reported now, not discovered later.

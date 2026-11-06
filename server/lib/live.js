@@ -14,6 +14,7 @@ import * as servicesMgr from './services.js';
 import * as zoned from './zoned.js';
 import * as agentUser from './agentuser.js';
 import * as svcUser from './svcuser.js';
+import * as dockerMgr from './docker.js';
 import crypto from 'node:crypto';
 import { envFor } from './vault.js';
 import { log } from './log.js';
@@ -28,6 +29,17 @@ const STRATEGIES = ['full', 'preserve-data', 'patch'];
 const INPUT_TYPES = ['string', 'integer', 'number', 'boolean', 'choice'];
 const INPUT_NAME_RE = /^[a-z][a-z0-9_]{0,30}$/;
 const approvalsFile = path.join(config.state, 'live-approvals.json');
+const MEM_RE = /^\d{1,5}[mMgG]$/;
+// "<folder in the project>:<path in the container>[:ro]"
+function parseVolume(v) {
+    const m = String(v || '').match(/^([^:]+):(\/[^:]*)(?::(ro|rw))?$/);
+    if (!m) return null;
+    const host = m[1].replace(/\/+$/, '');
+    if (!host || path.isAbsolute(host) || host.split(/[\\/]/).includes('..') || host.startsWith('.porthole')) return null;
+    return { host, cont: m[2].replace(/\/+$/, '') || '/', ro: m[3] === 'ro' };
+}
+const isContainer = s => typeof s?.image === 'string';
+const containerName = (p, key) => slugOf(p.name, key);
 
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 const slugOf = (project, key) => servicesMgr.slugify(`live ${project} ${key}`);
@@ -50,7 +62,17 @@ export function parseManifest(text) {
         const where = `services.${key}`;
         if (!KEY_RE.test(key)) errors.push(`${where}: key must be lowercase letters, digits and dashes.`);
         if (!s || typeof s !== 'object') { errors.push(`${where}: must be a mapping.`); continue; }
-        if (typeof s.start !== 'string' || !s.start.trim()) errors.push(`${where}.start: required (the command that runs it).`);
+        if (isContainer(s)) {
+            if (!dockerMgr.IMAGE_RE.test(s.image)) errors.push(`${where}.image: e.g. docker.n8n.io/n8nio/n8n:latest.`);
+            if (s.start !== undefined) errors.push(`${where}: image and start cannot both be set (an image has its own start command; use command: to change it).`);
+            if (s.run_as !== undefined) errors.push(`${where}.run_as: does not apply to a container (it runs as the project's account inside the container).`);
+            if (s.container_port !== undefined && !(Number.isInteger(Number(s.container_port)) && Number(s.container_port) > 0 && Number(s.container_port) < 65536)) errors.push(`${where}.container_port: 1-65535.`);
+            if (s.volumes !== undefined && !Array.isArray(s.volumes)) errors.push(`${where}.volumes: a list like "data:/home/node/.n8n".`);
+            for (const [i, v] of (Array.isArray(s.volumes) ? s.volumes : []).entries()) if (!parseVolume(v)) errors.push(`${where}.volumes[${i}]: "<folder in the project>:<path in the container>[:ro]".`);
+            if (s.command !== undefined && !(typeof s.command === 'string' || (Array.isArray(s.command) && s.command.every(x => typeof x === 'string' || typeof x === 'number')))) errors.push(`${where}.command: a string or a list.`);
+            if (s.memory !== undefined && !MEM_RE.test(String(s.memory))) errors.push(`${where}.memory: like 512m or 1g.`);
+            if (s.user !== undefined && !['service', 'image'].includes(s.user)) errors.push(`${where}.user: service (the default: the project's account) or image (whatever the image runs as).`);
+        } else if (typeof s.start !== 'string' || !s.start.trim()) errors.push(`${where}.start: required (the command that runs it), or image: for a container.`);
         if (s.port !== undefined && !(Number.isInteger(Number(s.port)) && Number(s.port) > 0 && Number(s.port) < 65536)) errors.push(`${where}.port: 1-65535.`);
         if (Number(s.port) === config.port) errors.push(`${where}.port: that is Porthole's own port.`);
         if (s.hostname !== undefined && !/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(String(s.hostname).toLowerCase())) errors.push(`${where}.hostname: a full name like app.example.com.`);
@@ -206,6 +228,7 @@ function rootFingerprint(p, s) {
 }
 function loadApprovals() { try { return JSON.parse(fs.readFileSync(approvalsFile, 'utf8')); } catch { return {}; } }
 function rootState(p, key, s) {
+    if (isContainer(s)) return { runAs: 'container', account: svcUser.userFor(p.name), wantsRoot: false, rootApproved: false };
     if (s.run_as !== 'root') return { runAs: 'service', account: svcUser.userFor(p.name), wantsRoot: false, rootApproved: false };
     let ok = false; try { ok = loadApprovals()[slugOf(p.name, key)] === rootFingerprint(p, s); } catch { ok = false; }
     return { runAs: ok ? 'root' : 'blocked', account: ok ? 'root' : null, wantsRoot: true, rootApproved: ok };
@@ -259,7 +282,7 @@ export async function list() {
                 running: !!reg?.alive, listening: reg ? reg.listening : null, pid: reg?.pid || null, startedAt: reg?.alive ? reg.created : null,
                 hostname: s.hostname ? String(s.hostname).toLowerCase() : null,
                 host: host ? { hostname: host.hostname, url: host.url, live: !!host.connected, mode: host.mode, slug: host.slug } : null,
-                update: s.update || null,
+                update: s.update || null, image: isContainer(s) ? String(s.image) : null,
                 ...rootState(p, key, s),
                 firewall: svcUser.firewallState(),
                 vaultNames: Array.isArray(s.needs) ? s.needs.map(String) : [],
@@ -306,8 +329,9 @@ export async function start(project, key) {
         else if (h) throw httpError(409, `Port ${port} is already in use${h.cmdline ? ` by ${h.cmdline}` : ''}.`);
     }
     const runAs = mustRun(p, key, s);
-    const account = runAs === 'service' ? await prepareAccount(p) : null;
-    const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd: ['bash', '-lc', s.start], project: p.name, env, runAs, account, live: { project: p.name, key, title: s.title || key } });
+    const account = runAs !== 'root' ? await prepareAccount(p) : null;
+    const cmd = runAs === 'container' ? await containerArgv(p, key, s, account, env, port) : ['bash', '-lc', s.start];
+    const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd, project: p.name, env, runAs, account, live: { project: p.name, key, title: s.title || key } });
     const given = (Array.isArray(s.needs) ? s.needs : []).map(String).filter(n => n in env);
     if (given.length) record('credential', 'service-start', { project: p.name, actor: 'Porthole', via: `live service (${account || runAs})`, what: `${p.name}/${key}`, names: given });
     if (runAs === 'root') record('elevate', 'root-start', { project: p.name, actor: 'Porthole', via: 'live service', what: `${p.name}/${key}`, cmd: String(s.start) });
@@ -316,10 +340,70 @@ export async function start(project, key) {
 }
 
 export async function restart(project, key) {
-    findService(project, key);
+    const { p, s } = findService(project, key);
     const slug = slugOf(project, key);
-    if ((await servicesMgr.list()).some(r => r.slug === slug && r.alive)) await servicesMgr.stop(slug, { keepTunnel: true });
+    if ((await servicesMgr.list()).some(r => r.slug === slug && r.alive)) { await stopContainer(p, key, s); await servicesMgr.stop(slug, { keepTunnel: true }); }
     return start(project, key);
+}
+
+// ---- container services: image: instead of start: ----
+// The pane runs `docker run` (attached, --rm) as Porthole, so the service registry, log, stop and hostname work as for
+// any process. argv is composed here from checked fields, never from free text in the file, so nothing an agent writes
+// runs as root. Inside, the app runs as the project's account; it sees its project folders only, bound to loopback.
+// Vault values go in by name (-e NAME) from the pane's environment: they are never on the command line.
+async function containerArgv(p, key, s, account, env, port) {
+    const name = containerName(p, key);
+    const a = svcUser.info(account); if (!a) throw httpError(500, `No account ${account}.`);
+    await dockerMgr.remove(name).catch(() => {});   // a leftover from a hard stop or a reboot
+    const asImage = s.user === 'image';
+    const args = ['run', '--rm', '--name', name, '--init', '--log-driver', 'none', '--security-opt', 'no-new-privileges'];
+    if (!asImage) args.push('--user', `${a.uid}:${a.gid}`, '--cap-drop', 'ALL');
+    if (port) args.push('-p', `127.0.0.1:${port}:${Number(s.container_port || port)}`);
+    if (s.memory) args.push('--memory', String(s.memory));
+    for (const v of Array.isArray(s.volumes) ? s.volumes : []) {
+        const pv = parseVolume(v); if (!pv) throw httpError(400, `Bad volume "${v}".`);
+        const host = path.resolve(p.root, pv.host);
+        if (host !== p.root && !host.startsWith(p.root + path.sep)) throw httpError(400, 'Volumes must stay inside the project.');
+        fs.mkdirSync(host, { recursive: true });
+        // The app writes as the account: hand it the folder (once; restored data is usually root's).
+        if (!asImage && !pv.ro) { try { if (fs.statSync(host).uid !== a.uid) await run('chown', ['-R', `${a.uid}:${a.gid}`, host], { timeout: 120_000 }); } catch (e) { log('live', `chown ${host}: ${e.message}`); } }
+        args.push('-v', `${host}:${pv.cont}${pv.ro ? ':ro' : ''}`);
+    }
+    for (const k of Object.keys(env)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) args.push('-e', k);
+    args.push(String(s.image));
+    const extra = Array.isArray(s.command) ? s.command.map(String) : typeof s.command === 'string' && s.command.trim() ? s.command.trim().split(/\s+/) : [];
+    return ['docker', ...args, ...extra];
+}
+async function stopContainer(p, key, s) {
+    if (!isContainer(s)) return;
+    // A clean stop (SIGTERM, then 15 s) before the pane's process group is killed: the container is what holds data.
+    await dockerMgr.stop(containerName(p, key), 15).catch(() => {});
+}
+
+// Pull the image again; a running service is restarted when the image changed.
+export async function pull(project, key) {
+    const { p, s } = findService(project, key);
+    if (!isContainer(s)) throw httpError(400, 'This service runs a command, not an image.');
+    const before = await dockerMgr.imageId(s.image).catch(() => null);
+    await dockerMgr.pull(s.image);
+    const after = await dockerMgr.imageId(s.image).catch(() => null);
+    const changed = before !== after;
+    const running = (await servicesMgr.list()).some(r => r.slug === slugOf(p.name, key) && r.alive);
+    if (running && changed) await restart(project, key);
+    log('live', `pulled ${s.image} for ${project}/${key}: ${changed ? 'new image' : 'no change'}${running && changed ? ', restarted' : ''}`);
+    return { image: s.image, changed, restarted: running && changed, id: after ? after.replace(/^sha256:/, '').slice(0, 12) : null };
+}
+
+// After a reboot: live services that were running (not stopped by anyone) are started again.
+export async function autostart() {
+    const regs = await servicesMgr.list().catch(() => []);
+    const done = [];
+    for (const r of regs) {
+        if (!r.live || r.alive || r.stoppedAt) continue;
+        try { await start(r.live.project, r.live.key); done.push(r.slug); } catch (e) { log('live', `autostart ${r.slug}: ${e.message}`); }
+    }
+    if (done.length) log('live', `started again after boot: ${done.join(', ')}`);
+    return done;
 }
 
 // Restart by registry slug (svc restart live-..., or an action that restarts its own service).
@@ -331,8 +415,9 @@ export async function restartSlug(slug) {
 }
 
 export async function stop(project, key) {
-    findService(project, key);
+    const { p, s } = findService(project, key);
     const slug = slugOf(project, key);
+    await stopContainer(p, key, s);
     // Stop the process but keep a hostname in place: nginx shows the coming-up page until it is started again.
     const db = await servicesMgr.list();
     if (!db.some(r => r.slug === slug)) throw httpError(409, 'Not running.');

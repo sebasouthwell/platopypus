@@ -846,7 +846,7 @@ async function loadHomeRunning() {
     $$('[data-proj-folder]', host).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
     $$('[data-go-services]', host).forEach(b => b.onclick = () => go('services'));
     bindQuickChips(host);
-    $$('.ico.fav img', host).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav'); sp.innerHTML = icon('folder'); }, { once: true }));
+    $$('.ico.fav img', host).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; if (!sp) return; sp.classList.remove('fav'); sp.innerHTML = icon('folder'); }, { once: true }));
 }
 
 function newProfileDialog(done) {
@@ -1438,7 +1438,7 @@ async function loadServices() {
     $$('[data-open-url]', body).forEach(b => b.onclick = e => { e.stopPropagation(); if (b.dataset.openUrl) window.open(b.dataset.openUrl, '_blank', 'noopener'); });
     $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.portholerun')));
     $$('[data-proj-menu]', body).forEach(b => b.onclick = () => projectMenu(s.projects[Number(b.dataset.projMenu)], s));
-    $$('.ico.logo img, .ico.fav img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }, { once: true }));
+    $$('.ico.logo img, .ico.fav img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; if (!sp) return; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }, { once: true }));
     $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
     $$('[data-live-page]', body).forEach(b => b.onclick = () => livePage(s.live.find(p => p.project === b.dataset.livePage), b.dataset.k));
     $$('[data-live-errors]', body).forEach(b => b.onclick = () => { const p = s.live.find(x => x.project === b.dataset.liveErrors); openDialog(`<h2>${icon('info')}${esc(p.name)} · ${esc(p.file || 'PORTHOLE.md')}</h2>${p.errors.map(e => `<p class="muted" style="color:var(--flare)">${esc(e)}</p>`).join('')}${p.warnings.map(w => `<p class="sub">${esc(w)}</p>`).join('')}<p class="sub">Ask the agent in that project to fix it and run <span class="mono">live check</span>.</p><div class="buttons"><button data-close>Close</button></div>`); });
@@ -1449,7 +1449,7 @@ async function loadServices() {
     $$('[data-link-menu]', body).forEach(b => b.onclick = () => linkMenu(s.links.find(t => t.port === Number(b.dataset.linkMenu))));
     $$('[data-cact]', body).forEach(b => b.onclick = () => containerAction(b.dataset.c, b.dataset.cact));
     $$('[data-clogs]', body).forEach(b => b.onclick = () => logsSheet(b.dataset.clogs));
-    $$('.ico.fav img, .ico.logo img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }));
+    $$('.ico.fav img, .ico.logo img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; if (!sp) return; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }));
     $$('[data-cmenu]', body).forEach(b => b.onclick = () => containerMenu(s.containers.find(c => c.name === b.dataset.cmenu)));
     $$('[data-pmenu]', body).forEach(b => b.onclick = () => composeMenu(b.dataset.pmenu));
     $$('[data-app]', body).forEach(b => b.onclick = () => launchApp(b.dataset.app, b.dataset.title));
@@ -1521,8 +1521,10 @@ async function livePage(p, key) {
         <div class="menu">
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
           ${v.host ? `<a class="row" href="${esc(openLink(v.host.url, v.port, allCreds))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">${icon('external')}<span>${esc(v.host.hostname)}${v.host.live ? '' : ' · setting up'}</span></a>` : v.hostname ? `<button data-a="hostname">${icon('globe')}Put on ${esc(v.hostname)}<span class="sub" style="margin-left:6px">DNS + nginx + certificate</span></button>` : v.port ? `<button data-a="share">${icon('share')}Share…</button>` : ''}
+          ${v.image ? `<button data-a="pull">${icon('cloud-down')}Update image</button>` : ''}
           <button data-a="logs">${icon('logs')}Log</button>
         </div>
+        ${v.image ? `<p class="sub" style="margin-top:8px">Container <span class="mono">${esc(v.image)}</span> · the app runs as <span class="mono">${esc(v.account || '')}</span> inside it, with its data folders from this project, reachable from this box only.</p>` : ''}
         ${v.actions.length || v.groups?.length ? `<h3 class="section" style="margin-top:14px">Actions<button class="act" data-pinpick>${icon('pin')}Pin to Home…</button></h3>` : ''}
         ${v.actions.length ? `<div class="chips" style="flex-wrap:wrap">${v.actions.map(a => `<button class="pill" data-act="${a.i}" data-confirm="${a.confirm ? 1 : 0}">${icon('zap')}${esc(a.label)}${a.inputs.length ? '…' : ''}</button>`).join('')}</div><pre data-act-out hidden style="max-height:30vh;margin-top:8px"></pre>` : ''}
         ${(v.groups || []).map(g => `<details class="group" data-group="${g.i}"><summary><span class="ico brass">${icon('package')}</span><span class="gl">${esc(g.label)}</span><span class="meta" data-gcount>${g.hint ? esc(g.hint) : ''}</span>${icon('chevron', 'i chev')}</summary><div class="list" data-gitems><p class="muted" style="padding:10px 12px">Loading…</p></div></details>`).join('')}
@@ -1539,6 +1541,7 @@ async function livePage(p, key) {
         try {
             if (a === 'start' || a === 'stop' || a === 'restart') { b.disabled = true; const r = await api(url(a), { method: 'POST' }); toast(a === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : a === 'restart' ? 'Restarted' : 'Started'); return refresh_(); }
             if (a === 'root') { if (!(await confirmDialog({ title: `Run ${v.title} as root?`, text: 'Its start command and every action run with full control of the box, until they or the project’s code change.', action: 'Allow as root' }))) return; await api(url('root'), { method: 'POST' }); toast('Allowed as root'); return refresh_(); }
+            if (a === 'pull') { b.disabled = true; b.textContent = 'Pulling…'; const r = await api(url('pull'), { method: 'POST' }); toast(r.changed ? (r.restarted ? 'New image pulled and restarted' : 'New image pulled; start it to use it') : 'Already the latest image'); return refresh_(); }
             if (a === 'unroot') { await api(url('root'), { method: 'DELETE' }); toast('Root revoked; restart it to run as porthole-svc'); return refresh_(); }
             if (a === 'hostname') { b.disabled = true; b.textContent = 'Creating DNS record, nginx block and certificate…'; await api(url('hostname'), { method: 'POST' }); toast(`${v.hostname} is set up`); return refresh_(); }
             if (a === 'share') { close(); return shareDialog(v.port, v.title); }
@@ -3126,7 +3129,7 @@ const AUDIT_TITLES = {
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
         'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };

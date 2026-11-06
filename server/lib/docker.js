@@ -19,7 +19,7 @@ function httpError(status, message) {
 }
 
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
-const IMAGE_RE = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/;
+export const IMAGE_RE = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/;
 const ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
@@ -137,6 +137,31 @@ export async function action(name, verb) {
     if (verb === 'remove') await docker(['rm', '-f', name], 60_000);
     else await docker([verb, name], 60_000);
     log('docker', `${verb} ${name}`);
+}
+
+// Used by container services (live.js).
+export async function pull(image) {
+    if (!IMAGE_RE.test(String(image || ''))) throw httpError(400, 'Image: e.g. nginx:alpine or ghcr.io/org/app:tag.');
+    await docker(['pull', image], 600_000);
+    log('docker', `pulled ${image}`);
+}
+export async function imageId(image) {
+    if (!IMAGE_RE.test(String(image || ''))) throw httpError(400, 'Bad image.');
+    return (await docker(['image', 'inspect', '--format', '{{.Id}}', image])).trim();
+}
+export async function stop(name, seconds = 15) {
+    if (!ID_RE.test(name)) throw httpError(400, 'Bad container name.');
+    await docker(['stop', '-t', String(Math.max(1, Math.min(Number(seconds) || 15, 120))), name], 150_000);
+}
+export async function remove(name) {
+    if (!ID_RE.test(name)) throw httpError(400, 'Bad container name.');
+    await docker(['rm', '-f', name], 60_000);
+}
+// Container name and IPv4 address on the default bridge, for the egress log.
+export async function bridgeContainers() {
+    const out = await docker(['network', 'inspect', 'bridge', '--format', '{{json .Containers}}']);
+    let j = {}; try { j = JSON.parse(out) || {}; } catch { j = {}; }
+    return Object.values(j).map(c => ({ name: c.Name, ip: String(c.IPv4Address || '').split('/')[0] })).filter(c => c.ip);
 }
 
 export async function logs(name, tail = 200) {

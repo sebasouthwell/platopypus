@@ -14,7 +14,8 @@ const browser = await chromium.launch(process.env.CHANNEL ? { channel: process.e
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const errors = [];
 page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
-page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource: the server responded with a status of 401/.test(m.text())) errors.push(`console: ${m.text()}`); });
+// 401 before sign-in and 404 for a Docker image without a logo (the fallback icon takes over) are expected.
+page.on('console', m => { if (m.type() === 'error' && !/status of 401/.test(m.text()) && !(/status of 404/.test(m.text()) && /\/api\/docker\/logo/.test(m.location()?.url || ''))) errors.push(`console: ${m.text()}`); });
 
 await page.goto(BASE + '/', { waitUntil: 'load' }); await page.waitForTimeout(1500);
 const version = await page.getAttribute('meta[name="porthole-version"]', 'content');
