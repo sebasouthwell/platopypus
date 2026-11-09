@@ -1,66 +1,101 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="PlatOpypus">
-  <!-- Agent PlatOpypus: a grey platypus on duty. Own drawing: no hat, no teal; dark glasses and an earpiece do the work. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="PlatOpypus" xmlns:c2pa="http://c2pa.org/manifest">
+  <!-- Agent PlatOpypus: a grey platypus on duty. Own drawing: dark glasses and an earpiece do the work. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="plat-bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#16263a"/>
       <stop offset="1" stop-color="#0b1422"/>
     </linearGradient>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="plat-body" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#9ba4ae"/>
       <stop offset="1" stop-color="#6c7680"/>
     </linearGradient>
-    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="plat-head" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b3bbc4"/>
+      <stop offset="1" stop-color="#848e98"/>
+    </linearGradient>
+    <linearGradient id="plat-belly" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#c6ccd3"/>
       <stop offset="1" stop-color="#a9b1ba"/>
     </linearGradient>
-    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="plat-brass" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#e8c46e"/>
       <stop offset="1" stop-color="#b58d38"/>
     </linearGradient>
-    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="plat-lens" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#2b3543"/>
       <stop offset="0.55" stop-color="#0c121a"/>
       <stop offset="1" stop-color="#1a2330"/>
     </linearGradient>
+    <clipPath id="plat-tailClip"><path d="M82 166 C 60 146, 28 138, 15 154 C 4 170, 20 194, 50 197 C 72 199, 90 190, 94 178 Z"/></clipPath>
+    <clipPath id="plat-bodyClip"><path d="M62 168 C 58 134, 92 114, 128 116 C 164 118, 186 142, 184 168 C 182 192, 150 204, 116 204 C 86 204, 64 194, 62 168 Z"/></clipPath>
+    <clipPath id="plat-billClip"><path d="M196 120 C 212 108, 240 112, 248 127 C 254 141, 242 153, 224 153 C 208 153, 197 149, 190 142 C 186 134, 189 125, 196 120 Z"/></clipPath>
   </defs>
 
-  <rect width="256" height="256" rx="58" fill="url(#bg)"/>
-  <circle cx="128" cy="136" r="98" fill="#101c2c" opacity="0.9"/>
+  <rect width="256" height="256" rx="58" fill="url(#plat-bg)"/>
+  <circle cx="128" cy="128" r="100" fill="#101c2c" opacity="0.9"/>
 
-  <g transform="translate(5 2) scale(0.97)">
-    <!-- tail: a flat paddle, scored like beaver leather -->
-    <path d="M82 150 C 46 138, 22 168, 42 188 C 60 204, 94 192, 104 172 Z" fill="#59626c"/>
-    <path d="M66 160 C 50 168, 48 180, 58 188" fill="none" stroke="#464e57" stroke-width="3" stroke-linecap="round"/>
-    <path d="M80 158 C 70 170, 72 182, 80 188" fill="none" stroke="#464e57" stroke-width="3" stroke-linecap="round"/>
+  <g transform="translate(-4 -31)">
+    <ellipse cx="126" cy="214" rx="94" ry="7" fill="#050910" opacity="0.8"/>
 
-    <!-- body with the head in one piece: long, low, a little raised at the front -->
-    <path d="M74 152 C 72 126, 96 106, 132 102 C 164 98, 192 100, 208 114 C 220 124, 218 142, 208 152 C 196 170, 168 184, 132 186 C 100 188, 76 176, 74 152 Z" fill="url(#body)"/>
-    <!-- belly -->
-    <path d="M96 156 C 104 140, 134 134, 164 140 C 190 146, 194 166, 172 178 C 146 188, 100 182, 96 156 Z" fill="url(#belly)"/>
+    <!-- tail: a broad paddle, held a little off the ground -->
+    <path d="M82 166 C 60 146, 28 138, 15 154 C 4 170, 20 194, 50 197 C 72 199, 90 190, 94 178 Z" fill="#59626c"/>
+    <g clip-path="url(#plat-tailClip)">
+      <path d="M62 168 C 58 134, 92 114, 128 116 C 164 118, 186 142, 184 168 C 182 192, 150 204, 116 204 C 86 204, 64 194, 62 168 Z" transform="translate(-4 2)" fill="#2f363e" opacity="0.45"/>
+    </g>
+    <path d="M24 156 C 38 146, 56 151, 68 160" fill="none" stroke="#7a848e" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+    <path d="M26 178 C 36 187, 48 189, 58 187" fill="none" stroke="#464e57" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
 
-    <!-- webbed feet -->
-    <path d="M118 184 L 110 200 Q 116 204, 122 200 L 126 190 Q 132 204, 138 200 L 136 184 Z" fill="#59626c"/>
-    <path d="M166 182 L 160 198 Q 166 202, 172 198 L 176 188 Q 182 202, 188 198 L 186 182 Z" fill="#59626c"/>
+    <!-- far-side feet -->
+    <path d="M-10 -9 C -12 -3, -18 2, -24 8 Q -20 15, -13 11 Q -8 17, -1 12 Q 5 16, 10 9 C 6 3, 6 -4, 8 -9 Q -1 -19, -10 -9 Z" transform="translate(108 199)" fill="#4a535c"/>
+    <path d="M-10 -9 C -12 -3, -18 2, -24 8 Q -20 15, -13 11 Q -8 17, -1 12 Q 5 16, 10 9 C 6 3, 6 -4, 8 -9 Q -1 -19, -10 -9 Z" transform="translate(168 199)" fill="#4a535c"/>
 
-    <!-- bill: flat and wide, brass so it reads as the brand's accent -->
-    <path d="M204 116 C 222 106, 246 110, 252 122 C 256 132, 246 140, 230 140 L 206 138 C 196 134, 196 122, 204 116 Z" fill="url(#brass)"/>
-    <path d="M208 132 C 222 136, 238 136, 246 130" fill="none" stroke="#8a6a26" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
-    <circle cx="236" cy="120" r="2.2" fill="#8a6a26" opacity="0.8"/>
-    <circle cx="244" cy="124" r="1.8" fill="#8a6a26" opacity="0.8"/>
+    <!-- body -->
+    <path d="M62 168 C 58 134, 92 114, 128 116 C 164 118, 186 142, 184 168 C 182 192, 150 204, 116 204 C 86 204, 64 194, 62 168 Z" fill="url(#plat-body)"/>
+    <g clip-path="url(#plat-bodyClip)">
+      <ellipse cx="122" cy="208" rx="52" ry="30" fill="url(#plat-belly)"/>
+      <!-- shadow the head casts on the neck and chest -->
+      <ellipse cx="168" cy="149" rx="47" ry="44" fill="#2f363e" opacity="0.5"/>
+    </g>
+
+    <!-- near-side webbed feet -->
+    <path d="M-10 -9 C -12 -3, -18 2, -24 8 Q -20 15, -13 11 Q -8 17, -1 12 Q 5 16, 10 9 C 6 3, 6 -4, 8 -9 Q -1 -19, -10 -9 Z" transform="translate(92 204)" fill="#59626c"/>
+    <path d="M79 214 L 83 204 M91 215 L 91 205" stroke="#464e57" stroke-width="2" stroke-linecap="round"/>
+    <path d="M-10 -9 C -12 -3, -18 2, -24 8 Q -20 15, -13 11 Q -8 17, -1 12 Q 5 16, 10 9 C 6 3, 6 -4, 8 -9 Q -1 -19, -10 -9 Z" transform="translate(150 204)" fill="#59626c"/>
+    <path d="M137 214 L 141 204 M149 215 L 149 205" stroke="#464e57" stroke-width="2" stroke-linecap="round"/>
+    <!-- the venom spur, in brass -->
+    <path d="M81 199 L 73 195 L 81 195 Z" fill="#e8c46e" stroke="#e8c46e" stroke-width="1.500" stroke-linejoin="round"/>
+
+    <!-- head: low, carried in line with the back -->
+    <ellipse cx="170" cy="140" rx="44" ry="40" fill="url(#plat-head)"/>
+    <!-- rim light along the back of the head -->
+    <path d="M129 150 C 124 128, 138 106, 162 101" fill="none" stroke="#d9dee4" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <path d="M150 112 C 162 105, 182 105, 196 114" fill="none" stroke="#d9dee4" stroke-width="3" stroke-linecap="round" opacity="0.45"/>
+
+    <!-- bill -->
+    <g transform="translate(0 24)">
+      <path d="M196 120 C 212 108, 240 112, 248 127 C 254 141, 242 153, 224 153 C 208 153, 197 149, 190 142 C 186 134, 189 125, 196 120 Z" fill="url(#plat-brass)"/>
+      <g clip-path="url(#plat-billClip)">
+        <path d="M186 140 C 206 150, 232 148, 250 134 L 256 160 L 186 160 Z" fill="#a17a2c" opacity="0.55"/>
+      </g>
+      <path d="M194 141 C 210 148, 232 147, 244 136 C 246 134, 246 131, 244 130" fill="none" stroke="#8a6a26" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/>
+      <path d="M197 118 C 190 125, 189 135, 194 143" fill="none" stroke="#7a5c1e" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+      <path d="M208 119 C 220 115, 232 117, 239 123" fill="none" stroke="#f4dc9c" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+      <circle cx="231" cy="126" r="2.2" fill="#8a6a26" opacity="0.85"/>
+      <circle cx="239" cy="130" r="1.8" fill="#8a6a26" opacity="0.85"/>
+    </g>
 
     <!-- dark glasses -->
-    <rect x="160" y="108" width="26" height="18" rx="6" fill="url(#lens)" stroke="#0a0f16" stroke-width="2"/>
-    <rect x="192" y="110" width="20" height="16" rx="6" fill="url(#lens)" stroke="#0a0f16" stroke-width="2"/>
-    <path d="M186 116 L 192 117" stroke="#0a0f16" stroke-width="3" stroke-linecap="round"/>
-    <path d="M160 115 L 148 112" stroke="#0a0f16" stroke-width="3" stroke-linecap="round"/>
-    <path d="M165 112 L 170 111" stroke="#8fb3d9" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
-    <path d="M196 113 L 200 112" stroke="#8fb3d9" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
-
-    <!-- earpiece and its coiled wire down the neck -->
-    <circle cx="148" cy="114" r="4" fill="#1a2330" stroke="#0a0f16" stroke-width="1.5"/>
-    <path d="M147 118 C 142 126, 146 132, 140 138 C 136 142, 140 148, 136 154" fill="none" stroke="#0a0f16" stroke-width="2.2" stroke-linecap="round"/>
-
-    <!-- the venom spur, in brass -->
-    <path d="M112 194 L 106 190" stroke="url(#brass)" stroke-width="3" stroke-linecap="round"/>
+    <g transform="translate(0 26)">
+      <path d="M152 101 L 134 98" stroke="#0a0f16" stroke-width="4" stroke-linecap="round"/>
+      <rect x="150" y="88" width="38" height="27" rx="10" fill="url(#plat-lens)" stroke="#0a0f16" stroke-width="3"/>
+      <rect x="193" y="91" width="21" height="22" rx="8" fill="url(#plat-lens)" stroke="#0a0f16" stroke-width="3"/>
+      <path d="M188 99 Q 190.500 95.500, 193 99" fill="none" stroke="#0a0f16" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M157 96 L 169 93.500" stroke="#8fb3d9" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+      <path d="M198 98 L 204 96.500" stroke="#8fb3d9" stroke-width="3" stroke-linecap="round" opacity="0.75"/>
+      <!-- earpiece and wire -->
+      <path d="M132 106 C 126 113, 132 119, 127 125 C 123 130, 128 135, 124 141 C 122 144, 124 148, 122 151" fill="none" stroke="#0a0f16" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="132" cy="101" r="5" fill="#1a2330" stroke="#0a0f16" stroke-width="1.5"/>
+      <circle cx="131" cy="100" r="1.4" fill="#8fb3d9" opacity="0.7"/>
+    </g>
   </g>
-</svg>
+<metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo5OGE3ODRhOC1kY2M0LTRlM2MtOTlkNC03NGYyNGNjOGYzZTIAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaPBd4LivipjaE6OW4wph/6QAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDo2OGUwMTI3Ni02ZWE4LTRkYmQtYjk0ZC01ZGM4NWIyMGVkODNscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoXKb9NTFR1j/DtOeMCTReEgAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggBUoVW0Hb8Wj3Vk6QBHoO1R9fz8XQKmMaY+5Tg71m38ukZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaNB325AFTq6/5ig2cym0O4gAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIGw4YXQCZmKryHSOxEX8cZ797Po/x2292n+kSBcZ+W+OZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GRtRZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjk4YTc4NGE4LWRjYzQtNGUzYy05OWQ0LTc0ZjI0Y2M4ZjNlMi9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjIxMTFkNjI1LTU5ZGMtNDQzZS1hNzJlLWFjYzk4YWYwOTZlNXJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCAFShVbQdvxaPdWTpAEeg7VH1/PxdAqYxpj7lODvWbfy6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggwX4Yd8wibxwex9u0i2knAkB/ziSszcy12xjufLVsq4miY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggGhy5uteQWd7SKg9l2EQ9419zdF2/9lEZGh00t2l/jzd0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQE52YZBz+oLwTXZugzHf3JmTNaaYugNR+Ns0BjBJQbnPKX0MkSRzR0G1zi+reLUtIO36Z2qcx6op6h8eeuX6nEE=</c2pa:manifest></metadata></svg>

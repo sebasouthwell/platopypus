@@ -450,6 +450,8 @@ phone's Update button. Mechanism:
   `web/mascot.svg`: the sign-in screen, the Home and sidebar brand marks, the SVG favicon, and the PWA icons
   (rendered from it by `scripts/render-mascot.mjs`; `make-icons.mjs` is retired). Brand text on Home and in the
   sidebar now reads PlatOpypus.
+- **1.28.1** — The mascot redrawn by its owner (same brief: grey platypus, dark glasses, earpiece, brass bill, no hat);
+  icons re-rendered from it.
 
 ## Release checklist
 
