@@ -11,10 +11,10 @@ const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="/sprite.svg?v=
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
 async function api(path, { method = 'GET', body, raw = false } = {}) {
-    const headers = { 'X-Porthole': '1' };
+    const headers = { 'X-Plato': '1' };
     if (body !== undefined && !(body instanceof Blob)) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, { method, headers, body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body), credentials: 'same-origin' });
-    noteServerVersion(res.headers.get('x-porthole-version'));
+    noteServerVersion(res.headers.get('x-plato-version') || res.headers.get('x-porthole-version'));
     if (res.status === 401 && !path.startsWith('/api/login')) { showLogin(); throw new ApiError(401, 'Signed out.'); }
     if (raw) return res;
     const data = await res.json().catch(() => ({}));
@@ -156,7 +156,7 @@ async function showLogin() {
 async function showApp() { $('#login').hidden = true; $('#app').hidden = false; go(state.tab); resumeSheet(); }
 
 async function postAuth(path, body) {
-    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Porthole': '1' }, body: JSON.stringify(body || {}), credentials: 'same-origin' });
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Plato': '1' }, body: JSON.stringify(body || {}), credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(res.status, data.error || res.statusText);
     return data;
@@ -657,7 +657,7 @@ async function upgradeRepoDialog(rel, name) {
     };
 }
 
-// .portholerun: show exactly what will run (as whom, where, what gets shared, which Vault names), then run it.
+// .platorun: show exactly what will run (as whom, where, what gets shared, which Vault names), then run it.
 async function portholerunDialog(rel) {
     let pl; try { pl = await api(`/api/portholerun?path=${encodeURIComponent(rel)}`); } catch (ex) { return toast(ex.message, true); }
     const who = pl.runAs === 'root' ? '<span class="tag danger">root</span> full control of the box' : pl.runAs === 'agent' ? `the agent user <span class="mono">${esc(pl.account)}</span>` : `<span class="mono">${esc(pl.account)}</span>, this project's own account (no logins, no PlatOpypus access)`;
@@ -665,7 +665,7 @@ async function portholerunDialog(rel) {
     const missing = pl.needs.filter(n => !n.present).map(n => n.name);
     const blocked = pl.errors.length || missing.length;
     const { panel, close } = openDialog(`<h2>${icon('rocket')}Run ${esc(pl.name)}</h2>
-        <p class="muted"><span class="mono">${esc(showPath(pl.folder))}/.portholerun</span>${pl.running ? ' · <span class="live">● running</span>' : ''}</p>
+        <p class="muted"><span class="mono">${esc(showPath(pl.folder))}/.platorun</span>${pl.running ? ' · <span class="live">● running</span>' : ''}</p>
         ${pl.errors.length ? `<div class="banner danger">${pl.errors.map(esc).join('<br>')}</div>` : `
         <div class="${pl.runAs === 'root' ? 'banner danger' : 'note'}" style="margin:0 0 10px">This will run these commands in <span class="mono">${esc(showPath(pl.cwd || pl.folder))}</span> as ${who}:</div>
         <pre style="white-space:pre-wrap;max-height:30vh">${pl.commands.map(c => `${c.step === 'before' ? '# first\n' : ''}${esc(c.cmd)}`).join('\n')}</pre>
@@ -675,14 +675,14 @@ async function portholerunDialog(rel) {
           ${pl.env.length ? `<div class="row plain"><span class="ico">${icon('settings')}</span><div class="main"><div class="title">Settings</div><div class="sub mono" style="white-space:normal">${pl.env.map(esc).join(' ')}</div></div></div>` : ''}
         </div>
         ${missing.length ? `<p class="sub warn" style="margin-top:8px">Add ${missing.map(esc).join(', ')} to the Vault first.</p>` : ''}
-        ${pl.gitignored ? '' : '<p class="sub" style="margin-top:8px">PlatOpypus adds <span class="mono">.portholerun</span> to the project\'s .gitignore when it runs.</p>'}
+        ${pl.gitignored ? '' : '<p class="sub" style="margin-top:8px">PlatOpypus adds <span class="mono">.platorun</span> to the project\'s .gitignore when it runs.</p>'}
         ${pl.link?.url ? `<p class="sub" style="margin-top:8px">Link: <a href="${esc(pl.link.url + (pl.open || ''))}" target="_blank" rel="noopener">${esc(pl.link.url.replace(/^https:\/\//, ''))}</a></p>` : ''}`}
         <div class="buttons">
           ${blocked ? '' : pl.running ? `<button class="primary" data-pr="restart">${icon('restart')}Restart</button><button data-pr="stop">${icon('stop')}Stop</button>` : `<button class="${pl.runAs === 'root' ? 'danger' : 'primary'}" data-pr="run">${icon('play')}Run${pl.runAs === 'root' ? ' as root' : ''}</button>`}
-          <button data-pr="edit">${icon('pencil')}Edit .portholerun</button><button data-close>Close</button></div>`);
+          <button data-pr="edit">${icon('pencil')}Edit .platorun</button><button data-close>Close</button></div>`);
     $$('[data-pr]', panel).forEach(b => b.onclick = async () => {
         const a = b.dataset.pr;
-        if (a === 'edit') { close(); return openEditor(rel, '.portholerun'); }
+        if (a === 'edit') { close(); return openEditor(rel, '.platorun'); }
         b.disabled = true;
         try {
             if (a === 'stop') { await api('/api/portholerun/stop', { method: 'POST', body: { path: rel } }); close(); toast(`${pl.name} stopped`); return; }
@@ -707,7 +707,7 @@ function runningLine(list) {
 }
 
 // ---------- Services: one card per project ----------
-const PART_LABEL = { live: 'live', run: '.portholerun', server: 'server', container: 'container', editor: 'VS Code', port: 'port', link: 'link', 'box-editor': 'VS Code' };
+const PART_LABEL = { live: 'live', run: '.platorun', server: 'server', container: 'container', editor: 'VS Code', port: 'port', link: 'link', 'box-editor': 'VS Code' };
 function partIcon(x) {
     if (x.type === 'container') return `<span class="ico ${x.running ? 'dock' : 'dim'} logo"><img src="/api/docker/logo?image=${encodeURIComponent(x.image || '')}" alt="" loading="lazy" data-fb="container"><span class="badge">${icon('container')}</span></span>`;
     const ic = { live: 'globe', run: 'rocket', server: 'devserver', port: 'devserver', editor: 'file-code', 'box-editor': 'file-code', link: 'link' }[x.type] || 'activity';
@@ -765,7 +765,7 @@ function partsHtml(parts, credChip) {
     return out.join('');
 }
 function projSummary(p) {
-    if (!p.parts.length) return p.canRun ? 'not running · has .portholerun' : 'nothing running';
+    if (!p.parts.length) return p.canRun ? 'not running · has .platorun' : 'nothing running';
     const up = p.parts.filter(x => x.running);
     if (!up.length) return `stopped · ${p.parts.length} part${p.parts.length === 1 ? '' : 's'}`;
     const names = [];
@@ -821,7 +821,7 @@ function projectMenu(p, s) {
         <button data-m="folder">${icon('folder-open')}Open the folder</button>
         <button data-m="agent">${icon('claude')}Start an agent here</button>
         ${p.hasEditor ? '' : `<button data-m="vscode">${icon('file-code')}Open in VS Code<span class="sub" style="margin-left:6px">project editor, sees only this folder</span></button>`}
-        ${p.canRun ? `<button data-m="run">${icon('rocket')}.portholerun…</button>` : ''}
+        ${p.canRun ? `<button data-m="run">${icon('rocket')}.platorun…</button>` : ''}
         ${lives.map(x => `<button data-m="live" data-k="${esc(x.key)}" data-p="${esc(x.project)}">${icon('globe')}${esc(x.title)} · service page</button>`).join('')}
         ${p.parts.filter(x => x.type === 'run' || x.type === 'server').map(x => `<button data-m="srv" data-slug="${esc(x.slug)}">${icon('logs')}${esc(x.title)} · logs and settings</button>`).join('')}
         ${p.parts.filter(x => x.type === 'container').map(x => `<button data-m="ctr" data-name="${esc(x.name)}">${icon('container')}${esc(x.title)} · container</button>`).join('')}
@@ -834,7 +834,7 @@ function projectMenu(p, s) {
         if (m === 'folder') { state.filesPath = p.path; go('files'); }
         if (m === 'agent') newShellDialog(p.path, 'agent');
         if (m === 'vscode') codeServerStartWith(p.path, true);
-        if (m === 'run') portholerunDialog(join(p.path, '.portholerun'));
+        if (m === 'run') portholerunDialog(join(p.path, '.platorun'));
         if (m === 'live') livePage(s.live.find(x => x.project === b.dataset.p), b.dataset.k);
         if (m === 'copy') copyText(p.open, 'Link copied');   // the bare address: sharing it never hands over a key
         if (m === 'srv') serverMenu(s.servers.find(x => x.slug === b.dataset.slug));
@@ -1459,7 +1459,7 @@ async function loadServices() {
     $$('[data-proj-folder]', body).forEach(b => b.onclick = () => { state.filesPath = b.dataset.projFolder; go('files'); });
     bindQuickChips(body);
     $$('[data-open-url]', body).forEach(b => b.onclick = e => { e.stopPropagation(); if (b.dataset.openUrl) window.open(b.dataset.openUrl, '_blank', 'noopener'); });
-    $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.portholerun')));
+    $$('[data-proj-run]', body).forEach(b => b.onclick = () => portholerunDialog(join(b.dataset.projRun, '.platorun')));
     $$('[data-proj-menu]', body).forEach(b => b.onclick = () => projectMenu(s.projects[Number(b.dataset.projMenu)], s));
     $$('.ico.logo img, .ico.fav img', body).forEach(img => img.addEventListener('error', () => { const sp = img.parentElement; if (!sp) return; sp.classList.remove('fav', 'logo'); sp.innerHTML = icon(img.dataset.fb || 'container'); }, { once: true }));
     $$('[data-live]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/live/${encodeURIComponent(b.dataset.p)}/${b.dataset.k}/${b.dataset.live}`, { method: 'POST' }); toast(b.dataset.live === 'stop' ? 'Stopped' : r?.tookOver ? `Started (took over from "${r.tookOver}")` : 'Started'); } catch (ex) { toast(ex.message, true); } loadServices(); });
@@ -2136,22 +2136,22 @@ async function loadFiles(path = null) {
     fsRoot = data.root || '/'; homeRel = data.home || '';
     state.filesPath = data.path; localStorage.setItem('porthole.path', data.path);
     renderCrumbs(data.path);
-    const items = data.items.filter(i => !i.hidden || showHidden || i.name === '.portholerun');
-    const runFile = data.items.find(i => i.name === '.portholerun' && i.type === 'file');
+    const items = data.items.filter(i => !i.hidden || showHidden || i.name === '.platorun' || i.name === '.portholerun');
+    const runFile = data.items.find(i => (i.name === '.platorun' || i.name === '.portholerun') && i.type === 'file');
     $('#files-empty').hidden = items.length > 0;
     $('#files-title').textContent = data.path ? basename(data.path) : (fsRoot === '/' ? 'Root' : 'Files');
     const up = data.path ? `<button class="row plain" data-up><span class="ico dim">${icon('back')}</span><div class="main"><div class="title mono">..</div><div class="sub">${esc(showPath(parentOf(data.path)))}</div></div></button>` : '';
-    // A folder with a .portholerun gets its Run card right under the git card.
+    // A folder with a .platorun gets its Run card right under the git card.
     const mine = (data.running || []).find(r => r.kind === 'run');
     $('#run-card').innerHTML = !runFile ? '' : mine
         ? `<div class="run-card on"><span class="ico kelp">${icon('activity')}</span><div class="main"><div class="title">${esc(basename(data.path) || 'This folder')} is running</div><div class="sub">${mine.port ? `<span class="mono">:${mine.port}</span> · ` : ''}${mine.url ? esc(mine.url.replace(/^https:\/\//, '')) : 'no link'}</div></div>${mine.url ? `<a class="pill kelp" href="${esc(openLink(mine.url, mine.port, credsSeen))}" target="_blank" rel="noopener">${icon('external')}Open</a>` : ''}<button class="pill" data-run-file>${icon('settings')}Manage</button></div>`
-        : `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.portholerun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>`;
-    $('#run-card [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.portholerun')));
+        : `<button class="run-card" data-run-file><span class="ico kelp">${icon('rocket')}</span><div class="main"><div class="title">Run ${esc(basename(data.path) || 'this folder')}</div><div class="sub">.platorun · see what it starts, then run it</div></div><span class="pill kelp">${icon('play')}Run</span></button>`;
+    $('#run-card [data-run-file]')?.addEventListener('click', () => portholerunDialog(join(data.path, '.platorun')));
     $('#file-list').innerHTML = up + items.map(i => `
         <button class="row" data-name="${esc(i.name)}" data-type="${i.type}" data-size="${i.size ?? 0}"${finePointer() ? ' draggable="true"' : ''}>
           <span class="ico ${i.type === 'dir' ? 'brass' : ''}${i.icon ? ' fav' : ''}">${i.icon ? `<img src="/api/files/icon?path=${encodeURIComponent(join(join(data.path, i.name), i.icon))}" alt="" loading="lazy">` : icon(i.type === 'dir' ? 'folder' : EXT_ICON[extOf(i.name)] || 'file')}</span>
           <div class="main"><div class="title">${esc(i.name)}${i.links?.from ? '<span class="tag">upgrade</span>' : ''}${i.links?.to ? '<span class="tag dim">prototype</span>' : ''}</div><div class="sub">${i.running?.length ? `${runningLine(i.running)} · ` : ''}${i.links?.from ? `upgraded from ${esc(i.links.from.name)} · ` : ''}${i.links?.to ? `upgraded into ${esc(i.links.to.map(t => t.name).join(', '))} · ` : ''}${i.type === 'dir' ? (i.running?.length ? '' : 'Folder · ') : fmtBytes(i.size) + ' · '}${fmtAgo(i.modified)}${i.symlink ? ' · link' : ''}</div></div>
-          ${i.running?.[0]?.url ? `<span class="pill kelp sm" data-open-run="${esc(openLink(i.running[0].url, i.running[0].port, credsSeen))}" title="${esc(i.running[0].url)}">${icon('external')}Open</span>` : ''}${i.run ? (i.running?.some(r => r.kind === 'run') ? `<span class="pill ghost-kelp sm" data-run-dir title="Running · restart or stop">${icon('activity')}Running</span>` : `<span class="pill kelp sm" data-run-dir title="Run with .portholerun">${icon('play')}Run</span>`) : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
+          ${i.running?.[0]?.url ? `<span class="pill kelp sm" data-open-run="${esc(openLink(i.running[0].url, i.running[0].port, credsSeen))}" title="${esc(i.running[0].url)}">${icon('external')}Open</span>` : ''}${i.run ? (i.running?.some(r => r.kind === 'run') ? `<span class="pill ghost-kelp sm" data-run-dir title="Running · restart or stop">${icon('activity')}Running</span>` : `<span class="pill kelp sm" data-run-dir title="Run with .platorun">${icon('play')}Run</span>`) : ''}<span class="more ${state.expanded === join(data.path, i.name) ? 'on' : ''}" data-more>${icon('more_h')}</span>
         </button>`).join('');
     $$('#file-list .ico.fav img').forEach(img => img.addEventListener('error', () => { const s = img.parentElement; s.classList.remove('fav'); s.innerHTML = icon('folder'); }));
     $('#file-list [data-up]')?.addEventListener('click', () => loadFiles(parentOf(state.filesPath)).catch(ex => toast(ex.message, true)));
@@ -2159,10 +2159,10 @@ async function loadFiles(path = null) {
         const name = row.dataset.name, type = row.dataset.type, size = Number(row.dataset.size), rel = join(state.filesPath, name);
         row.addEventListener('click', e => {
             const openRun = e.target.closest('[data-open-run]'); if (openRun) return window.open(openRun.dataset.openRun, '_blank', 'noopener');
-            if (e.target.closest('[data-run-dir]')) return portholerunDialog(join(rel, '.portholerun'));
+            if (e.target.closest('[data-run-dir]')) return portholerunDialog(join(rel, '.platorun'));
             if (e.target.closest('[data-more]')) return toggleExpand(row, rel, name, type, size);
             if (type === 'dir') return loadFiles(rel).catch(ex => toast(ex.message, true));
-            if (name === '.portholerun' && type === 'file') return portholerunDialog(rel);
+            if (name === '.platorun' && type === 'file') return portholerunDialog(rel);
             if (isTextName(name, size)) return openEditor(rel, name);
             previewFile(rel, name);
         });
@@ -2521,7 +2521,7 @@ function uploadOne(file, dir, onProgress, overwrite = false) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', `/api/files/upload?path=${encodeURIComponent(dir || '.')}&name=${encodeURIComponent(file.name)}${overwrite ? '&overwrite=1' : ''}`);
-        xhr.setRequestHeader('X-Porthole', '1'); xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        xhr.setRequestHeader('X-Plato', '1'); xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         xhr.upload.onprogress = ev => { if (ev.lengthComputable) onProgress(Math.round(ev.loaded / ev.total * 100)); };
         xhr.onload = async () => {
             if (xhr.status < 300) return resolve();
@@ -2617,6 +2617,18 @@ async function loadMore() {
     $('#box-refresh').onclick = () => loadMore().catch(e => toast(e.message, true));
     loadUpdate().catch(() => {});
     api('/api/alerts').then(a => { const el = $('#more-alerts-sub'); if (el) el.textContent = alertsSub(a); }).catch(() => {});
+    api('/api/rename').then(r => {
+        const card = $('#rename-card'); if (!card) return;
+        card.hidden = !r.pending;
+        if (!r.pending) return;
+        card.innerHTML = `<div class="row"><span class="ico brass">${icon('restart')}</span><div class="main"><div class="title">Finish the rename</div><div class="sub" style="white-space:normal">Shells and services still run under the old name. One step moves them: live services stop and start again; open shells, plain servers and quick links end (Claude sessions resume in a new shell). About a minute.</div></div><button class="text-btn" data-rename-finish>Do it</button></div>`;
+        $('[data-rename-finish]', card).onclick = async b => {
+            if (!(await confirmDialog({ title: 'Finish the rename now?', text: 'Every open shell ends (agents resume in a new shell), plain servers and quick links stop, live services restart. Pick a quiet moment.', action: 'Finish the rename' }))) return;
+            b.target.disabled = true; b.target.textContent = 'Moving…';
+            try { const x = await api('/api/rename/finish', { method: 'POST' }); toast(x.restarted?.length ? `Done; restarted ${x.restarted.join(', ')}` : 'Done'); } catch (ex) { toast(ex.message, true); }
+            loadMore().catch(() => {});
+        };
+    }).catch(() => {});
     const c = s.claude;
     $('#more-claude-sub').textContent = `Claude ${c.version ? c.version.replace(/\s*\(Claude Code\)/, '') : 'not installed'} · Codex · Antigravity · profiles`;
     $('#more-remote-sub').textContent = c.remoteControl ? 'Running — open the Claude app' : c.signedIn ? 'Off' : 'Sign in to Claude first';
@@ -3182,7 +3194,7 @@ async function loadAlerts() {
         <div class="buttons"><button data-close>Close</button></div>`);
     const lp = $('[data-limit-preview]', body); if (lp) lp.onclick = async () => { lp.disabled = true; try { showPlan(await api('/api/limit/run', { method: 'POST', body: { dry: true } }), false); } catch (ex) { toast(ex.message, true); } lp.disabled = false; };
     const ln = $('[data-limit-now]', body); if (ln) ln.onclick = async () => {
-        if (!(await confirmDialog({ title: 'Close links and stop everything that is not a live service?', text: 'Public quick links close; registered servers, .portholerun runs and containers stop (they can be started again). Live services and shells stay.', action: 'Do it now' }))) return;
+        if (!(await confirmDialog({ title: 'Close links and stop everything that is not a live service?', text: 'Public quick links close; registered servers, .platorun runs and containers stop (they can be started again). Live services and shells stay.', action: 'Do it now' }))) return;
         ln.disabled = true; try { showPlan(await api('/api/limit/run', { method: 'POST', body: {} }), true); loadServices().catch(() => {}); } catch (ex) { toast(ex.message, true); } ln.disabled = false; loadAlerts().catch(() => {});
     };
     $$('[data-bot]', body).forEach(b => b.onclick = () => put({ itemId: b.dataset.bot }));
@@ -3218,7 +3230,7 @@ const AUDIT_TITLES = {
     credential: {
         'agent-read': e => `Agent read ${auditNames(e)}`, 'agent-run': e => `Agent ran a command with ${auditNames(e)}`,
         'root-read': e => `Root shell read ${auditNames(e)}`, 'root-run': e => `Root shell ran a command with ${auditNames(e)}`, 'shell-export': e => `Put into a new shell: ${auditNames(e)}`,
-        'service-start': e => `Given to ${e.what}: ${auditNames(e)}`, portholerun: e => `Given to .portholerun ${e.what}: ${auditNames(e)}`,
+        'service-start': e => `Given to ${e.what}: ${auditNames(e)}`, portholerun: e => `Given to .platorun ${e.what}: ${auditNames(e)}`,
         'vault-revealed': e => `Revealed on the phone: ${e.what}`, 'service-revealed': e => `Revealed on the phone: ${e.what}`,
         shared: e => `Shared with you: ${e.what}`, 'shared-revealed': e => `Opened shared card: ${e.what}`,
     },
@@ -3229,9 +3241,9 @@ const AUDIT_TITLES = {
         'server-run': e => `Server started · ${e.what}`, 'server-register': e => `Server registered · ${e.what}`, 'server-start': e => `Server started · ${e.what}`,
         'server-stop': e => `Server stopped · ${e.what}`, 'server-restart': e => `Server restarted · ${e.what}`, 'server-remove': e => `Server removed · ${e.what}`,
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
-        'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.portholerun · ${e.what}`,
+        'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.platorun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, backup: e => `Backed up · ${e.what}`, 'hostname-moved': e => `Hostname moved here · ${e.what}`, 'backup-failed': e => `Backup failed · ${e.what}`, restore: e => `Restored · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, 'rename-finished': e => `Rename finished · ${e.what}`, backup: e => `Backed up · ${e.what}`, 'hostname-moved': e => `Hostname moved here · ${e.what}`, 'backup-failed': e => `Backup failed · ${e.what}`, restore: e => `Restored · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };

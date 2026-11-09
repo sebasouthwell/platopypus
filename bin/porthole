@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# Porthole box CLI — recovery and housekeeping, run on the box as the service user (root by default).
+# PlatOpypus box CLI (`plato`, also `porthole`) — recovery and housekeeping, run on the box as the service user (root by default).
 #
-#   porthole reset-auth    forget passkeys, password, two-step codes and all sessions; print a fresh setup token.
+#   plato reset-auth    forget passkeys, password, two-step codes and all sessions; print a fresh setup token.
 #                          The web app shows the first-run setup screen again. Vault, files, shells, containers untouched.
-#   porthole reset-totp    turn two-step codes off only (lost authenticator); passkey/password still required.
-#   porthole token         print the current setup/CLI token (only useful before first setup or after reset-auth).
-#   porthole sessions      sign every device out (credentials stay).
-#   porthole status        service, version, credential summary.
-#   porthole update        run the self-updater now (same as More → Update).
+#   plato reset-totp    turn two-step codes off only (lost authenticator); passkey/password still required.
+#   plato token         print the current setup/CLI token (only useful before first setup or after reset-auth).
+#   plato sessions      sign every device out (credentials stay).
+#   plato status        service, version, credential summary.
+#   plato update        run the self-updater now (same as More → Update).
 set -euo pipefail
 
-STATE="${PORTHOLE_STATE:-${HOME:-/root}/.porthole}"
-APP="${PORTHOLE_APP:-/opt/porthole}"
+STATE="${PLATO_STATE:-${PORTHOLE_STATE:-}}"; [ -n "$STATE" ] || { if [ -e "${HOME:-/root}/.platopypus" ] || [ ! -e "${HOME:-/root}/.porthole" ]; then STATE="${HOME:-/root}/.platopypus"; else STATE="${HOME:-/root}/.porthole"; fi; }
+APP="${PLATO_APP:-${PORTHOLE_APP:-}}"; [ -n "$APP" ] || { if [ -e /opt/platopypus ] || [ ! -e /opt/porthole ]; then APP=/opt/platopypus; else APP=/opt/porthole; fi; }
+unit() { if systemctl cat platopypus >/dev/null 2>&1; then echo platopypus; else echo porthole; fi; }
 SEC="$STATE/security.json"
 
 restart_service() {
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet porthole 2>/dev/null; then
-        systemctl restart porthole && echo "porthole service restarted"
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$(unit)" 2>/dev/null; then
+        systemctl restart "$(unit)" && echo "$(unit) service restarted"
     else
-        echo "restart the Porthole server to apply (it reads the token at start)"
+        echo "restart the PlatOpypus server to apply (it reads the token at start)"
     fi
 }
 
@@ -40,14 +41,14 @@ case "${1:-}" in
         fi
         ;;
     token)
-        cat "$STATE/token" 2>/dev/null || echo "no token file yet; start the server once (or run: porthole reset-auth)"
+        cat "$STATE/token" 2>/dev/null || echo "no token file yet; start the server once (or run: plato reset-auth)"
         ;;
     sessions)
         rm -f "$STATE/auth-sessions.json"; echo "all devices signed out."; restart_service
         ;;
     status)
         echo "version:  $(node -e 'console.log(require(process.argv[1]).version)' "$APP/server/package.json" 2>/dev/null || echo '?') ($(cat "$APP/VERSION" 2>/dev/null | cut -d' ' -f1))"
-        if command -v systemctl >/dev/null 2>&1; then echo "service:  $(systemctl is-active porthole 2>/dev/null || echo 'not installed')"; fi
+        if command -v systemctl >/dev/null 2>&1; then echo "service:  $(systemctl is-active "$(unit)" 2>/dev/null || echo 'not installed') ($(unit))"; fi
         if [ -f "$SEC" ]; then
             node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(`passkeys: ${(s.passkeys||[]).length}  password: ${s.password?"set":"no"}  two-step: ${s.totp&&s.totp.enabled?"on":"off"}`)' "$SEC"
         else
@@ -57,7 +58,7 @@ case "${1:-}" in
         echo "state:    $STATE"
         ;;
     update)
-        exec bash "$APP/bin/porthole-update"
+        exec bash "$APP/bin/plato-update"
         ;;
     *)
         sed -n '2,10p' "$0"

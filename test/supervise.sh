@@ -5,7 +5,7 @@
 child=0
 trap '[ "$child" -gt 0 ] && kill -TERM "$child" 2>/dev/null' TERM
 while true; do
-    (cd /opt/porthole/server && exec node server.js) &
+    (cd /opt/platopypus/server 2>/dev/null || cd /opt/porthole/server; exec node server.js) &
     child=$!
     wait "$child"; wait "$child" 2>/dev/null
     sleep 1

@@ -1,4 +1,4 @@
-# Proxy to the Porthole process on loopback. Installed to /etc/nginx/conf.d/porthole-proxy.inc.
+# Proxy to the PlatOpypus process on loopback. Installed to /etc/nginx/conf.d/platopypus-proxy.inc.
 proxy_pass http://127.0.0.1:7331;
 proxy_http_version 1.1;
 proxy_set_header Host $host;

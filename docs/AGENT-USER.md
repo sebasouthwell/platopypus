@@ -17,7 +17,7 @@ in three stages. Each stage is safe to update into and to roll back from.
 - An agent-user shell may only start in a project under `/Projects`, a scratch folder or `/home/agent`. PlatOpypus makes
   that folder group-writable for `porthole-dev` (group ownership + setgid on folders) the first time; files stay owned
   by whoever made them, and root shells keep full access, so mixing both kinds in one project works.
-- Each agent-user shell gets its own **shell token** (in its environment as `PORTHOLE_TOKEN`). The box CLIs (`vault`,
+- Each agent-user shell gets its own **shell token** (in its environment as `PLATO_TOKEN`). The box CLIs (`vault`,
   `credshare`, `svc`, `tunnel`, `live`, `project`, `elevate`) sign in with it and get a **restricted session**: only
   the routes those CLIs need. Files, shells, Docker, the Vault editor, security settings, updates and the terminal
   WebSocket are refused. The box token and `vault.key` are unreadable to the agent user.
@@ -40,7 +40,7 @@ Rollback: none needed; root shells work exactly as before.
   rewrites profile paths. The root copies stay in place, renamed `*.porthole-moved-<date>`, until the user confirms.
 - **Files → folder → Make agent-ready** for projects created before stage 1 (the same group change, for the whole tree).
 - New agent shells default to the agent user once logins are moved. Root stays one tap away.
-- Backups of what is moved go to `~/.porthole/migrate/stage2-<date>.tar.gz`.
+- Backups of what is moved go to `~/.platopypus/migrate/stage2-<date>.tar.gz`.
 
 Rollback: AI agents → Undo move restores the renamed root copies; the agent-user copies are left for inspection.
 
@@ -55,12 +55,12 @@ Rollback: AI agents → Undo move restores the renamed root copies; the agent-us
 
 - Agent shells always run as the agent user; running an agent as root needs the explicit **Run as root** grant,
   shown in red on the shell.
-- `server/lib/migrate.js` with `~/.porthole/schema.json` (per UPDATE.md): confirms stage 2 ran, removes the renamed
+- `server/lib/migrate.js` with `~/.platopypus/schema.json` (per UPDATE.md): confirms stage 2 ran, removes the renamed
   root copies after a final backup, and refuses to start on a failed step with the rollback written to the log.
 
 ## Compatibility notes
 
 - `shells.json` gains `runAs` (missing = root) and `tokenHash`; old entries keep working.
-- Box CLIs are unchanged for root shells: they still read `~/.porthole/token`. The only new behaviour is when
-  `PORTHOLE_TOKEN` holds a shell token.
+- Box CLIs are unchanged for root shells: they still read `~/.platopypus/token`. The only new behaviour is when
+  `PLATO_TOKEN` holds a shell token.
 - Agent instructions explain `elevate` and are installed for both users.

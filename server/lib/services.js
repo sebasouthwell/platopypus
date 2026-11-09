@@ -156,10 +156,10 @@ export async function runServer({ name, port, cwd, cmd, project = null, env = {}
     const logFile = path.join(ownLogDir, `${slug}.log`);
     const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     // The pane shell is the process-group leader; the command and tee hang off it, so TERM -pgid takes everything.
-    const inner = asService ? svcUser.wrapShell(account, cmd.map(q).join(' '), [...Object.keys(env), 'PORTHOLE_SERVICE']) : cmd.map(q).join(' ');
+    const inner = asService ? svcUser.wrapShell(account, cmd.map(q).join(' '), [...Object.keys(env), 'PLATO_SERVICE', 'PORTHOLE_SERVICE']) : cmd.map(q).join(' ');
     let shellCmd = `cd ${q(dir)} && (${inner}) 2>&1 | tee -a ${q(logFile)}; echo "[svc] exited $?" | tee -a ${q(logFile)}; sleep 1`;
     if (asAgent) { const a = agentUser.info(); fs.chownSync(ownLogDir, a.uid, a.gid); fs.writeFileSync(logFile, '', { flag: 'a', mode: 0o644 }); fs.chownSync(logFile, a.uid, a.gid); shellCmd = agentUser.wrap(shellCmd); } // started by an agent-user shell: runs as that user
-    await newSession(session, dir, shellCmd, { ...env, PORTHOLE_SERVICE: slug });
+    await newSession(session, dir, shellCmd, { ...env, PLATO_SERVICE: slug, PORTHOLE_SERVICE: slug });
     let pid = null;
     try { pid = Number((await tmux('display-message', '-p', '-t', `${session}:`, '#{pane_pid}')).trim()) || null; } catch { /* no pane yet */ }
     db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: dir, cmd, pid, session, project, created: Date.now(), stoppedAt: null, log: logFile, external: false, ...(owner ? { owner } : {}), ...(live ? { live } : {}), runAs: asAgent ? 'agent' : asService ? 'service' : asContainer ? 'container' : 'root', ...(asService || asContainer ? { account } : {}) };

@@ -99,6 +99,7 @@ const ACTIVITY = [
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/(actions|groups)\//, 'service-action', (m, b, r) => ({ what: `${r?.label || 'action'}${b.item ? ` · ${b.item}` : ''}`, project: decodeURIComponent(m[1]), code: r?.code })],
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/pull$/, 'image-pull', (m, b, r) => ({ what: `${decodeURIComponent(m[1])}/${m[2]} · ${r?.image || ''} (${r?.changed ? (r.restarted ? 'new image, restarted' : 'new image') : 'no change'})`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
+    ['POST', /^\/api\/rename\/finish$/, 'rename-finished', (m, b, r) => ({ what: `shells and services moved to the plato socket; restarted ${(r?.restarted || []).join(', ') || 'nothing'}` })],
     ['PUT', /^\/api\/limit$/, 'limit-changed', (m, b, r) => ({ what: `Limit reached guard ${r?.on ? 'on' : 'off'}, load over ${r?.load}` })],
     ['PUT', /^\/api\/alerts$/, 'alerts-changed', (m, b, r) => ({ what: `Telegram alerts${r?.botName ? ` via ${r.botName}` : ''}: ${r ? Object.entries(r.on).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : ''}${r?.pausedUntil ? ' (paused)' : ''}` })],
     ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
@@ -117,7 +118,7 @@ function send(res, status, body, headers = {}) {
     res.writeHead(status, {
         'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
-        'X-Porthole-Version': RUNNING_VERSION,
+        'X-Plato-Version': RUNNING_VERSION, 'X-Porthole-Version': RUNNING_VERSION,
         ...securityHeaders(),
         ...headers,
     });
@@ -629,6 +630,9 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Push alerts (Telegram bot from the Vault) and the network egress log
+        // 2.0 rename: whether the tmux server still runs on the old socket, and the step that moves it.
+        if (p === '/api/rename' && method === 'GET') return send(res, 200, { pending: !!config.renamePending, socket: config.tmuxSocket });
+        if (p === '/api/rename/finish' && method === 'POST') return send(res, 200, await live.finishRename());
         // Backups to S3: settings, a storage check, back up / list / restore per project.
         if (p === '/api/backups' && method === 'GET') return send(res, 200, backups.settings());
         if (p === '/api/backups' && method === 'PUT') return send(res, 200, backups.configure(await readJson(req, 8 * 1024)));

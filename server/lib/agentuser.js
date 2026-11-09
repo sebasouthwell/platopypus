@@ -89,7 +89,7 @@ export function wrap(cmd) {
     const inner = cmd ? `umask 007; ${cmd}` : 'umask 007; exec bash -l';
     // Absolute path: runuser lives in sbin, which the service's PATH may not include.
     const runuser = ['/usr/sbin/runuser', '/sbin/runuser', '/usr/bin/runuser'].find(f => fs.existsSync(f)) || 'runuser';
-    return `exec ${runuser} -u ${USER} -- env PATH=${q(pathVar)} PORTHOLE_RUN_AS=agent bash -l -c ${q(inner)}`;
+    return `exec ${runuser} -u ${USER} -- env PATH=${q(pathVar)} PLATO_RUN_AS=agent PORTHOLE_RUN_AS=agent bash -l -c ${q(inner)}`;
 }
 
 // The uid owning a process and its real working directory (from /proc, not anything the caller claims).

@@ -105,7 +105,7 @@ Everything under `services`, `data` and `backup` is optional; a project with onl
 | **Dev and live** | Live runs from its own checkout under `~/live/<project>` pinned to a commit; development continues in `~/Projects/<project>`. When dev is ahead, the service page says so and offers Update. A second agent can be started in the live checkout for hot fixes. |
 | **Update strategy** | Per service, asked on the phone the first time: **full** (stop, replace the checkout, reset data, start, for stateless apps), **preserve-data** (stop, update code, keep data, run the migration action if there is one, start), **patch** (run the service's `patch` command, no reset). A backup before updating is offered when the project has data. |
 
-## Quick runs: `.portholerun`
+## Quick runs: `.platorun`
 
 Lighter than PORTHOLE.md, for "start this the way it usually runs" without an agent. One file in a project folder:
 
@@ -125,7 +125,7 @@ run_as: service             # service (project account, default) | agent | root
 Files shows a **Run** card at the top of that folder (and the file itself is always listed, even with hidden files
 off). Tapping it shows every command, the folder, the account, what gets shared and which Vault names are needed;
 Run only proceeds with the hash of the plan you saw, so an edit in between is refused. It runs as the registered
-server `run-<name>` (stop, restart, logs in Services), and `.portholerun` is added to the project's `.gitignore`.
+server `run-<name>` (stop, restart, logs in Services), and `.platorun` is added to the project's `.gitignore`.
 
 ## Rules for agents
 
@@ -149,7 +149,7 @@ server `run-<name>` (stop, restart, logs in Services), and `.portholerun` is add
   substituted into the command text, so quote them (`"$INPUT_COUNT"`) and they cannot inject shell. Types: string
   (one line, 500 characters unless `max_length`; `pattern` is a full-match regular expression), integer, number
   (`min`/`max`), boolean (`true`/`false`), choice (`choices`).
-- Actions run in the service folder with the service's environment plus `PORTHOLE_SERVICE` (its slug). Never
+- Actions run in the service folder with the service's environment plus `PLATO_SERVICE` (its slug). Never
   restart the service from inside the command (`svc restart …`): use `restart: true`, or `stop_first: true` when the
   command edits data the running process keeps in memory and would write back (a counter, a cache, a SQLite file
   open in WAL mode). PlatOpypus stops, runs, then starts, and reports each step in the output.
@@ -220,7 +220,7 @@ Run a live service on its own short-lived cloud machine instead of the PlatOpypu
 - **Every host comes ready:** nginx, certbot and the coming-up page are installed by cloud-init before the project is
   cloned, so the hostname answers on https within minutes, then switches to the service once its health check passes.
 - PlatOpypus renders a Terraform stack per host from a template, applies it with its own state under
-  `~/.porthole/ephemeral/<id>/`, boots the instance with cloud-init that clones the project at the pinned commit and
+  `~/.platopypus/ephemeral/<id>/`, boots the instance with cloud-init that clones the project at the pinned commit and
   starts the service from `PORTHOLE.md`, then points the chosen hostname at it with nginx + Let's Encrypt on that host.
 - **Admin API** on each host: a tiny agent (start, stop, status, logs, actions, backup) bound behind nginx on the
   host's hostname under a random path, requiring a per-host key generated at creation. **PlatOpypus holds the key**

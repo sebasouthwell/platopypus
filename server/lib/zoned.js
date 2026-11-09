@@ -161,14 +161,14 @@ server {
 }
 async function nginxApply(slug, text) {
     ensureComingUp();
-    const avail = `/etc/nginx/sites-available/porthole-zoned-${slug}`;
+    const avail = `/etc/nginx/sites-available/platopypus-zoned-${slug}`;
     fs.writeFileSync(avail, text, { mode: 0o644 });
-    try { fs.symlinkSync(avail, `/etc/nginx/sites-enabled/porthole-zoned-${slug}`); } catch { /* exists */ }
+    try { fs.symlinkSync(avail, `/etc/nginx/sites-enabled/platopypus-zoned-${slug}`); } catch { /* exists */ }
     try { await run('nginx', ['-t']); } catch (e) { nginxRemove(slug); throw httpError(500, `nginx rejected the config: ${String(e.stderr || e.message).slice(0, 300)}`); }
     await run('systemctl', ['reload', 'nginx']);
 }
 function nginxRemove(slug) {
-    for (const f of [`/etc/nginx/sites-enabled/porthole-zoned-${slug}`, `/etc/nginx/sites-available/porthole-zoned-${slug}`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
+    for (const f of [`/etc/nginx/sites-enabled/platopypus-zoned-${slug}`, `/etc/nginx/sites-available/platopypus-zoned-${slug}`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 }
 async function nginxReloadQuiet() { try { await run('nginx', ['-t']); await run('systemctl', ['reload', 'nginx']); } catch { /* ignore */ } }
 
@@ -201,7 +201,7 @@ export async function list() {
     const out = [];
     for (const it of Object.values(load().items)) {
         let alive, connected;
-        if (it.mode === 'direct') { alive = certExists(it.hostname) && fs.existsSync(`/etc/nginx/sites-enabled/porthole-zoned-${it.slug}`); connected = alive; }
+        if (it.mode === 'direct') { alive = certExists(it.hostname) && fs.existsSync(`/etc/nginx/sites-enabled/platopypus-zoned-${it.slug}`); connected = alive; }
         else { alive = await hasSession(SESSION_PREFIX + it.slug); connected = alive && tunnelConnected(it.slug); }
         out.push({ slug: it.slug, hostname: it.hostname, port: it.port, name: it.name || it.hostname, url: `https://${it.hostname}`, kind: 'zoned', mode: it.mode, created: it.created, expires: null, origin: it.origin, owner: it.owner || null, via: it.via, alive, connected });
     }
@@ -304,7 +304,25 @@ export function byPort(port) {
 
 // After a reboot: tunnel sessions are gone and must be started again; direct shares need nothing (nginx + certbot
 // timer are system services).
+// 2.0: nginx blocks made by 1.x are called porthole-zoned-<slug>; give them the new name once.
+async function migrateNginxNames() {
+    if (!fs.existsSync('/etc/nginx/sites-available')) return;
+    let moved = 0;
+    for (const slug of Object.keys(load().items)) {
+        const oldA = `/etc/nginx/sites-available/porthole-zoned-${slug}`, newA = `/etc/nginx/sites-available/platopypus-zoned-${slug}`;
+        if (!fs.existsSync(oldA) || fs.existsSync(newA)) continue;
+        try {
+            fs.renameSync(oldA, newA);
+            fs.rmSync(`/etc/nginx/sites-enabled/porthole-zoned-${slug}`, { force: true });
+            try { fs.symlinkSync(newA, `/etc/nginx/sites-enabled/platopypus-zoned-${slug}`); } catch { /* exists */ }
+            moved++;
+        } catch (e) { log('zoned', `rename of the nginx block for ${slug}: ${e.message}`); }
+    }
+    if (moved) { log('zoned', `renamed ${moved} nginx block${moved === 1 ? '' : 's'} to platopypus-zoned-*`); await nginxReloadQuiet(); }
+}
+
 export async function ensure() {
+    await migrateNginxNames().catch(() => {});
     for (const it of Object.values(load().items)) {
         if (it.mode !== 'tunnel' || (await hasSession(SESSION_PREFIX + it.slug))) continue;
         try { await startSession(it, decrypt(it.token)); log('zoned', `restarted cloudflared for ${it.hostname}`); } catch (e) { log('zoned', `cannot restart ${it.hostname}: ${e.message}`); }

@@ -14,11 +14,17 @@
 #   MODE             "box" (default) or "docker"
 
 set -euo pipefail
+# Never run from inside a folder this script may move (2.0 moves /opt/porthole): a vanished cwd breaks rsync.
+cd /
 # Callers (containers, a service with a short PATH) may lack sbin, where useradd/groupadd/iptables live.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
-# On the EC2 box the first boot writes /etc/porthole.env; later re-runs (scripts/box.ps1 deploy) reuse it.
-if [ -f /etc/porthole.env ]; then set -a; . /etc/porthole.env; set +a; chmod 600 /etc/porthole.env; fi   # root only: app accounts must not read box settings
+# On the EC2 box the first boot writes the env file; later re-runs (scripts/box.ps1 deploy, the updater) reuse it.
+# 2.0: the file is /etc/platopypus.env (PLATO_*); /etc/porthole.env (PORTHOLE_*) is still read and copied over once.
+for envf in /etc/porthole.env /etc/platopypus.env; do [ -f "$envf" ] && { set -a; . "$envf"; set +a; chmod 600 "$envf"; }; done   # root only: app accounts must not read box settings
+if [ -f /etc/porthole.env ] && [ ! -f /etc/platopypus.env ]; then sed -e 's/^PORTHOLE_/PLATO_/' /etc/porthole.env > /etc/platopypus.env; chmod 600 /etc/platopypus.env; fi
+# Either spelling of a setting wins the same way everywhere: PLATO_* first, then PORTHOLE_*.
+PORTHOLE_USER="${PLATO_USER:-${PORTHOLE_USER:-}}"; PORTHOLE_SRC="${PLATO_SRC:-${PORTHOLE_SRC:-}}"; PORTHOLE_DOMAIN="${PLATO_DOMAIN:-${PORTHOLE_DOMAIN:-}}"; PORTHOLE_AGENT_USER="${PLATO_AGENT_USER:-${PORTHOLE_AGENT_USER:-}}"
 
 # Default: a box when systemd runs this machine, otherwise a container (the self-updater re-runs this script without MODE).
 if [ -z "${MODE:-}" ]; then if [ -d /run/systemd/system ]; then MODE=box; else MODE=docker; fi; fi
@@ -26,10 +32,10 @@ PORTHOLE_USER="${PORTHOLE_USER:-root}"      # root: shells, Docker and the Files
 PORTHOLE_SRC="${PORTHOLE_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 PORTHOLE_DOMAIN="${PORTHOLE_DOMAIN:-}"
 LE_EMAIL="${LE_EMAIL:-}"
-APP_DIR=/opt/porthole
+APP_DIR=/opt/platopypus
 export DEBIAN_FRONTEND=noninteractive
 
-say() { printf '\n\033[1;33m[porthole]\033[0m %s\n' "$*"; }
+say() { printf '\n\033[1;33m[platopypus]\033[0m %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root"; exit 1; }
 
@@ -188,8 +194,20 @@ if [ "$MODE" = "box" ]; then
     dpkg-reconfigure -f noninteractive unattended-upgrades >/dev/null 2>&1 || true
 fi
 
-# ---------- porthole app ----------
-say "porthole app -> $APP_DIR"
+# ---------- 2.0 rename: the old folders move, links stay at the old paths (running processes, old scripts, rollbacks) ----------
+move_with_link() {   # old new
+    if [ -d "$1" ] && [ ! -L "$1" ] && [ ! -e "$2" ]; then mv -T "$1" "$2" && ln -s "$2" "$1" && say "moved $1 -> $2 (link left behind)"; fi
+    [ -e "$1" ] || { [ -e "$2" ] && ln -s "$2" "$1"; } || true
+}
+move_with_link /opt/porthole /opt/platopypus
+move_with_link /opt/porthole-src /opt/platopypus-src
+move_with_link "$HOME_DIR/.porthole" "$HOME_DIR/.platopypus"
+STATE_DIR="$HOME_DIR/.platopypus"
+install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0700 "$STATE_DIR"
+[ -e "$HOME_DIR/.porthole" ] || ln -s "$STATE_DIR" "$HOME_DIR/.porthole"
+
+# ---------- platopypus app ----------
+say "platopypus app -> $APP_DIR"
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" "$APP_DIR"
 rsync -a --delete --exclude node_modules --exclude .git --exclude infra --exclude test \
     "$PORTHOLE_SRC"/ "$APP_DIR"/ 2>/dev/null || {
@@ -205,6 +223,7 @@ ln -sf "$APP_DIR/bin/tunnel" /usr/local/bin/tunnel
 ln -sf "$APP_DIR/bin/vault" /usr/local/bin/vault
 ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
 ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/plato
+ln -sf "$APP_DIR/bin/plato-update" /usr/local/bin/plato-update
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
@@ -212,21 +231,24 @@ ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
 ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
 ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
 # Publishing gate: a global pre-push hook asks PlatOpypus whether the folder is flagged as a repo; .pasted/ never enters git.
-install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$HOME_DIR/.porthole/githooks"
-install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$HOME_DIR/.porthole/githooks/pre-push"
-install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0644 "$APP_DIR/deploy/gitignore_global" "$HOME_DIR/.porthole/gitignore_global"
-sudo -u "$PORTHOLE_USER" -H bash -lc "git config --global core.hooksPath '$HOME_DIR/.porthole/githooks'; git config --global core.excludesFile '$HOME_DIR/.porthole/gitignore_global'" || true
+install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$STATE_DIR/githooks"
+install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$STATE_DIR/githooks/pre-push"
+install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0644 "$APP_DIR/deploy/gitignore_global" "$STATE_DIR/gitignore_global"
+sudo -u "$PORTHOLE_USER" -H bash -lc "git config --global core.hooksPath '$STATE_DIR/githooks'; git config --global core.excludesFile '$STATE_DIR/gitignore_global'" || true
 
 # Global agent instructions (vault, credshare, tunnels, git, phone-sized output). The same text goes into every
-# agent's own global file. The block between the porthole markers is replaced on every run; anything the user wrote
-# outside it is kept. Installs before 1.2.3 appended the block without markers, and it ran to the end of the file.
+# agent's own global file. The block between the platopypus markers is replaced on every run; anything the user wrote
+# outside it is kept. 1.x used porthole markers (replaced the same way); installs before 1.2.3 appended the block
+# without markers, and it ran to the end of the file.
 install_agent_md() {
     local dir="$1" file="$2" src="$APP_DIR/deploy/AGENT.global.md" tmp
     install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0700 "$dir"
     tmp="$(mktemp)"
     {
         if [ -f "$file" ]; then
-            if grep -q '<!-- porthole:begin -->' "$file"; then
+            if grep -q '<!-- platopypus:begin -->' "$file"; then
+                awk '/<!-- platopypus:begin -->/{skip=1} !skip{print} /<!-- platopypus:end -->/{skip=0}' "$file"
+            elif grep -q '<!-- porthole:begin -->' "$file"; then
                 awk '/<!-- porthole:begin -->/{skip=1} !skip{print} /<!-- porthole:end -->/{skip=0}' "$file"
             elif grep -q '^# This machine is a PlatOpypus dev box' "$file"; then
                 awk '/^# This machine is a PlatOpypus dev box/{exit} {print}' "$file"
@@ -234,7 +256,7 @@ install_agent_md() {
                 cat "$file"; printf '\n'
             fi
         fi
-        printf '<!-- porthole:begin -->\n'; cat "$src"; printf '\n<!-- porthole:end -->\n'
+        printf '<!-- platopypus:begin -->\n'; cat "$src"; printf '\n<!-- platopypus:end -->\n'
     } > "$tmp"
     install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0600 "$tmp" "$file"; rm -f "$tmp"
 }
@@ -249,17 +271,16 @@ if [ -n "${AGENT_HOME:-}" ]; then   # the same instructions for agents running a
     install_agent_md "$AGENT_HOME/.gemini" "$AGENT_HOME/.gemini/GEMINI.md"
     PORTHOLE_USER="$PORTHOLE_USER_SAVED"
     # the global pre-push hook and .pasted ignore apply to the agent user too
-    # (the root copies under ~/.porthole are unreadable to this user, and git silently skips an unreadable hooks path)
+    # (the root copies under ~/.platopypus are unreadable to this user, and git silently skips an unreadable hooks path)
     chmod 0755 "$APP_DIR/deploy/githooks/pre-push"; chmod 0644 "$APP_DIR/deploy/gitignore_global"
     sudo -u "$AGENT_USER" -H bash -lc "git config --global core.hooksPath '$APP_DIR/deploy/githooks'; git config --global core.excludesFile '$APP_DIR/deploy/gitignore_global'" 2>/dev/null || true
 fi
 sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR/server && npm install --omit=dev --no-audit --no-fund --loglevel=error"
-sudo -u "$PORTHOLE_USER" -H bash -lc "cd $APP_DIR && node scripts/make-icons.mjs >/dev/null"
 
 if [ "$MODE" = "box" ]; then
     # ---------- systemd ----------
     say "systemd service"
-    cat > /etc/systemd/system/porthole.service <<EOF
+    cat > /etc/systemd/system/platopypus.service <<EOF
 [Unit]
 Description=PlatOpypus phone console
 After=network-online.target
@@ -270,11 +291,12 @@ Type=simple
 User=$PORTHOLE_USER
 WorkingDirectory=$APP_DIR/server
 EnvironmentFile=-/etc/porthole.env
+EnvironmentFile=-/etc/platopypus.env
 Environment=HOME=$HOME_DIR
 Environment=PATH=$HOME_DIR/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=PORTHOLE_BIND=127.0.0.1
-Environment=PORTHOLE_PORT=7331
-Environment=PORTHOLE_ROOT=$([ "$PORTHOLE_USER" = root ] && echo / || echo "$HOME_DIR")
+Environment=PLATO_BIND=127.0.0.1
+Environment=PLATO_PORT=7331
+Environment=PLATO_ROOT=$([ "$PORTHOLE_USER" = root ] && echo / || echo "$HOME_DIR")
 Environment=LANG=C.UTF-8
 ExecStart=/usr/bin/node server.js
 Restart=always
@@ -298,11 +320,15 @@ WantedBy=multi-user.target
 EOF
     # Memory protection only counts when the parent slice carries it too; nginx (the only way in) gets a share.
     mkdir -p /etc/systemd/system/system.slice.d /etc/systemd/system/nginx.service.d
-    printf '[Slice]\nMemoryLow=384M\n' > /etc/systemd/system/system.slice.d/porthole.conf
-    printf '[Service]\nNice=-5\nCPUWeight=500\nIOWeight=500\nMemoryLow=64M\nOOMScoreAdjust=-500\n' > /etc/systemd/system/nginx.service.d/porthole.conf
+    printf '[Slice]\nMemoryLow=384M\n' > /etc/systemd/system/system.slice.d/platopypus.conf
+    printf '[Service]\nNice=-5\nCPUWeight=500\nIOWeight=500\nMemoryLow=64M\nOOMScoreAdjust=-500\n' > /etc/systemd/system/nginx.service.d/platopypus.conf
+    rm -f /etc/systemd/system/system.slice.d/porthole.conf /etc/systemd/system/nginx.service.d/porthole.conf
     systemctl daemon-reload
-    systemctl enable --now porthole
-    systemctl restart porthole
+    # 2.0: the unit is platopypus.service. The 1.x unit file stays on disk (disabled) so a rollback to 1.x can start it.
+    if systemctl is-enabled --quiet porthole 2>/dev/null; then systemctl disable porthole >/dev/null 2>&1 || true; fi
+    systemctl enable platopypus >/dev/null 2>&1 || true
+    if systemctl is-active --quiet porthole 2>/dev/null; then systemctl stop porthole; fi   # KillMode=process: shells and services stay up
+    systemctl restart platopypus
     systemctl try-restart nginx 2>/dev/null || true
 
     # ---------- nginx + let's encrypt ----------
@@ -314,19 +340,26 @@ EOF
         apt-get -o DPkg::Lock::Timeout=600 install -y -q nginx certbot python3-certbot-nginx
         rm -f /etc/nginx/sites-enabled/default
         install -d -m 0755 /var/www/html
-        cp "$APP_DIR/deploy/nginx-snippets.conf" /etc/nginx/conf.d/porthole-snippets.conf
-        cp "$APP_DIR/deploy/porthole-proxy.inc" /etc/nginx/conf.d/porthole-proxy.inc
+        cp "$APP_DIR/deploy/nginx-snippets.conf" /etc/nginx/conf.d/platopypus-snippets.conf
+        cp "$APP_DIR/deploy/platopypus-proxy.inc" /etc/nginx/conf.d/platopypus-proxy.inc
+        # 1.x file names go (the zones and the include they defined are now in the platopypus-* files).
+        rm -f /etc/nginx/conf.d/porthole-snippets.conf /etc/nginx/conf.d/porthole-proxy.inc /etc/nginx/sites-enabled/porthole /etc/nginx/sites-available/porthole
+        for f in /etc/nginx/sites-available/porthole-zoned-*; do   # hostnames on your domain made by 1.x
+            [ -e "$f" ] || continue; slug="${f##*/porthole-zoned-}"
+            mv -f "$f" "/etc/nginx/sites-available/platopypus-zoned-$slug"; rm -f "/etc/nginx/sites-enabled/porthole-zoned-$slug"
+            ln -sf "/etc/nginx/sites-available/platopypus-zoned-$slug" "/etc/nginx/sites-enabled/platopypus-zoned-$slug"
+        done
         render_site() {
             local tpl="$1"
-            sed -e "s/__DOMAIN__/$PORTHOLE_DOMAIN/g" "$APP_DIR/deploy/$tpl" > /etc/nginx/sites-available/porthole
-            ln -sf /etc/nginx/sites-available/porthole /etc/nginx/sites-enabled/porthole
+            sed -e "s/__DOMAIN__/$PORTHOLE_DOMAIN/g" "$APP_DIR/deploy/$tpl" > /etc/nginx/sites-available/platopypus
+            ln -sf /etc/nginx/sites-available/platopypus /etc/nginx/sites-enabled/platopypus
             nginx -t && systemctl enable --now nginx && systemctl reload nginx
         }
         CERT="/etc/letsencrypt/live/$PORTHOLE_DOMAIN/fullchain.pem"
         if [ -s "$CERT" ] && [ -s /etc/letsencrypt/options-ssl-nginx.conf ]; then
-            render_site nginx-porthole-ssl.conf
+            render_site nginx-platopypus-ssl.conf
         else
-            render_site nginx-porthole.conf
+            render_site nginx-platopypus.conf
             say "let's encrypt certificate (retries until DNS resolves here)"
             for i in $(seq 1 30); do
                 if certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --no-eff-email -m "$LE_EMAIL"                     -d "$PORTHOLE_DOMAIN" --deploy-hook "systemctl reload nginx"; then
@@ -337,16 +370,16 @@ EOF
             # certbot ships these two files with the nginx plugin; make sure they exist for the ssl template.
             [ -s /etc/letsencrypt/options-ssl-nginx.conf ] || cp /usr/lib/python3/dist-packages/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf /etc/letsencrypt/options-ssl-nginx.conf 2>/dev/null || true
             [ -s /etc/letsencrypt/ssl-dhparams.pem ] || cp /usr/lib/python3/dist-packages/certbot/ssl-dhparams.pem /etc/letsencrypt/ssl-dhparams.pem 2>/dev/null || true
-            [ -s "$CERT" ] && render_site nginx-porthole-ssl.conf
+            [ -s "$CERT" ] && render_site nginx-platopypus-ssl.conf
         fi
         systemctl enable --now certbot.timer >/dev/null 2>&1 || true
     fi
 
-    TOKEN_FILE="$HOME_DIR/.porthole/token"
+    TOKEN_FILE="$STATE_DIR/token"
     for i in 1 2 3 4 5; do [ -s "$TOKEN_FILE" ] && break; sleep 1; done
     say "done."
-    echo "  login token:  $(cat "$TOKEN_FILE" 2>/dev/null || echo '(not yet written; see journalctl -u porthole)')"
+    echo "  login token:  $(cat "$TOKEN_FILE" 2>/dev/null || echo '(not yet written; see journalctl -u platopypus)')"
     echo "  local URL:    http://127.0.0.1:7331"
     [ -n "$PORTHOLE_DOMAIN" ] && echo "  public URL:   https://$PORTHOLE_DOMAIN"
-    echo "  tailscale:    sudo tailscale up --ssh --hostname=porthole   (then https://porthole.<tailnet>.ts.net via 'tailscale serve')"
+    echo "  tailscale:    sudo tailscale up --ssh --hostname=platopypus   (then https://platopypus.<tailnet>.ts.net via 'tailscale serve')"
 fi

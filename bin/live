@@ -12,13 +12,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const [sub, ...rest] = process.argv.slice(2);
-const port = process.env.PORTHOLE_PORT || '7331';
-const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
-let token = process.env.PORTHOLE_TOKEN || '';
+const port = (process.env.PLATO_PORT || process.env.PORTHOLE_PORT) || '7331';
+const state = (process.env.PLATO_STATE || process.env.PORTHOLE_STATE) || `${process.env.HOME || '/root'}/.porthole`;
+let token = (process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN) || '';
 try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* none */ }
 if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
 
-const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
 let cookie = '';
 async function api(p, method = 'GET', body) {
     if (!cookie) {

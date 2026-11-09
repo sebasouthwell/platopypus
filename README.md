@@ -94,7 +94,7 @@ PlatOpypus is root-level control of a box, so every layer assumes the one before
 | Tunnels | Public URLs → warning in UI, auto-expiry (4 h; 20 min for editors), PlatOpypus's own port refused, and a watcher that closes a tunnel when the process behind it disappears. |
 | Vault | AES-256-GCM, key file 0600, values never listed, reveal is explicit and logged, reserved env names blocked, project scope only reaches shells in that folder. |
 | Docker | Arguments validated and exec'd without a shell; containers bind to loopback. |
-| Process | Runs as root by default (`PORTHOLE_USER=ubuntu` for a confined install). Loopback-only token sign-in remains for the box's own `vault`/`tunnel` CLIs; requests through the reverse proxy can never use it. |
+| Process | Runs as root by default (`PLATO_USER=ubuntu` for a confined install). Loopback-only token sign-in remains for the box's own `vault`/`tunnel` CLIs; requests through the reverse proxy can never use it. |
 | Audit | Every auth event and every shell, tunnel, vault, docker, git and editor action goes to stdout → journald. Root use, credential use and activity also go to a browsable audit log (More → Audit log), one file per day, kept 90 days, with new outbound connections by agents and services under Network. Telegram alerts (More → Alerts) for root requests, sign-ins, public links and crashed servers. |
 
 Every route is listed with its gate in `server/server.js`; the endpoint audit is summarised at the bottom of
@@ -109,7 +109,7 @@ PlatOpypus service, and (when a domain is given) nginx with a Let's Encrypt cert
 ```bash
 git clone https://github.com/<you>/porthole /opt/porthole-src
 cd /opt/porthole-src
-sudo PORTHOLE_DOMAIN=porthole.example.com LE_EMAIL=you@example.com ./install.sh
+sudo PLATO_DOMAIN=porthole.example.com LE_EMAIL=you@example.com ./install.sh
 ```
 
 The installer prints the **setup token**. Open `https://porthole.example.com`, enter the token, create a
@@ -118,9 +118,9 @@ passkey, then turn on two-step codes under More → Security. Re-run `install.sh
 Your firewall should admit 80/443 only (ideally only from your CDN's edge if you proxy the domain). No SSH is
 needed; use your cloud's session manager or Tailscale SSH for break-glass.
 
-Environment variables (see `server/lib/config.js`): `PORTHOLE_PORT` (7331), `PORTHOLE_BIND` (127.0.0.1),
-`PORTHOLE_ROOT` (files root), `PORTHOLE_STATE` (~/.porthole), `PORTHOLE_TUNNEL_TTL`, `PORTHOLE_MAX_UPLOAD_MB`,
-`PORTHOLE_SESSION_DAYS`, `PORTHOLE_ALLOWED_ORIGINS`, `PORTHOLE_DOCKER_HOST`, `PORTHOLE_ALLOW_PASSWORD_ONLY`.
+Environment variables (see `server/lib/config.js`): `PLATO_PORT` (7331), `PLATO_BIND` (127.0.0.1),
+`PLATO_ROOT` (files root), `PLATO_STATE` (~/.platopypus), `PLATO_TUNNEL_TTL`, `PLATO_MAX_UPLOAD_MB`,
+`PLATO_SESSION_DAYS`, `PLATO_ALLOWED_ORIGINS`, `PLATO_DOCKER_HOST`, `PLATO_ALLOW_PASSWORD_ONLY`.
 
 ## Local test (Docker)
 
@@ -131,7 +131,7 @@ docker compose exec porthole node /tmp/smoke.mjs     # ~5 min end-to-end suite, 
 ```
 
 Open `http://127.0.0.1:7331/`, setup token `porthole-test`. The compose file mounts the host Docker socket so
-the Docker features can be exercised, sets `PORTHOLE_DOCKER_HOST=host.docker.internal` (container ports live on
+the Docker features can be exercised, sets `PLATO_DOCKER_HOST=host.docker.internal` (container ports live on
 the host when PlatOpypus itself runs in a container), and allows password-only setup because passkeys need
 https or localhost. On a real box PlatOpypus runs natively and none of that applies.
 
@@ -155,8 +155,8 @@ The box checks the public repo once a day (and on demand under More) and shows "
 latest commit messages. **Update** shows a "shutting down for approximately 5 minutes" screen and runs a
 detached updater: fetch the repo into `/opt/porthole-src`, snapshot `/opt/porthole`, re-run `install.sh`,
 restart only the PlatOpypus service, and roll back automatically if the API is not healthy within 30 seconds.
-State (`~/.porthole`), your files, tmux sessions, Docker and nginx are never touched; the page reloads itself
-when the service is back. Point it at a fork with `PORTHOLE_UPDATE_REPO=owner/repo`. **`UPDATE.md`** is the contract for new versions:
+State (`~/.platopypus`), your files, tmux sessions, Docker and nginx are never touched; the page reloads itself
+when the service is back. Point it at a fork with `PLATO_UPDATE_REPO=owner/repo`. **`UPDATE.md`** is the contract for new versions:
 how the updater runs, every state file and its shape, and the rules for changing them compatibly.
 
 ## Box CLI

@@ -133,7 +133,7 @@ async function projectsView({ liveList, servers, containers, devservers, links, 
     // Merge a compose project's containers into one part ("3 containers"), keeping the details for the panel.
     const out = [];
     for (const f of folders.values()) {
-        if (!f.parts.length && !fsSync.existsSync(path.join(f.abs, '.portholerun')) && !fsSync.existsSync(path.join(f.abs, 'PORTHOLE.md'))) continue;
+        if (!f.parts.length && !['.platorun', '.portholerun'].some(n => fsSync.existsSync(path.join(f.abs, n))) && !fsSync.existsSync(path.join(f.abs, 'PORTHOLE.md'))) continue;
         const running = f.parts.some(x => x.running);
         const app = f.parts.filter(x => x.type !== 'editor');
         const primary = app.find(x => x.running && x.url) || app.find(x => x.running && x.link?.url) || null;
@@ -141,7 +141,7 @@ async function projectsView({ liveList, servers, containers, devservers, links, 
         out.push({
             name: f.name, path: f.path, icon, running, parts: f.parts,
             open: primary ? (primary.url || primary.link.url) : null,
-            canRun: fsSync.existsSync(path.join(f.abs, '.portholerun')),
+            canRun: ['.platorun', '.portholerun'].some(n => fsSync.existsSync(path.join(f.abs, n))),
             hasEditor: f.parts.some(x => x.type === 'editor'),
             summary: { running: f.parts.filter(x => x.running).length, total: f.parts.length },
         });

@@ -18,16 +18,16 @@ RUN apt-get update -q && apt-get install -y -q --no-install-recommends rsync \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Now the server code.
-COPY server /opt/porthole/server
+COPY server /opt/platopypus/server
 
 USER root
-WORKDIR /opt/porthole/server
+WORKDIR /opt/platopypus/server
 ENV HOME=/root \
     PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin \
     LANG=C.UTF-8 \
-    PORTHOLE_BIND=0.0.0.0 \
-    PORTHOLE_PORT=7331 \
-    PORTHOLE_ROOT=/ \
-    PORTHOLE_INSECURE_COOKIE=1
+    PLATO_BIND=0.0.0.0 \
+    PLATO_PORT=7331 \
+    PLATO_ROOT=/ \
+    PLATO_INSECURE_COOKIE=1
 EXPOSE 7331
 CMD ["node", "server.js"]

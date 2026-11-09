@@ -7,6 +7,8 @@ const require = createRequire('/opt/porthole/server/package.json');
 const WebSocket = require('ws');
 
 const BASE = process.env.BASE || 'http://127.0.0.1:7331';
+// 2.0: tmux runs on the `plato` socket unless an older server with sessions is still on `porthole` (same rule as config.js).
+const TSOCK = (() => { try { const o = require('node:child_process').execFileSync('tmux', ['-L', 'porthole', 'list-sessions', '-F', '#{session_name}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); if (o.trim()) return 'porthole'; } catch { /* none */ } return 'plato'; })();
 const TOKEN = process.env.TOKEN || 'porthole-test';
 const DO_TUNNEL = process.env.TUNNEL !== '0';
 let cookie = '';
@@ -64,6 +66,8 @@ check('session cookie set, HttpOnly+SameSite', /HttpOnly/.test(r.headers.get('se
 // 3. CSRF header required on mutations.
 r = await call('/api/shells', { method: 'POST', body: { name: 'x' }, noCsrf: true });
 check('mutation without X-Porthole header is 403', r.status === 403);
+r = await call('/api/quick/recents', { method: 'DELETE', noCsrf: true, headers: { 'X-Plato': '1' } });
+check('the X-Plato header (2.0) is accepted for mutations', r.status === 200, String(r.status));
 
 // 4. Shell lifecycle.
 await call('/api/shells/smoke', { method: 'DELETE' }).catch(() => {});
@@ -157,7 +161,7 @@ check('credshare announces the card (OSC or pushed frame) with a value-free conf
 await call('/api/shells/smoke-detached', { method: 'DELETE' }).catch(() => {});
 await call('/api/shells', { method: 'POST', body: { name: 'smoke-detached', kind: 'shell', cwd: '.' } });
 await sleep(1500);
-{ const { execFileSync } = await import('node:child_process'); execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-detached:', '-l', `credshare --title "Detached ${marker}" --secret key=abc-${marker} --port 8099\n`]); }
+{ const { execFileSync } = await import('node:child_process'); execFileSync('tmux', ['-L', TSOCK, 'send-keys', '-t', 'smoke-detached:', '-l', `credshare --title "Detached ${marker}" --secret key=abc-${marker} --port 8099\n`]); }
 let detachedFound = false;
 for (let i = 0; i < 20 && !detachedFound; i++) { await sleep(1000); detachedFound = (await call('/api/creds')).body.some(c => c.title === `Detached ${marker}` && c.port === 8099); }
 check('credshare registers without any terminal attached', detachedFound);
@@ -534,8 +538,8 @@ if (r.body.available) {
     r = await call('/api/shells', { method: 'POST', body: { name: 'smoke-agent-bad', kind: 'shell', cwd: 'etc', runAs: 'agent' } });
     check('agent-user shell refused outside projects', r.status === 403, `${r.status}`);
     await sleep(1500);
-    const keys = (cmd) => { execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-agent:', '-l', cmd]); execFileSync('tmux', ['-L', 'porthole', 'send-keys', '-t', 'smoke-agent:', 'Enter']); };
-    const typeIn = async (cmd, marker2, wait = 12) => { keys(cmd + `; echo DONE-${marker2}`); for (let i = 0; i < wait * 2; i++) { await sleep(500); const out = sh('tmux -L porthole capture-pane -p -J -S -200 -t smoke-agent:'); const lines = out.split('\n'); const idx = lines.findIndex(l => l.startsWith(`DONE-${marker2}`)); if (idx >= 0) return lines.slice(0, idx).join('\n'); } return sh('tmux -L porthole capture-pane -p -J -S -200 -t smoke-agent:'); };
+    const keys = (cmd) => { execFileSync('tmux', ['-L', TSOCK, 'send-keys', '-t', 'smoke-agent:', '-l', cmd]); execFileSync('tmux', ['-L', TSOCK, 'send-keys', '-t', 'smoke-agent:', 'Enter']); };
+    const typeIn = async (cmd, marker2, wait = 12) => { keys(cmd + `; echo DONE-${marker2}`); for (let i = 0; i < wait * 2; i++) { await sleep(500); const out = sh(`tmux -L ${TSOCK} capture-pane -p -J -S -200 -t smoke-agent:`); const lines = out.split('\n'); const idx = lines.findIndex(l => l.startsWith(`DONE-${marker2}`)); if (idx >= 0) return lines.slice(0, idx).join('\n'); } return sh(`tmux -L ${TSOCK} capture-pane -p -J -S -200 -t smoke-agent:`); };
     let out = await typeIn('id -u; whoami', 'a1');
     check('agent-user shell is not root', /\nagent\s*$/.test(out.trimEnd()) || out.includes('\nagent'), out.slice(-120));
     out = await typeIn('cat /root/.porthole/token >/dev/null 2>&1 && echo READ-TOKEN || echo NO-TOKEN', 'a2');
@@ -620,7 +624,8 @@ if (r.body.available) {
     check('agent shell with a first message starts', r.status === 201, `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
     const cj = JSON.parse(execFileSync('cat', [`${process.env.HOME || '/root'}/.claude.json`], { encoding: 'utf8' }));
     check('Claude Code pre-trusts the folder', cj.projects?.['/Projects/smoke-sec']?.hasTrustDialogAccepted === true);
-    const envDump = execFileSync('tmux', ['-L', 'porthole', 'show-environment', '-t', 'smoke-trust'], { encoding: 'utf8' });
+    const envDump = execFileSync('tmux', ['-L', TSOCK, 'show-environment', '-t', 'smoke-trust'], { encoding: 'utf8' });
+    check('a shell gets its settings under both spellings (PLATO_* and PORTHOLE_*)', /^PLATO_SHELL_NAME=smoke-trust$/m.test(envDump) && /^PORTHOLE_SHELL_NAME=smoke-trust$/m.test(envDump), envDump.split('\n').filter(l => /SHELL_NAME/.test(l)).join(' '));
     check('first message reaches the agent session', /PORTHOLE_FIRST_PROMPT=say hello/.test(envDump));
     await call('/api/shells/smoke-trust', { method: 'DELETE' }).catch(() => {});
     execFileSync('bash', ['-lc', 'rm -rf /Projects/smoke-sec']);
@@ -632,7 +637,7 @@ r = await call('/api/shells', { method: 'POST', body: { name: 'once-smoke', kind
 check('one-shot refuses agents without a non-interactive mode', r.status === 400);
 r = await call('/api/shells', { method: 'POST', body: { name: 'once-smoke', kind: 'agent', agent: 'claude', firstPrompt: 'reply with the word ok', oneshot: true, runAs: 'root', session: 'project' } });
 check('one-shot shell starts in a scratch folder', r.status === 201 && /\/scratch\//.test(r.body.cwd), `${r.status} ${JSON.stringify(r.body).slice(0, 140)}`);
-{ const { execFileSync } = await import('node:child_process'); try { execFileSync('tmux', ['-L', 'porthole', 'kill-session', '-t', 'once-smoke']); } catch { /* already ended */ } }
+{ const { execFileSync } = await import('node:child_process'); try { execFileSync('tmux', ['-L', TSOCK, 'kill-session', '-t', 'once-smoke']); } catch { /* already ended */ } }
 let res1 = []; for (let i = 0; i < 20 && !res1.some(x => x.name === 'once-smoke'); i++) { await sleep(1000); await call('/api/shells'); res1 = (await call('/api/oneshot')).body; }
 check('finished one-shot keeps its result and removes its folder', res1.some(x => x.name === 'once-smoke' && x.prompt.startsWith('reply')) && !(await call('/api/shells')).body.some(x => x.name === 'once-smoke'), JSON.stringify(res1.map(x => x.name)));
 
@@ -1200,12 +1205,27 @@ EOF`);
     sh('rm -rf /Projects/smoke-limit');
 }
 
+// 8c4. The 2.0 rename: new paths with the old ones as links; the plato command; the run file under its new name.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    check('the app lives at /opt/platopypus and /opt/porthole points at it', sh('readlink -f /opt/porthole') === '/opt/platopypus' && sh('test -d /opt/platopypus/server && echo yes || echo no') === 'yes', sh('ls -ld /opt/porthole /opt/platopypus'));
+    check('the state folder is ~/.platopypus and ~/.porthole points at it', sh('readlink -f /root/.porthole') === '/root/.platopypus' && sh('test -f /root/.platopypus/vault.key && echo yes || echo no') === 'yes', sh('ls -ld /root/.porthole'));
+    check('plato status works', /version:\s+2\./.test(sh('plato status')), sh('plato status | head -1'));
+    const rn = (await call('/api/rename')).body;
+    check('the rename status says which tmux socket is in use', rn && typeof rn.pending === 'boolean' && ['plato', 'porthole'].includes(rn.socket), JSON.stringify(rn));
+    sh(`rm -rf /Projects/smoke-platorun && mkdir -p /Projects/smoke-platorun && printf 'run: python3 -m http.server 8181\nport: 8181\n' > /Projects/smoke-platorun/.platorun`);
+    r = await call('/api/files?path=Projects/smoke-platorun');
+    check('a .platorun file is picked up like .portholerun was', r.status === 200 && JSON.stringify(r.body).includes('.platorun'), JSON.stringify(r.body).slice(0, 160));
+    sh('rm -rf /Projects/smoke-platorun');
+}
+
 // 8c3. Device priority: PlatOpypus runs at nice -10, the shells it starts at nice 0.
 {
     const { execFileSync } = await import('node:child_process');
     const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const self = sh("ps -o ni= -p $(pgrep -f 'node server.js' | head -1)").trim();
-    const pane = sh("ps -o ni= -p $(tmux -L porthole display-message -p -t smoke: '#{pane_pid}')").trim();
+    const pane = sh(`ps -o ni= -p $(tmux -L ${TSOCK} display-message -p -t smoke: '#{pane_pid}')`).trim();
     // Raising priority needs CAP_SYS_NICE, which Docker withholds: here only the shells' normal priority can be checked.
     check('shells run at normal priority, never at a raised one', Number(pane) === 0 && Number(self) <= 0, `porthole nice ${self}, shell pane nice ${pane}`);
 }

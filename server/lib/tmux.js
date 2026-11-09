@@ -12,6 +12,17 @@ const run = promisify(execFile);
 const conf = tmuxConfPath();
 
 export const tmuxBase = ['-L', config.tmuxSocket, '-f', conf];
+// Finish the rename: from now on talk to the `plato` socket (the old server has been ended by the caller).
+export function switchSocket(name = 'plato') { tmuxBase[1] = name; config.tmuxSocket = name; config.renamePending = false; }
+// Every variable goes in under both spellings for all of 2.x: PLATO_* is the name, PORTHOLE_* still works.
+export function bothNames(env = {}) {
+    const out = { ...env };
+    for (const [k, v] of Object.entries(env)) {
+        if (k.startsWith('PORTHOLE_') && out['PLATO_' + k.slice(9)] === undefined) out['PLATO_' + k.slice(9)] = v;
+        else if (k.startsWith('PLATO_') && out['PORTHOLE_' + k.slice(6)] === undefined) out['PORTHOLE_' + k.slice(6)] = v;
+    }
+    return out;
+}
 
 export async function tmux(...args) {
     try {
@@ -57,7 +68,7 @@ function launcher() {
 // Create a detached session. `command` is optional; without it the user's shell starts.
 export async function newSession(name, cwd, command, env = {}) {
     const args = ['new-session', '-d', '-s', name, '-c', cwd, '-x', '100', '-y', '40'];
-    for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
+    for (const [k, v] of Object.entries(bothNames(env))) args.push('-e', `${k}=${v}`);
     if (command) args.push(command);
     const pre = launcher();
     if (pre.length) {

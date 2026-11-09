@@ -39,7 +39,28 @@ promoted version. Set `PORTHOLE_UPDATE_BRANCH=master` to follow every release im
 - `/opt/porthole/VERSION` holds `<short-sha> <unix-time>` of the installed source (`bundle` if installed from
   the deploy bundle rather than git).
 
+## 2.0: the rename on disk
+
+2.0.0 renames what 1.x called `porthole` on the box, keeping every old name usable (the table in
+`docs/MIGRATION-2.0.md` is the full list). The rules that make an update to 2.0 safe and a rollback possible:
+
+- **Old paths stay valid.** `~/.porthole` → `~/.platopypus` and `/opt/porthole` → `/opt/platopypus` are renames with a
+  symlink left at the old path, done before anything reads them (`config.js` for the state folder at server start,
+  `install.sh` for the app folder). Running processes keep their open files; a rolled-back 1.x release finds its
+  state and code through the links.
+- **Old names are read.** `PORTHOLE_*` settings are mirrored to `PLATO_*` (and back) at startup; every shell and
+  service gets both spellings for all of 2.x. `X-Porthole` and the `porthole_session` cookie are accepted until 3.0;
+  responses carry both version headers. `.portholerun` and `PORTHOLE.md` are read for good.
+- **The 1.x unit file is left in place (disabled).** `platopypus.service` is the unit; a rollback to 1.x re-enables
+  `porthole.service` (the updater checks the major version of the code it is putting back).
+- **The tmux socket moves only by hand.** New code keeps talking to the `porthole` socket while it has sessions; the
+  "Finish the rename" step on More stops live services, ends the old server, switches to `plato` and starts them again.
+- **Accounts and groups are not renamed in 2.0** (`porthole-dev`, `porthole-svcs`, `porthole-svc`, `ps-<project>`):
+  that is 2.1, with a reverse step for rollback.
+
 ## State on disk (owned by the server)
+
+2.0: the folder is `~/.platopypus` (`~/.porthole` is a link to it).
 
 All under `PORTHOLE_STATE` (default `~/.porthole`, mode 0700). Every file is written atomically (tmp + rename)
 with mode 0600. Formats as of version 1.0:
@@ -76,8 +97,8 @@ with mode 0600. Formats as of version 1.0:
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
 
 nginx: zoned shares add `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` (owned and removed by PlatOpypus);
-`install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-porthole.conf` (no certificate yet)
-or `deploy/nginx-porthole-ssl.conf` (certificate present) on **every** run; certbot runs in `certonly` mode and
+`install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-platopypus.conf` (no certificate yet)
+or `deploy/nginx-platopypus-ssl.conf` (certificate present) on **every** run; certbot runs in `certonly` mode and
 never edits nginx config. Do not hand-edit the site file on a box; change the template and release.
 
 Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profiles/claude/<name>` (Claude
@@ -98,7 +119,7 @@ Older `auth-sessions.json` records already carry `created`, so no migration.
 ## Rules for compatible changes
 
 0. **An update never ends a session.** Shells, servers, live services and tunnels are tmux sessions that must survive
-   `systemctl restart porthole` (`KillMode=process`); check it on the box: `tmux -L porthole ls` before and after.
+   `systemctl restart platopypus` (`KillMode=process`); check it on the box: `tmux -L plato ls` (or `-L porthole` before the rename is finished) before and after.
 1. **Additive by default.** New fields get defaults when read; missing files mean "first run" for that feature.
    Never require a field that older versions did not write.
 2. **Read old, write new.** When a shape changes, keep a `normalise()` step that upgrades records on read (see
@@ -452,6 +473,16 @@ phone's Update button. Mechanism:
   sidebar now reads PlatOpypus.
 - **1.28.1** — The mascot redrawn by its owner (same brief: grey platypus, dark glasses, earpiece, brass bill, no hat);
   icons re-rendered from it.
+- **2.0.0** — **The rename on disk** (MAJOR; see "2.0: the rename on disk" above and `docs/MIGRATION-2.0.md`). State
+  `~/.platopypus`, app `/opt/platopypus`, source `/opt/platopypus-src` (links at the old paths); `/etc/platopypus.env`
+  written from `/etc/porthole.env`; unit `platopypus.service` (1.x unit kept, disabled); drop-ins and nginx files
+  renamed (`platopypus`, `platopypus-snippets.conf`, `platopypus-proxy.inc`, `platopypus-zoned-<slug>`, zones
+  `plato_login`/`plato_api`); settings `PLATO_*` with `PORTHOLE_*` mirrored; `X-Plato` / `plato_session` with the old
+  ones accepted; tmux socket `plato` after "Finish the rename" (`GET /api/rename`, `POST /api/rename/finish`, audit
+  `rename-finished`); firewall chain `PLATO-EGRESS`; `bin/plato-update` (`porthole-update` is a shim for 1.x hand-off);
+  `.platorun` (`.portholerun` read); agent-file markers `platopypus:begin/end`. Migration `2.0.0-rename` (idempotent:
+  links, env file, old chain). No route changed or removed. Also fixes 1.28.x: `install.sh` no longer regenerates the
+  old icons over the mascot.
 
 ## Release checklist
 

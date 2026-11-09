@@ -38,20 +38,20 @@ for (let i = 0; i < args.length; i++) {
     }
 }
 if (!cred.fields.length && !cred.url) { console.error('nothing to share: add --user/--pass/--field/--secret/--url'); process.exit(2); }
-if (process.env.PORTHOLE_SHELL_NAME) cred.shell = process.env.PORTHOLE_SHELL_NAME;
+if ((process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME)) cred.shell = (process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME);
 if (!cred.title) {
     cred.title = `${path.basename(cred.cwd) || 'Project'} credentials`;
     console.error(`credshare: no --title given; using "${cred.title}". Say what the login is for, e.g. --title "Parle admin login" --note "manage users".`);
 }
 
 // Register with the local Porthole server (loopback token sign-in, same mechanism as the tunnel CLI).
-const port = process.env.PORTHOLE_PORT || '7331';
-const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
-let token = process.env.PORTHOLE_TOKEN || '';
+const port = (process.env.PLATO_PORT || process.env.PORTHOLE_PORT) || '7331';
+const state = (process.env.PLATO_STATE || process.env.PORTHOLE_STATE) || `${process.env.HOME || '/root'}/.porthole`;
+let token = (process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN) || '';
 try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token file */ }
 let registered = null;
 try {
-    const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
     const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
     const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
     if (login.ok && cookie) {

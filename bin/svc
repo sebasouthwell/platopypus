@@ -13,9 +13,9 @@ import fs from 'node:fs';
 
 const args = process.argv.slice(2);
 const sub = args.shift();
-const port = process.env.PORTHOLE_PORT || '7331';
-const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
-let token = process.env.PORTHOLE_TOKEN || '';
+const port = (process.env.PLATO_PORT || process.env.PORTHOLE_PORT) || '7331';
+const state = (process.env.PLATO_STATE || process.env.PORTHOLE_STATE) || `${process.env.HOME || '/root'}/.porthole`;
+let token = (process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN) || '';
 try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token file */ }
 
 function help(code = 0) { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 10).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(code); }
@@ -30,7 +30,7 @@ for (let i = 0; i < args.length; i++) {
     rest.push(a);
 }
 
-const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
 let cookie = '';
 async function api(path, method = 'GET', body) {
     if (!cookie) {
@@ -50,18 +50,18 @@ const show = s => `${s.alive ? '●' : '○'} ${s.name.padEnd(24)} ${s.port ? ('
 try {
     if (sub === 'run') {
         if (!opts.name || !rest.length) { console.error('usage: svc run --name <name> [--port N] -- <command…>'); process.exit(2); }
-        const s = await api('/api/servers/run', 'POST', { name: opts.name, port: opts.port, cwd: opts.cwd || process.cwd(), cmd: rest, project: process.env.PORTHOLE_SHELL_NAME || null });
+        const s = await api('/api/servers/run', 'POST', { name: opts.name, port: opts.port, cwd: opts.cwd || process.cwd(), cmd: rest, project: (process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME) || null });
         console.log(`started "${s.name}" in its own session${s.port ? ` on :${s.port}` : ''}. Logs: svc logs ${s.slug}. Stop: svc stop ${s.slug}.`);
     } else if (sub === 'add') {
         if (!opts.name) { console.error('usage: svc add --name <name> [--port N] [--pid P]'); process.exit(2); }
-        const s = await api('/api/servers', 'POST', { name: opts.name, port: opts.port, pid: opts.pid, cwd: opts.cwd || process.cwd(), project: process.env.PORTHOLE_SHELL_NAME || null });
+        const s = await api('/api/servers', 'POST', { name: opts.name, port: opts.port, pid: opts.pid, cwd: opts.cwd || process.cwd(), project: (process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME) || null });
         console.log(`registered "${s.name}" (pid ${s.pid}${s.port ? `, :${s.port}` : ''}). The phone can now stop or share it.`);
     } else if (sub === 'ls' || sub === 'list') {
         const l = await api('/api/servers');
         if (!l.length) console.log('no registered servers (svc run --name … -- <command>)');
         for (const s of l) console.log(show(s));
     } else if (sub === 'stop' || sub === 'start' || sub === 'restart' || sub === 'rm' || sub === 'remove' || sub === 'logs') {
-        const name = rest[0] || opts.name || (sub === 'restart' ? process.env.PORTHOLE_SERVICE : ''); if (!name) { console.error(`usage: svc ${sub} <name>`); process.exit(2); }
+        const name = rest[0] || opts.name || (sub === 'restart' ? (process.env.PLATO_SERVICE || process.env.PORTHOLE_SERVICE) : ''); if (!name) { console.error(`usage: svc ${sub} <name>`); process.exit(2); }
         const slug = slugOf(name);
         if (sub === 'logs') { process.stdout.write(await api(`/api/servers/${slug}/logs?tail=${Number(opts.n) || 100}`) + '\n'); }
         else if (sub === 'rm' || sub === 'remove') { await api(`/api/servers/${slug}`, 'DELETE'); console.log(`removed ${slug}`); }

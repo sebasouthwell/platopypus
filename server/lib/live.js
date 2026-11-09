@@ -21,6 +21,7 @@ import { log } from './log.js';
 import { folderIcon, relative as relToRoot } from './files.js';
 import { recordRun } from './quick.js';
 import { record } from './audit.js';
+import { tmux, switchSocket } from './tmux.js';
 
 const run = promisify(execFile);
 const projectsDir = path.join(config.root, 'Projects');
@@ -307,7 +308,8 @@ async function envForService(p, s) {
     const missing = needs.filter(n => !(n in vaultEnv));
     const granted = Object.fromEntries(needs.filter(n => n in vaultEnv).map(n => [n, vaultEnv[n]]));
     const fixed = Object.fromEntries(Object.entries(s.env || {}).map(([k, v]) => [String(k), String(v)]));
-    return { env: { ...granted, ...fixed, PORTHOLE_PROJECT: p.name, ...(s.__key ? { PORTHOLE_SERVICE: slugOf(p.name, s.__key) } : {}) }, missing };
+    const names = { PLATO_PROJECT: p.name, PORTHOLE_PROJECT: p.name, ...(s.__key ? { PLATO_SERVICE: slugOf(p.name, s.__key), PORTHOLE_SERVICE: slugOf(p.name, s.__key) } : {}) };
+    return { env: { ...granted, ...fixed, ...names }, missing };
 }
 
 export async function start(project, key) {
@@ -395,6 +397,22 @@ export async function pull(project, key) {
     if (running && changed) await restart(project, key);
     log('live', `pulled ${s.image} for ${project}/${key}: ${changed ? 'new image' : 'no change'}${running && changed ? ', restarted' : ''}`);
     return { image: s.image, changed, restarted: running && changed, id: after ? after.replace(/^sha256:/, '').slice(0, 12) : null };
+}
+
+// 2.0: move from the `porthole` tmux socket to `plato`. Live services are stopped and started again on the new
+// server; every other session on the old server (shells, plain servers, quick links) ends with it, which is why
+// this is a step the user takes, not something an update does.
+export async function finishRename() {
+    if (!config.renamePending) return { done: true, restarted: [], note: 'already on the plato socket' };
+    const regs = await servicesMgr.list().catch(() => []);
+    const liveUp = regs.filter(r => r.alive && r.live).map(r => r.live);
+    for (const l of liveUp) await stop(l.project, l.key).catch(() => {});
+    try { await tmux('kill-server'); } catch { /* already gone */ }
+    switchSocket('plato');
+    const restarted = [];
+    for (const l of liveUp) { try { await start(l.project, l.key); restarted.push(`${l.project}/${l.key}`); } catch (e) { log('live', `finish rename: ${l.project}/${l.key}: ${e.message}`); } }
+    log('live', `rename finished: tmux on the plato socket; restarted ${restarted.join(', ') || 'nothing'}`);
+    return { done: true, restarted };
 }
 
 // After a reboot: live services that were running (not stopped by anyone) are started again.

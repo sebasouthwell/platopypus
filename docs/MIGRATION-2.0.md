@@ -1,5 +1,7 @@
 # 2.0: the full rename, as a plan
 
+**Status:** phase 1 shipped in 2.0.0 (`PLATO_` prefix; `ps-<project>` unchanged; hostname untouched). Phase 2 and 3 pending.
+
 Everything the user sees already says PlatOpypus (1.27.0). This is the rest: every name on the box that still says
 `porthole`. It is split into three phases because they carry different risks, and the first phase is designed so
 that **the previous release still runs if the update is rolled back**: every old path keeps working through a

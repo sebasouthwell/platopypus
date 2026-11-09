@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# PlatOpypus self-updater (2.0: bin/plato-update; bin/porthole-update stays as a shim so a 1.x updater can hand over).
+# Runs detached from the service (systemd-run or setsid).
+#   1. fetch the public repo into $PORTHOLE_SRC (clone on first use, otherwise fast-forward to origin/$BRANCH)
+#   2. snapshot the current app to $PORTHOLE_APP.prev
+#   3. run install.sh (idempotent: rsync app, npm install, restart the porthole service)
+#   4. health-check the API; roll back from the snapshot if it does not answer within 45 s
+# The new release's own updater does the work: after fetching, this script hands over to $SRC/bin/porthole-update
+# (once), so upgrade logic always comes from the version being installed, not the one being replaced.
+# State (~/.platopypus) is changed only by that release's migrations (server/lib/migrate.js, run when the new server
+# starts): they archive the state first and restore it themselves if a step fails; if the new code later fails the
+# health check, this script restores that archive along with the previous code. User files, tmux sessions, Docker,
+# nginx and certificates are not touched.
+set -uo pipefail
+cd /   # install.sh may move the folder this was started from
+# Callers (containers, a service with a short PATH) may lack sbin, where useradd/groupadd/iptables live.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
+REPO="${PLATO_UPDATE_REPO:-${PORTHOLE_UPDATE_REPO:-sebasouthwell/platopypus}}"
+BRANCH="${PLATO_UPDATE_BRANCH:-${PORTHOLE_UPDATE_BRANCH:-stable}}"
+SRC="${PLATO_SRC:-${PORTHOLE_SRC:-}}"; [ -n "$SRC" ] || { if [ -e /opt/platopypus-src ] || [ ! -e /opt/porthole-src ]; then SRC=/opt/platopypus-src; else SRC=/opt/porthole-src; fi; }
+APP="${PLATO_APP:-${PORTHOLE_APP:-}}"; [ -n "$APP" ] || { if [ -e /opt/platopypus ] || [ ! -e /opt/porthole ]; then APP=/opt/platopypus; else APP=/opt/porthole; fi; }
+STATE="${PLATO_STATE:-${PORTHOLE_STATE:-}}"; [ -n "$STATE" ] || { if [ -e "${HOME:-/root}/.platopypus" ] || [ ! -e "${HOME:-/root}/.porthole" ]; then STATE="${HOME:-/root}/.platopypus"; else STATE="${HOME:-/root}/.porthole"; fi; }
+PORT="${PLATO_PORT:-${PORTHOLE_PORT:-7331}}"
+HANDOFF="${PLATO_HANDOFF:-${PORTHOLE_HANDOFF:-}}"
+# The service unit: platopypus (2.0) or porthole (1.x, still there on a box that has not finished the rename).
+unit() { if systemctl cat platopypus >/dev/null 2>&1; then echo platopypus; else echo porthole; fi; }
+# After a rollback the previous code decides the unit: a 1.x release only knows porthole.service.
+restart_for() {   # app dir of the code now in place
+    local major; major="$(node -p "String(require('$1/server/package.json').version).split('.')[0]" 2>/dev/null || echo 2)"
+    if [ "$major" -lt 2 ] && systemctl cat porthole >/dev/null 2>&1; then
+        systemctl stop platopypus 2>/dev/null || true; systemctl disable platopypus >/dev/null 2>&1 || true
+        systemctl enable porthole >/dev/null 2>&1 || true; systemctl restart porthole
+    else
+        systemctl restart "$(unit)"
+    fi
+}
+LOCK="$STATE/update.lock"
+RESULT="$STATE/update-result.json"
+for envf in /etc/porthole.env /etc/platopypus.env; do [ -f "$envf" ] && { set -a; . "$envf"; set +a; }; done
+
+say() { printf '%s [update] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$STATE/update.log"; }
+finish() { # status message
+    printf '{"ok":%s,"message":%s,"at":%s,"from":"%s","to":"%s"}\n' "$1" "$(printf '%s' "$2" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$2")" "$(date +%s000)" "${FROM:-?}" "${TO:-?}" > "$RESULT"
+    rm -f "$LOCK"
+    say "$2"
+    exit $([ "$1" = true ] && echo 0 || echo 1)
+}
+
+mkdir -p "$STATE"
+if [ -z "$HANDOFF" ]; then
+    if [ -f "$LOCK" ] && [ "$(( $(date +%s) - $(stat -c %Y "$LOCK") ))" -lt 1800 ]; then say "another update is running"; exit 1; fi
+    echo $$ > "$LOCK"
+fi
+FROM="${FROM:-$(cat "$APP/VERSION" 2>/dev/null | cut -d' ' -f1)}"
+STARTED="${STARTED:-$(date +%s)}"
+
+# 1. source checkout (skipped after a hand-off: the previous updater already fetched it)
+if [ -n "$HANDOFF" ]; then
+    say "continuing with the updater from the new release"
+elif [ ! -d "$SRC/.git" ]; then
+    say "no git checkout at $SRC; cloning https://github.com/$REPO"
+    rm -rf "$SRC.new"
+    if git clone --quiet --depth 1 --branch "$BRANCH" "https://github.com/$REPO" "$SRC.new"; then
+        rm -rf "$SRC"; mv "$SRC.new" "$SRC"
+    else
+        finish false "clone failed"
+    fi
+else
+    say "fetching origin/$BRANCH into $SRC"
+    git -C "$SRC" remote set-url origin "https://github.com/$REPO" 2>/dev/null
+    git -C "$SRC" fetch --quiet --depth 1 origin "$BRANCH" || finish false "fetch failed"
+    git -C "$SRC" reset --quiet --hard FETCH_HEAD || finish false "reset failed"
+fi
+TO="$(git -C "$SRC" rev-parse --short HEAD)"
+say "source at $TO (installed: ${FROM:-unknown})"
+
+# Hand over to the new release's updater, once, so its upgrade steps are the ones that run.
+NEXT="$SRC/bin/plato-update"; [ -f "$NEXT" ] || NEXT="$SRC/bin/porthole-update"
+if [ -z "$HANDOFF" ] && [ -f "$NEXT" ] && ! cmp -s "$NEXT" "${BASH_SOURCE[0]}"; then
+    say "handing over to the updater in $TO"
+    export PLATO_HANDOFF=1 PORTHOLE_HANDOFF=1 FROM STARTED PLATO_UPDATE_REPO="$REPO" PLATO_UPDATE_BRANCH="$BRANCH" PLATO_SRC="$SRC" PLATO_APP="$APP" PLATO_STATE="$STATE" PORTHOLE_UPDATE_REPO="$REPO" PORTHOLE_UPDATE_BRANCH="$BRANCH" PORTHOLE_SRC="$SRC" PORTHOLE_APP="$APP" PORTHOLE_STATE="$STATE"
+    exec bash "$NEXT"
+fi
+
+# Upgrade plan: the migrations the new server will run against this box's state.
+NEW_VERSION="$(node -p "require('$SRC/server/package.json').version" 2>/dev/null || echo '?')"
+PENDING=0
+if [ -f "$SRC/server/lib/migrate.js" ]; then
+    if node "$SRC/server/lib/migrate.js" plan --state "$STATE" > "$STATE/update-plan.json" 2>>"$STATE/update.log"; then
+        PENDING="$(node -p "require('$STATE/update-plan.json').pending.length" 2>/dev/null || echo 0)"
+        if [ "$PENDING" -gt 0 ]; then
+            say "upgrade plan to $NEW_VERSION: $PENDING migration(s)"
+            node -e "for (const m of require('$STATE/update-plan.json').pending) console.log('  - ' + m.version + ' ' + m.id + ': ' + m.title)" | tee -a "$STATE/update.log"
+        else
+            say "upgrade plan to $NEW_VERSION: no data migrations"
+        fi
+    else
+        finish false "could not work out the upgrade plan (see update.log); nothing changed"
+    fi
+fi
+
+# Put state back as it was before this update's migrations (only if they ran during this update).
+restore_state() {
+    local at file
+    at="$(node -p "(require('$STATE/schema.json').lastRun||{}).at||0" 2>/dev/null || echo 0)"
+    file="$(node -p "require('$STATE/schema.json').lastBackup||''" 2>/dev/null || echo '')"
+    if [ -n "$file" ] && [ -f "$file" ] && [ "$at" -ge "$(( STARTED * 1000 ))" ]; then
+        say "restoring state from $(basename "$file") (migrations from this update are undone)"
+        node "$SRC/server/lib/migrate.js" restore --state "$STATE" --file "$file" >> "$STATE/update.log" 2>&1 || say "state restore FAILED; restore $file by hand"
+    fi
+}
+
+# 2. snapshot
+rm -rf "$APP.prev"
+cp -a "$APP" "$APP.prev" || finish false "snapshot failed"
+
+# 3. install (this restarts the porthole service on a box; in a container it only replaces files)
+if PLATO_SRC="$SRC" PORTHOLE_SRC="$SRC" bash "$SRC/install.sh" 2>&1 | sed -E 's/(login token: +)[A-Za-z0-9_-]+/\1********/' >> "$STATE/update.log"; test "${PIPESTATUS[0]}" -eq 0; then
+    say "install.sh finished"
+else
+    say "install.sh failed; rolling back"
+    systemctl stop "$(unit)" 2>/dev/null || true
+    restore_state
+    rm -rf "$APP"; mv "$APP.prev" "$APP"
+    restart_for "$APP" 2>/dev/null || kill -TERM 1 2>/dev/null || true
+    finish false "install failed; rolled back to ${FROM:-previous}"
+fi
+if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet "$(unit)" 2>/dev/null; then
+    # Container / no systemd: the node process is PID 1 → ask it to exit so the runtime restarts it on the new code.
+    say "no systemd service; signalling the server to restart"
+    kill -TERM 1 2>/dev/null || pkill -TERM -f 'node server.js' 2>/dev/null || true
+fi
+
+# 4. health check with rollback. "The API answers" is not enough: a page whose script fails to load would pass.
+#    So: API up, the page is served with version-stamped assets, the main script and stylesheet come back with a
+#    plausible size, and the script parses. Anything else for 45 s → roll back to the snapshot.
+REASON=""
+healthy() {
+    curl -fsS "http://127.0.0.1:$PORT/api/login" >/dev/null 2>&1 || { REASON="API not answering"; return 1; }
+    local page v
+    page="$(curl -fsS "http://127.0.0.1:$PORT/" 2>/dev/null)" || { REASON="home page not served"; return 1; }
+    v="$(printf '%s' "$page" | sed -n 's/.*\/app\.js?v=\([^"]*\)".*/\1/p' | head -1)"
+    [ -n "$v" ] || { REASON="home page has no stamped app.js"; return 1; }
+    [ "$(curl -fsS -o /dev/null -w '%{size_download}' "http://127.0.0.1:$PORT/app.js?v=$v" 2>/dev/null || echo 0)" -gt 10000 ] || { REASON="app.js missing or truncated"; return 1; }
+    [ "$(curl -fsS -o /dev/null -w '%{size_download}' "http://127.0.0.1:$PORT/styles.css?v=$v" 2>/dev/null || echo 0)" -gt 1000 ] || { REASON="styles.css missing or truncated"; return 1; }
+    node --check "$APP/web/app.js" >/dev/null 2>&1 || { REASON="app.js does not parse"; return 1; }
+    # The new server applied this release's migrations (it refuses to start otherwise, but check the record too).
+    if [ "$PENDING" -gt 0 ]; then
+        [ "$(node -p "require('$STATE/schema.json').version" 2>/dev/null)" = "$NEW_VERSION" ] || { REASON="migrations not recorded"; return 1; }
+    fi
+    return 0
+}
+for i in $(seq 1 45); do
+    sleep 1
+    if healthy; then
+        rm -rf "$APP.prev"
+        finish true "updated ${FROM:-?} → $TO"
+    fi
+done
+say "health check failed ($REASON); rolling back"
+systemctl stop "$(unit)" 2>/dev/null || true
+restore_state
+rm -rf "$APP"; mv "$APP.prev" "$APP"
+restart_for "$APP" 2>/dev/null || kill -TERM 1 2>/dev/null || true
+finish false "health check failed; rolled back to ${FROM:-previous}"

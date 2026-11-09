@@ -19,7 +19,7 @@ export const REPO = process.env.PORTHOLE_UPDATE_REPO || 'sebasouthwell/platopypu
 // Channel: `stable` moves only when a release has soaked on master (scripts/release.ps1 -Promote); set
 // PORTHOLE_UPDATE_BRANCH=master in /etc/porthole.env to follow every release immediately.
 export const BRANCH = process.env.PORTHOLE_UPDATE_BRANCH || 'stable';
-const SRC = process.env.PORTHOLE_SRC || '/opt/porthole-src';
+const SRC = process.env.PORTHOLE_SRC || (fs.existsSync('/opt/platopypus-src') || !fs.existsSync('/opt/porthole-src') ? '/opt/platopypus-src' : '/opt/porthole-src');
 
 function load() { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { return {}; } }
 function save(s) { fs.writeFileSync(stateFile, JSON.stringify(s, null, 2), { mode: 0o600 }); }
@@ -93,16 +93,16 @@ export function status() {
 // Start the detached updater. It survives this process restarting.
 export async function apply() {
     if (fs.existsSync(path.join(config.state, 'update.lock'))) throw httpError(409, 'An update is already running.');
-    const script = path.join(appDir, 'bin', 'porthole-update');
+    const script = path.join(appDir, 'bin', 'plato-update');
     if (!fs.existsSync(script)) throw httpError(500, 'Updater script missing.');
     log('update', `APPLY requested → ${REPO}@${BRANCH}`);
     const out = fs.openSync(path.join(config.state, 'update.log'), 'a');
-    const env = { ...process.env, PORTHOLE_UPDATE_REPO: REPO, PORTHOLE_UPDATE_BRANCH: BRANCH, PORTHOLE_SRC: SRC, PORTHOLE_STATE: config.state, PORTHOLE_APP: appDir };
+    const env = { ...process.env, PORTHOLE_UPDATE_REPO: REPO, PORTHOLE_UPDATE_BRANCH: BRANCH, PORTHOLE_SRC: SRC, PORTHOLE_STATE: config.state, PORTHOLE_APP: appDir, PLATO_UPDATE_REPO: REPO, PLATO_UPDATE_BRANCH: BRANCH, PLATO_SRC: SRC, PLATO_STATE: config.state, PLATO_APP: appDir };
     let child;
     try {
         // Prefer a transient systemd unit so the updater is not killed with the porthole service.
         await run('systemd-run', ['--version'], { timeout: 3000 });
-        child = spawn('systemd-run', ['--unit', `porthole-update-${Date.now()}`, '--collect', '--setenv=PORTHOLE_UPDATE_REPO=' + REPO, '--setenv=PORTHOLE_UPDATE_BRANCH=' + BRANCH, '--setenv=PORTHOLE_SRC=' + SRC, '--setenv=PORTHOLE_STATE=' + config.state, '--setenv=PORTHOLE_APP=' + appDir, 'bash', script], { stdio: ['ignore', out, out], detached: true });
+        child = spawn('systemd-run', ['--unit', `platopypus-update-${Date.now()}`, '--collect', '--setenv=PORTHOLE_UPDATE_REPO=' + REPO, '--setenv=PORTHOLE_UPDATE_BRANCH=' + BRANCH, '--setenv=PORTHOLE_SRC=' + SRC, '--setenv=PORTHOLE_STATE=' + config.state, '--setenv=PORTHOLE_APP=' + appDir, 'bash', script], { stdio: ['ignore', out, out], detached: true });
     } catch {
         child = spawn('setsid', ['bash', script], { env, stdio: ['ignore', out, out], detached: true });
     }

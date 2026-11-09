@@ -22,8 +22,10 @@ import * as servicesMgr from './services.js';
 const execFileP = promisify(execFile);
 const dir = path.join(config.state, 'egress');
 const seenFile = path.join(dir, 'seen.json');
-const PREFIX = 'PH-EGRESS ';
-const CHAIN = 'PORTHOLE-EGRESS';
+const PREFIX = 'PLATO-EGRESS ';
+const CHAIN = 'PLATO-EGRESS';
+const LEGACY_PREFIX = 'PH-EGRESS ';          // 1.x log prefix: still read, so lines from before an update are not lost
+const LEGACY_CHAIN = 'PORTHOLE-EGRESS';
 const KEEP_DAYS = 90;
 const dayOf = ts => new Date(ts).toISOString().slice(0, 10);
 const sbin = b => ['/usr/sbin/' + b, '/sbin/' + b].find(p => fs.existsSync(p)) || b;
@@ -115,7 +117,7 @@ function loadSeen() {
 function dayFile(day) { return path.join(dir, `${day}.json`); }
 function loadDay(day) { try { return JSON.parse(fs.readFileSync(dayFile(day), 'utf8')); } catch { return {}; } }
 
-const KERNEL_RE = /PH-EGRESS (?:.*?\bSRC=(\S+))?.*?\bDST=(\S+).*?\bPROTO=(\w+)(?:.*?\bSPT=(\d+))?(?:.*?\bDPT=(\d+))?(?:.*?\bUID=(\d+))?/;
+const KERNEL_RE = /(?:PH-EGRESS|PLATO-EGRESS) (?:.*?\bSRC=(\S+))?.*?\bDST=(\S+).*?\bPROTO=(\w+)(?:.*?\bSPT=(\d+))?(?:.*?\bDPT=(\d+))?(?:.*?\bUID=(\d+))?/;
 
 // Containers (live services with image:) are not uid-owned on the host: their packets are logged from the docker
 // bridge and named by the container's address.
@@ -218,6 +220,13 @@ export async function applyRules() {
         const spec = ['DOCKER-USER', '-i', 'docker0', '!', '-o', 'docker0', '-m', 'conntrack', '--ctstate', 'NEW', '-m', 'limit', '--limit', '50/second', '--limit-burst', '200', '-j', 'LOG', '--log-prefix', PREFIX, '--log-level', '6'];
         try { await ipt('iptables', ['-C', ...spec]); } catch { await ipt('iptables', ['-I', ...spec]); }
     } catch { /* no docker on this box */ }
+    // 1.x chain and rules go (idempotent; errors mean they were not there).
+    for (const bin of ['iptables', 'ip6tables']) {
+        await ipt(bin, ['-D', 'OUTPUT', '-j', LEGACY_CHAIN]).catch(() => {});
+        await ipt(bin, ['-F', LEGACY_CHAIN]).catch(() => {});
+        await ipt(bin, ['-X', LEGACY_CHAIN]).catch(() => {});
+    }
+    await ipt('iptables', ['-D', 'DOCKER-USER', '-i', 'docker0', '!', '-o', 'docker0', '-m', 'conntrack', '--ctstate', 'NEW', '-m', 'limit', '--limit', '50/second', '--limit-burst', '200', '-j', 'LOG', '--log-prefix', LEGACY_PREFIX, '--log-level', '6']).catch(() => {});
     for (const bin of ['iptables', 'ip6tables']) {
         try { await ipt(bin, ['-N', CHAIN]); } catch { /* exists */ }
         await ipt(bin, ['-F', CHAIN]);
@@ -253,7 +262,7 @@ export async function start() {
     if (!journalctl) { status = { on: false, detail: 'This box has no journald, so the kernel log cannot be followed.' }; return status; }
     try { const n = await applyRules(); status = { on: true, detail: `Logging new connections from ${n} account${n === 1 ? '' : 's'} (agent user and service accounts). Root processes are not logged.` }; }
     catch (e) { status = { on: false, detail: `Could not add the firewall logging rules: ${String(e.stderr || e.message).trim().split('\n')[0]}` }; log('egress', status.detail); return status; }
-    follow(journalctl, ['-k', '-f', '-n', '0', '-o', 'cat'], l => { if (l.includes(PREFIX)) ingestKernel(l).catch(() => {}); }, 'journalctl');
+    follow(journalctl, ['-k', '-f', '-n', '0', '-o', 'cat'], l => { if (l.includes(PREFIX) || l.includes(LEGACY_PREFIX)) ingestKernel(l).catch(() => {}); }, 'journalctl');
     if (resolvectl) follow(resolvectl, ['monitor', '--json=short'], ingestDns, 'resolvectl monitor');
     else status.detail += ' No resolvectl: addresses are shown without names.';
     setInterval(flush, 60_000).unref();

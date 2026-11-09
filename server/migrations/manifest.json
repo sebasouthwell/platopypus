@@ -6,7 +6,24 @@
       "version": "1.15.0",
       "title": "Give live services their own accounts",
       "detail": "Removes the shared porthole-svc account from the project group, closes project folders to other accounts, and clears root approvals made before code fingerprints (they are asked for again). Project files and data are not changed.",
-      "touches": ["accounts", "permissions", "live-approvals.json"]
+      "touches": [
+        "accounts",
+        "permissions",
+        "live-approvals.json"
+      ]
+    },
+    {
+      "id": "2.0.0-rename",
+      "version": "2.0.0",
+      "title": "Rename to PlatOpypus on disk",
+      "detail": "The state folder becomes ~/.platopypus and the app /opt/platopypus, with links left at the old paths; /etc/platopypus.env is written from /etc/porthole.env; the old firewall chain and nginx file names are retired. Accounts, project folders, services and hostnames are not changed.",
+      "touches": [
+        "state folder (moved + link)",
+        "/opt (moved + link)",
+        "/etc/platopypus.env",
+        "iptables",
+        "nginx file names"
+      ]
     }
   ]
 }

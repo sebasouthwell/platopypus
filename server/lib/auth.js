@@ -17,7 +17,9 @@ import { EventEmitter } from 'node:events';
 // 'signin' and 'lockout' events, for alerts. Box CLI token logins are not sign-ins of a person.
 export const events = new EventEmitter();
 
-const COOKIE = 'porthole_session';
+const COOKIE = 'plato_session';
+const LEGACY_COOKIE = 'porthole_session';   // 1.x; read until 3.0, never written
+const cookieSid = req => { const c = parseCookies(req); return c[COOKIE] || c[LEGACY_COOKIE]; };
 const file = path.join(config.state, 'auth-sessions.json');
 
 let sessions = new Map(); // sid -> { created, lastSeen, ua, how }
@@ -115,7 +117,7 @@ export function finishTotp(req, ticket, code) {
 }
 
 export function logout(req) {
-    const sid = parseCookies(req)[COOKIE];
+    const sid = cookieSid(req);
     if (sid && sessions.delete(sid)) persist();
     log('auth', `logout from ${clientAddr(req)}`);
     return setCookie('', 0);
@@ -135,7 +137,7 @@ export function parseCookies(req) {
 
 // Returns the session record if the request is authenticated, else null.
 export function authenticate(req) {
-    const sid = parseCookies(req)[COOKIE];
+    const sid = cookieSid(req);
     if (!sid) return null;
     const s = sessions.get(sid);
     if (!s) return null;
@@ -160,7 +162,7 @@ export function originAllowed(req) {
 
 // Custom header required on state-changing requests (defence in depth next to SameSite=Strict).
 export function hasCsrfHeader(req) {
-    return req.headers['x-porthole'] === '1';
+    return req.headers['x-plato'] === '1' || req.headers['x-porthole'] === '1';
 }
 
 export function sessionCount() {
@@ -168,7 +170,7 @@ export function sessionCount() {
 }
 
 export function revokeOtherSessions(req) {
-    const keep = parseCookies(req)[COOKIE];
+    const keep = cookieSid(req);
     let n = 0;
     for (const sid of [...sessions.keys()]) if (sid !== keep) { sessions.delete(sid); n++; }
     persist();

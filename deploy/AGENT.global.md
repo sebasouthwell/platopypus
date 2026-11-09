@@ -6,7 +6,9 @@ an iPhone, so keep terminal output compact and avoid wide tables.
 You may be one of several agents on this box (Claude Code, Codex CLI, Antigravity CLI). Each is started by PlatOpypus
 with the user's chosen flags; do not change permission modes yourself. PlatOpypus installs this same text for each
 tool (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`) and refreshes the block between the
-`porthole:begin/end` markers on every update; anything written outside the markers is kept.
+`platopypus:begin/end` markers on every update; anything written outside the markers is kept.
+(2.0: settings are `PLATO_*`; the old `PORTHOLE_*` spellings are set too and keep working. The run file is `.platorun`;
+`.portholerun` is still read. The box command is `plato`; `porthole` still works.)
 
 The helper commands below (`vault`, `credshare`, `tunnel`, `gh`, `docker`) are ordinary programs on PATH: run them
 with your shell tool exactly as shown, whichever agent you are.
@@ -30,7 +32,7 @@ API keys and OAuth tokens live in the PlatOpypus vault. Before asking the user f
 3. Every `vault run` and `vault get` is in the user's audit log with the command it was for: name the real
    command, one per call, rather than starting a sub-shell with the values.
 4. Build on these variables instead of hard-coding or re-asking: a new project that needs Telegram should
-   read `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from its environment, and its README or `.portholerun`
+   read `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from its environment, and its README or `.platorun`
    should start it with `vault run` or list them under `needs:`.
 
 Never echo, log or commit a token value. Pass it through environment variables or files with 0600
@@ -62,14 +64,14 @@ appearing in the terminal scrollback.
 
 A project that should run as a live service describes itself in `PORTHOLE.md` in its root (or `docs/PORTHOLE.md`):
 how to start each service, its port, the hostname it should live on, the Vault names it needs, how it updates, and
-the operator commands worth having as buttons. The format is in `/opt/porthole/docs/LIVE.md`. Write it when you add
+the operator commands worth having as buttons. The format is in `/opt/platopypus/docs/LIVE.md`. Write it when you add
 a service and keep it current; run `live check` after editing. Never put secret values in it: reference Vault names
 (`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
 from the phone; `live status` shows what PlatOpypus sees. Actions that need the service restarted say `restart: true`
 (or `stop_first: true` when they change data the running process holds in memory); never call `svc restart` inside an
 action. When the user starts the live service, it takes over the port from any `svc run` test copy in the same folder,
 so stop your own copy (`svc rm <name>`) once the manifest is done rather than leaving two.
-For a quick way to run a project without you, write a `.portholerun` file in its folder (YAML: `run:` required;
+For a quick way to run a project without you, write a `.platorun` file in its folder (YAML: `run:` required;
 `port`, `before`, `cwd`, `env` (no secrets), `needs` (Vault names), `share: quick|domain|none`, `hostname`, `open`,
 `run_as: service|agent|root`). The user taps it in Files, sees every command and the account it runs as, and starts
 it with its link; PlatOpypus keeps it out of git. Use PORTHOLE.md instead for a service that should stay live.
@@ -80,8 +82,8 @@ phone shows each group as a dropdown with the items and their commands, plus "Al
 
 ## Session type and security level
 
-PlatOpypus tells you what kind of session this is. At the start of every session run `echo $PORTHOLE_SESSION
-$PORTHOLE_SECURITY_LEVEL` and, if `PORTHOLE_SECURITY_FILE` is set, **read that file first and follow it for the whole
+PlatOpypus tells you what kind of session this is. At the start of every session run `echo $PLATO_SESSION
+$PLATO_SECURITY_LEVEL` and, if `PLATO_SECURITY_FILE` is set, **read that file first and follow it for the whole
 session**; it overrides your defaults on how much security work to do (from "build as fast as possible" for a
 throwaway project to boundary tests every iteration and a daily CVE check for professional work). A `control` session
 is box operations, not project work. For professional projects run `project security` at the start of each session and
@@ -90,7 +92,7 @@ user changes the level on the phone.
 
 ## Running without root
 
-If `echo $PORTHOLE_RUN_AS` prints `agent`, you are the unprivileged agent user. You can work freely in this project,
+If `echo $PLATO_RUN_AS` prints `agent`, you are the unprivileged agent user. You can work freely in this project,
 but not as root. For a command that needs root (installing a system package, editing /etc, binding a port below 1024,
 restarting a system service) run:
 

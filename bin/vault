@@ -9,8 +9,9 @@
 //   vault env [folder]                print `export NAME=value` lines for the general scope + the folder's project scope
 //                                     use as: eval "$(vault env)"
 // Every get, run and env is written to the audit log (More → Audit log): names and the command, never values.
-// Values are decrypted with the key in ~/.porthole/vault.key, which only root can read.
+// Values are decrypted with the key in ~/.platopypus/vault.key, which only root can read.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -34,13 +35,13 @@ function runWith(values, command) {
 }
 
 // Agent-user shells cannot read the vault key: they ask Porthole, which checks the calling process and its folder.
-if (process.env.PORTHOLE_RUN_AS === 'agent' || (process.getuid && process.getuid() !== 0)) {
-    const port = process.env.PORTHOLE_PORT || '7331';
-    const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+if ((process.env.PLATO_RUN_AS || process.env.PORTHOLE_RUN_AS) === 'agent' || (process.getuid && process.getuid() !== 0)) {
+    const port = (process.env.PLATO_PORT || process.env.PORTHOLE_PORT) || '7331';
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
     const sq = s => `'${String(s).replace(/'/g, `'\''`)}'`;
     let runPlan = null;
     try {
-        const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token: process.env.PORTHOLE_TOKEN || '' }), signal: AbortSignal.timeout(5000) });
+        const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token: (process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN) || '' }), signal: AbortSignal.timeout(5000) });
         if (!login.ok) throw new Error('this shell has no Porthole token (start it as an agent-user shell)');
         const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
         const call = async (p, method = 'GET', body) => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...headers, cookie }, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15000) }); const d = await r.json().catch(() => ({})); if (!r.ok) { console.error(d.error || `HTTP ${r.status}`); process.exit(1); } return d; };
@@ -54,13 +55,13 @@ if (process.env.PORTHOLE_RUN_AS === 'agent' || (process.getuid && process.getuid
     process.exit(0);
 }
 
-process.env.PORTHOLE_STATE ||= path.join(process.env.HOME || '/root', '.porthole');
+{ const h = process.env.HOME || '/root'; const d = fs.existsSync(path.join(h, '.platopypus')) || !fs.existsSync(path.join(h, '.porthole')) ? path.join(h, '.platopypus') : path.join(h, '.porthole'); process.env.PLATO_STATE ||= process.env.PORTHOLE_STATE || d; process.env.PORTHOLE_STATE ||= process.env.PLATO_STATE; }
 const lib = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'server', 'lib');
 const vault = await import(pathToFileURL(path.join(lib, 'vault.js')).href);
 const { config } = await import(pathToFileURL(path.join(lib, 'config.js')).href);
 // Root shells can read the key themselves, so this is a record, not a gate: it keeps the log honest about root use too.
 const audit = await import(pathToFileURL(path.join(lib, 'audit.js')).href).catch(() => null);
-const actor = process.env.PORTHOLE_SHELL_NAME ? `shell "${process.env.PORTHOLE_SHELL_NAME}"` : 'root, outside Porthole shells';
+const actor = (process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME) ? `shell "${(process.env.PLATO_SHELL_NAME || process.env.PORTHOLE_SHELL_NAME)}"` : 'root, outside Porthole shells';
 const note = (action, ev) => { try { audit?.record('credential', action, { actor, via: 'vault (root)', cwd: process.cwd(), ...ev }); } catch { /* never block */ } };
 
 function sq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }

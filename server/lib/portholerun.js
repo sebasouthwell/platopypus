@@ -33,7 +33,11 @@ import { log } from './log.js';
 import { record } from './audit.js';
 import { ensureIgnored as ensureDefaultIgnores } from './gitignore.js';
 
-export const FILE = '.portholerun';
+export const FILE = '.platorun';
+export const LEGACY_FILE = '.portholerun';   // 1.x name, read for good
+export const FILES = [FILE, LEGACY_FILE];
+// The run file in a folder, whichever name it has.
+export function fileIn(dir) { for (const f of FILES) { const p = path.join(dir, f); if (fs.existsSync(p)) return p; } return null; }
 const MAX = 8 * 1024;
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const ENV_RE = /^[A-Z_][A-Z0-9_]{0,63}$/;
@@ -43,7 +47,8 @@ const slugName = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').
 
 function read(file) {
     const abs = path.resolve(file);
-    if (path.basename(abs) !== FILE) throw httpError(400, `Not a ${FILE} file.`);
+    if (!FILES.includes(path.basename(abs))) throw httpError(400, `Not a ${FILE} file.`);
+    if (!fs.existsSync(abs) && path.basename(abs) === FILE && fs.existsSync(path.join(path.dirname(abs), LEGACY_FILE))) abs = path.join(path.dirname(abs), LEGACY_FILE);
     const root = profile.projectRoot(path.dirname(abs));
     if (!root) throw httpError(403, `${FILE} runs only inside a project under /Projects.`);
     let st; try { st = fs.statSync(abs); } catch { throw httpError(404, `${FILE} not found.`); }
@@ -93,7 +98,7 @@ export async function plan(file) {
     const reg = (await servicesMgr.list().catch(() => [])).find(r => r.slug === slug);
     const running = !!reg?.alive;
     const link = spec?.port ? (await tunnels.list().catch(() => [])).find(t => t.port === Number(spec.port)) || null : null;
-    let gitignored = false; try { gitignored = fs.readFileSync(path.join(f.root, '.gitignore'), 'utf8').split('\n').some(l => l.trim() === FILE || l.trim() === `/${FILE}` || l.trim() === `**/${FILE}`); } catch { /* none */ }
+    let gitignored = false; try { gitignored = fs.readFileSync(path.join(f.root, '.gitignore'), 'utf8').split('\n').some(l => FILES.includes(l.trim()) || FILES.map(f => `/${f}`).includes(l.trim()) || l.trim() === `**/${FILE}`); } catch { /* none */ }
     const account = v.runAs === 'service' ? svcUser.userFor(project) : v.runAs === 'agent' ? agentUser.USER : 'root';
     return {
         file: f.abs, folder: path.relative(config.root, f.dir).split(path.sep).join('/'), project, name, slug, hash: f.hash, errors: v.errors,
@@ -108,9 +113,9 @@ export async function plan(file) {
 function ensureIgnored(root) {
     const gi = path.join(root, '.gitignore');
     let text = ''; try { text = fs.readFileSync(gi, 'utf8'); } catch { /* new */ }
-    if (text.split('\n').some(l => [FILE, `/${FILE}`, `**/${FILE}`].includes(l.trim()))) return false;
+    if (text.split('\n').some(l => FILES.flatMap(f => [f, `/${f}`, `**/${f}`]).includes(l.trim()))) return false;
     if (!fs.existsSync(path.join(root, '.git')) && !text) return false;   // not a repo: nothing to keep it out of
-    fs.writeFileSync(gi, `${text}${text && !text.endsWith('\n') ? '\n' : ''}# PlatOpypus: how this box runs the project (not part of the code)\n**/${FILE}\n`);
+    fs.writeFileSync(gi, `${text}${text && !text.endsWith('\n') ? '\n' : ''}# PlatOpypus: how this box runs the project (not part of the code)\n**/${FILE}\n**/${LEGACY_FILE}\n`);
     return true;
 }
 
@@ -126,7 +131,7 @@ export async function run(file, hash, { restart = false } = {}) {
     if (p.running) { if (!restart) throw httpError(409, `${p.name} is already running.`); await servicesMgr.stop(p.slug, { keepTunnel: true }); }
     const root = profile.projectRoot(path.dirname(p.file));
     const vault = await envFor(path.dirname(p.file), { project: 'exact' });
-    const env = { ...Object.fromEntries(v.needs.map(n => [n, vault[n]])), ...v.env, PORTHOLE_PROJECT: p.project };
+    const env = { ...Object.fromEntries(v.needs.map(n => [n, vault[n]])), ...v.env, PLATO_PROJECT: p.project, PORTHOLE_PROJECT: p.project };
     const cmd = spec.before ? `${spec.before} && ${spec.run}` : String(spec.run);
     let account = null;
     if (v.runAs === 'service') account = await prepareAccount({ root, name: path.basename(root) });

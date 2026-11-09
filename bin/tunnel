@@ -6,15 +6,15 @@
 #   tunnel rm 8008          close it
 set -euo pipefail
 
-PORT_API="${PORTHOLE_PORT:-7331}"
-STATE="${PORTHOLE_STATE:-${HOME:-/root}/.porthole}"
+PORT_API="${PLATO_PORT:-${PORTHOLE_PORT:-7331}}"
+STATE="${PLATO_STATE:-${PORTHOLE_STATE:-${HOME:-/root}}/.porthole}"
 BASE="http://127.0.0.1:${PORT_API}"
 JAR=$(mktemp); trap 'rm -f "$JAR"' EXIT
 
-token() { [ -n "${PORTHOLE_TOKEN:-}" ] && echo "$PORTHOLE_TOKEN" || cat "$STATE/token"; }
+token() { [ -n "${PLATO_TOKEN:-${PORTHOLE_TOKEN:-}}" ] && echo "$PORTHOLE_TOKEN" || cat "$STATE/token"; }
 
 login() {
-    curl -fsS -c "$JAR" -H 'Content-Type: application/json' -H 'X-Porthole: 1' \
+    curl -fsS -c "$JAR" -H 'Content-Type: application/json' -H 'X-Plato: 1' \
         -d "{\"token\":\"$(token)\"}" "$BASE/api/login/token" >/dev/null
 }
 
@@ -26,12 +26,12 @@ case "${1:-}" in
         ;;
     rm)
         login
-        curl -fsS -b "$JAR" -H 'X-Porthole: 1' -X DELETE "$BASE/api/tunnels/${2:?port}" >/dev/null && echo "closed tunnel on port $2"
+        curl -fsS -b "$JAR" -H 'X-Plato: 1' -X DELETE "$BASE/api/tunnels/${2:?port}" >/dev/null && echo "closed tunnel on port $2"
         ;;
     *)
         PORT="$1"; LABEL="${2:-}"
         login
-        OUT=$(curl -fsS -b "$JAR" -H 'Content-Type: application/json' -H 'X-Porthole: 1' \
+        OUT=$(curl -fsS -b "$JAR" -H 'Content-Type: application/json' -H 'X-Plato: 1' \
             -d "$(jq -cn --argjson p "$PORT" --arg n "$LABEL" '{port:$p,name:$n}')" "$BASE/api/tunnels")
         URL=$(echo "$OUT" | jq -r '.url // empty')
         if [ -n "$URL" ]; then echo "$URL"; else echo "tunnel starting; check the Tunnels tab or run: tunnel ls"; fi

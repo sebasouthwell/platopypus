@@ -100,7 +100,9 @@ export async function apply({ state, dir = MIGRATIONS_DIR, log = console.log } =
 export async function boot(state, log) { return apply({ state, log }); }
 
 // ---- CLI ----
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run as a CLI when this file is the script, even through a symlinked path (2.0: /opt/porthole → /opt/platopypus).
+const realOf = p => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+if (process.argv[1] && realOf(process.argv[1]) === realOf(fileURLToPath(import.meta.url))) {
     const args = process.argv.slice(2);
     const opt = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
     const state = opt('--state') || process.env.PORTHOLE_STATE || path.join(process.env.HOME || '/root', '.porthole');

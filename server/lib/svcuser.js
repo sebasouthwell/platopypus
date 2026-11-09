@@ -143,11 +143,11 @@ const okName = n => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && !['PATH', 'HOME'].incl
 export function wrapShell(user, cmd, envNames = []) {
     const a = info(user); if (!a) throw httpError(500, `No account ${user}.`);
     const pass = envNames.filter(okName).map(n => `${n}="$${n}"`).join(' ');
-    return `${runuserBin()} -u ${user} -- env -i PATH=${q(PATH)} HOME=${q(a.home)} LANG=C.UTF-8 PORTHOLE_RUN_AS=service ${pass} bash -c ${q(`umask 007; ${cmd}`)}`;
+    return `${runuserBin()} -u ${user} -- env -i PATH=${q(PATH)} HOME=${q(a.home)} LANG=C.UTF-8 PLATO_RUN_AS=service PORTHOLE_RUN_AS=service ${pass} bash -c ${q(`umask 007; ${cmd}`)}`;
 }
 
 // argv for execFile: run cmd as the account (actions), with exactly the variables in extraEnv.
 export function argv(user, cmd, extraEnv = {}) {
     const a = info(user); if (!a) throw httpError(500, `No account ${user}.`);
-    return [runuserBin(), ['-u', user, '--', 'env', '-i', 'LANG=C.UTF-8', `PATH=${PATH}`, `HOME=${a.home}`, 'PORTHOLE_RUN_AS=service', ...Object.entries(extraEnv).filter(([k]) => okName(k)).map(([k, v]) => `${k}=${v}`), 'bash', '-c', `umask 007; ${cmd}`]];
+    return [runuserBin(), ['-u', user, '--', 'env', '-i', 'LANG=C.UTF-8', `PATH=${PATH}`, `HOME=${a.home}`, 'PLATO_RUN_AS=service', 'PORTHOLE_RUN_AS=service', ...Object.entries(extraEnv).filter(([k]) => okName(k)).map(([k, v]) => `${k}=${v}`), 'bash', '-c', `umask 007; ${cmd}`]];
 }

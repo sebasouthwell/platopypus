@@ -76,6 +76,12 @@ if (mode === 'seed') {
     const srv = Array.isArray(servers) && servers.find(s => s.slug === ex.server);
     check('the registered server is still registered and running', !!srv && srv.alive === true, JSON.stringify(srv && { alive: srv.alive }));
     for (const f of ex.stateFiles) check(`state file kept: ${f}`, fs.existsSync(`${STATE}/${f}`));
+    // 2.0: new paths, old ones as links (an older release rolled back must still find everything).
+    if (want && Number(String(want).split('.')[0]) >= 2) {
+        const lnk = p => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+        check('2.0: the state folder moved to ~/.platopypus with ~/.porthole as a link', fs.existsSync('/root/.platopypus/vault.key') && lnk('/root/.porthole'), sh('ls -ld /root/.porthole /root/.platopypus 2>&1'));
+        check('2.0: the app moved to /opt/platopypus with /opt/porthole as a link', fs.existsSync('/opt/platopypus/server/package.json') && lnk('/opt/porthole'), sh('ls -ld /opt/porthole /opt/platopypus 2>&1'));
+    }
     const mf = '/opt/porthole/server/migrations/manifest.json';
     check('the new release is installed (migrations manifest present)', fs.existsSync(mf));
     const manifest = fs.existsSync(mf) ? JSON.parse(fs.readFileSync(mf, 'utf8')).migrations.map(m => m.id) : ['(missing)'];

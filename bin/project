@@ -14,13 +14,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const [sub, ...rest] = process.argv.slice(2);
-const port = process.env.PORTHOLE_PORT || '7331';
-const state = process.env.PORTHOLE_STATE || `${process.env.HOME || '/root'}/.porthole`;
-let token = process.env.PORTHOLE_TOKEN || '';
+const port = (process.env.PLATO_PORT || process.env.PORTHOLE_PORT) || '7331';
+const state = (process.env.PLATO_STATE || process.env.PORTHOLE_STATE) || `${process.env.HOME || '/root'}/.porthole`;
+let token = (process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN) || '';
 try { if (!token) token = fs.readFileSync(`${state}/token`, 'utf8').trim(); } catch { /* no token */ }
 if (!sub || sub === '-h' || sub === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 12).map(l => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(sub ? 0 : 2); }
 
-const headers = { 'Content-Type': 'application/json', 'X-Porthole': '1' };
+const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
 async function api(p, method = 'GET', body) {
     const login = await fetch(`http://127.0.0.1:${port}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000) });
     if (!login.ok) throw new Error('cannot reach Porthole on this box');
