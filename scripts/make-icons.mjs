@@ -1,3 +1,4 @@
+// RETIRED in 1.28.0: the icons are rendered from web/mascot.svg by scripts/render-mascot.mjs. Kept for reference.
 // Generates the PWA icons (a brass porthole ring on deep sea) as PNGs with no dependencies.
 // Usage: node scripts/make-icons.mjs   → writes web/icons/icon-{180,192,512}.png
 

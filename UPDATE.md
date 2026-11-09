@@ -446,6 +446,10 @@ phone's Update button. Mechanism:
   default repo follows). A project may call its manifest `PLATOPYPUS.md`; `PORTHOLE.md` keeps working. The box gets a
   `plato` command beside `porthole`. Nothing on disk moves: `~/.porthole`, the `porthole` service and accounts, the
   `PORTHOLE_*` variables, the `X-Porthole` header, `.portholerun` and your hostnames are unchanged (that is a 2.0).
+- **1.28.0** — **The mascot.** A grey platypus in dark glasses with an earpiece (own drawing, brass bill, no hat), as
+  `web/mascot.svg`: the sign-in screen, the Home and sidebar brand marks, the SVG favicon, and the PWA icons
+  (rendered from it by `scripts/render-mascot.mjs`; `make-icons.mjs` is retired). Brand text on Home and in the
+  sidebar now reads PlatOpypus.
 
 ## Release checklist
 

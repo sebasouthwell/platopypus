@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="PlatOpypus">
+  <!-- Agent PlatOpypus: a grey platypus on duty. Own drawing: no hat, no teal; dark glasses and an earpiece do the work. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16263a"/>
+      <stop offset="1" stop-color="#0b1422"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ba4ae"/>
+      <stop offset="1" stop-color="#6c7680"/>
+    </linearGradient>
+    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c6ccd3"/>
+      <stop offset="1" stop-color="#a9b1ba"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8c46e"/>
+      <stop offset="1" stop-color="#b58d38"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3543"/>
+      <stop offset="0.55" stop-color="#0c121a"/>
+      <stop offset="1" stop-color="#1a2330"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="58" fill="url(#bg)"/>
+  <circle cx="128" cy="136" r="98" fill="#101c2c" opacity="0.9"/>
+
+  <g transform="translate(5 2) scale(0.97)">
+    <!-- tail: a flat paddle, scored like beaver leather -->
+    <path d="M82 150 C 46 138, 22 168, 42 188 C 60 204, 94 192, 104 172 Z" fill="#59626c"/>
+    <path d="M66 160 C 50 168, 48 180, 58 188" fill="none" stroke="#464e57" stroke-width="3" stroke-linecap="round"/>
+    <path d="M80 158 C 70 170, 72 182, 80 188" fill="none" stroke="#464e57" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- body with the head in one piece: long, low, a little raised at the front -->
+    <path d="M74 152 C 72 126, 96 106, 132 102 C 164 98, 192 100, 208 114 C 220 124, 218 142, 208 152 C 196 170, 168 184, 132 186 C 100 188, 76 176, 74 152 Z" fill="url(#body)"/>
+    <!-- belly -->
+    <path d="M96 156 C 104 140, 134 134, 164 140 C 190 146, 194 166, 172 178 C 146 188, 100 182, 96 156 Z" fill="url(#belly)"/>
+
+    <!-- webbed feet -->
+    <path d="M118 184 L 110 200 Q 116 204, 122 200 L 126 190 Q 132 204, 138 200 L 136 184 Z" fill="#59626c"/>
+    <path d="M166 182 L 160 198 Q 166 202, 172 198 L 176 188 Q 182 202, 188 198 L 186 182 Z" fill="#59626c"/>
+
+    <!-- bill: flat and wide, brass so it reads as the brand's accent -->
+    <path d="M204 116 C 222 106, 246 110, 252 122 C 256 132, 246 140, 230 140 L 206 138 C 196 134, 196 122, 204 116 Z" fill="url(#brass)"/>
+    <path d="M208 132 C 222 136, 238 136, 246 130" fill="none" stroke="#8a6a26" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <circle cx="236" cy="120" r="2.2" fill="#8a6a26" opacity="0.8"/>
+    <circle cx="244" cy="124" r="1.8" fill="#8a6a26" opacity="0.8"/>
+
+    <!-- dark glasses -->
+    <rect x="160" y="108" width="26" height="18" rx="6" fill="url(#lens)" stroke="#0a0f16" stroke-width="2"/>
+    <rect x="192" y="110" width="20" height="16" rx="6" fill="url(#lens)" stroke="#0a0f16" stroke-width="2"/>
+    <path d="M186 116 L 192 117" stroke="#0a0f16" stroke-width="3" stroke-linecap="round"/>
+    <path d="M160 115 L 148 112" stroke="#0a0f16" stroke-width="3" stroke-linecap="round"/>
+    <path d="M165 112 L 170 111" stroke="#8fb3d9" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <path d="M196 113 L 200 112" stroke="#8fb3d9" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- earpiece and its coiled wire down the neck -->
+    <circle cx="148" cy="114" r="4" fill="#1a2330" stroke="#0a0f16" stroke-width="1.5"/>
+    <path d="M147 118 C 142 126, 146 132, 140 138 C 136 142, 140 148, 136 154" fill="none" stroke="#0a0f16" stroke-width="2.2" stroke-linecap="round"/>
+
+    <!-- the venom spur, in brass -->
+    <path d="M112 194 L 106 190" stroke="url(#brass)" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

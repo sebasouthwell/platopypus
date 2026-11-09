@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="PlatOpypus">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="icon" type="image/svg+xml" href="/mascot.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
@@ -22,7 +23,7 @@
 <!-- Sign in / first-run setup -->
 <section id="login" class="screen login" hidden>
   <div class="login-card">
-    <div class="ring" aria-hidden="true"><span></span></div>
+    <img class="mascot" src="/mascot.svg" alt="" width="96" height="96">
     <h1>Agent PlatOpypus</h1>
 
     <!-- first run -->
@@ -65,7 +66,7 @@
   <!-- HOME -->
   <section id="tab-home" class="tab" data-tab="home">
     <header class="topbar">
-      <div class="brand"><span class="ring small"><span></span></span><div><div class="brand-name">porthole</div><div class="sub" id="home-sub">…</div></div></div>
+      <div class="brand"><img class="mascot small" src="/mascot.svg" alt="" width="34" height="34"><div><div class="brand-name">PlatOpypus</div><div class="sub" id="home-sub">…</div></div></div>
       <div class="bar-actions">
         <button class="icon-btn" id="home-search" aria-label="Search"><svg class="i"><use href="/sprite.svg#i-search"/></svg></button>
         <button class="icon-btn accent" id="home-new" aria-label="New"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button>
@@ -246,7 +247,7 @@
   <nav class="tabs" aria-label="Sections">
     <div class="nav-head">
       <button class="nav-burger" id="nav-burger" aria-label="Collapse the menu" aria-expanded="true" title="Menu"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <span class="ring small"><span></span></span><span class="nav-brand">porthole</span>
+      <img class="mascot small" src="/mascot.svg" alt="" width="34" height="34"><span class="nav-brand">PlatOpypus</span>
     </div>
     <button data-go="home" class="active" title="Home"><svg class="i"><use href="/sprite.svg#i-home"/></svg><span>Home</span></button>
     <button data-go="shells" title="Shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg><span>Shells</span></button>
