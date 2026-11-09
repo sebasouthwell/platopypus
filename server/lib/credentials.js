@@ -40,7 +40,7 @@ export function rp(req) {
     const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
     const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (req.socket.encrypted ? 'https' : 'http');
     const origin = process.env.PORTHOLE_ORIGIN || `${proto}://${host}`;
-    return { rpID: process.env.PORTHOLE_RPID || hostname, rpName: 'Porthole', origin };
+    return { rpID: process.env.PORTHOLE_RPID || hostname, rpName: 'PlatOpypus', origin };
 }
 
 export function isLoopbackDirect(req) {
@@ -128,7 +128,7 @@ export async function registrationOptions(req, name) {
     const options = await generateRegistrationOptions({
         rpName, rpID,
         userName: 'owner',
-        userDisplayName: 'Porthole owner',
+        userDisplayName: 'PlatOpypus owner',
         attestationType: 'none',
         authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
         excludeCredentials: (s.passkeys || []).map(p => ({ id: p.id, transports: p.transports })),

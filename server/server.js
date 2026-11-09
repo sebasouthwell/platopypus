@@ -1,4 +1,4 @@
-// Porthole server: static UI + JSON API + WebSocket terminals.
+// PlatOpypus server: static UI + JSON API + WebSocket terminals.
 // No framework; Node's http module and `ws` are enough and keep the dependency surface small.
 
 import http from 'node:http';
@@ -192,7 +192,7 @@ const server = http.createServer(async (req, res) => {
     try {
         // Static: UI and vendored libs. Everything else under /api needs auth.
         if (p === '/oauth/callback' && method === 'GET') {
-            if (!auth.authenticate(req)) return send(res, 401, 'Sign in to Porthole first, then start the connection again from the Vault.');
+            if (!auth.authenticate(req)) return send(res, 401, 'Sign in to PlatOpypus first, then start the connection again from the Vault.');
             try {
                 const r = await vault.handleCallback(Object.fromEntries(url.searchParams));
                 res.writeHead(302, { Location: `/?oauth=connected&name=${encodeURIComponent(r.name)}`, ...securityHeaders() });
@@ -421,7 +421,7 @@ const server = http.createServer(async (req, res) => {
             const inline = url.searchParams.get('inline') === '1';
             const ext = path.extname(abs).toLowerCase();
             // Active content (html/svg/xml/js) is shown as plain text and sandboxed, so a file written by any process
-            // on the box can never run script in Porthole's origin with the session cookie.
+            // on the box can never run script in PlatOpypus's origin with the session cookie.
             const active = ['.html', '.htm', '.xhtml', '.svg', '.xml', '.js', '.mjs'].includes(ext);
             const mime = inline ? (active ? 'text/plain; charset=utf-8' : (files.mimeByExt[ext] || 'application/octet-stream')) : 'application/octet-stream';
             res.writeHead(200, {
@@ -533,7 +533,7 @@ const server = http.createServer(async (req, res) => {
             if (!creds.verifyPassword(b.current)) return send(res, 401, { error: 'Current password is not right.' });
             creds.clearPassword(); auth.revokeOtherSessions(req); return send(res, 200, { ok: true });
         }
-        if (p === '/api/security/totp/setup' && method === 'POST') return send(res, 200, totp.setup(req.headers['x-forwarded-host'] || req.headers.host || 'Porthole'));
+        if (p === '/api/security/totp/setup' && method === 'POST') return send(res, 200, totp.setup(req.headers['x-forwarded-host'] || req.headers.host || 'PlatOpypus'));
         if (p === '/api/security/totp/enable' && method === 'POST') { totp.enable((await readJson(req, 1024)).code); auth.revokeOtherSessions(req); return send(res, 200, { ok: true }); }
         if (p === '/api/security/totp/disable' && method === 'POST') { totp.disable((await readJson(req, 1024)).code); auth.revokeOtherSessions(req); return send(res, 200, { ok: true }); }
 
@@ -787,14 +787,14 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.
 update.schedule();
 
 function groupExists(name) { try { return fs.readFileSync('/etc/group', 'utf8').split('\n').some(l => l.startsWith(name + ':')); } catch { return false; } }
-// Porthole first: raise its own priority (the systemd unit does this too; this covers Docker mode and old units).
+// PlatOpypus first: raise its own priority (the systemd unit does this too; this covers Docker mode and old units).
 try { if (os.getPriority() > -10) os.setPriority(process.pid, -10); } catch { /* not allowed: fine */ }
 server.listen(config.port, config.bind, () => {
     log('porthole', `listening on http://${config.bind}:${config.port}  root=${config.root}  state=${config.state}`);
     // iptables rules do not survive a reboot: put the service-account limits back before any live service starts.
     import('./lib/svcuser.js').then(m => { try { if (groupExists(m.GROUP)) m.applyFirewall(); } catch { /* no group yet */ } });
     egress.start().catch(e => log('egress', `not started: ${e.message}`));
-    // Live services that were running when the box went down come back (tmux survives a Porthole restart, not a reboot).
+    // Live services that were running when the box went down come back (tmux survives a PlatOpypus restart, not a reboot).
     setTimeout(() => live.autostart().catch(e => log('live', `autostart: ${e.message}`)), 15_000).unref();
     if (config.bind !== '127.0.0.1' && config.bind !== '::1') {
         log('porthole', `WARNING: bound to ${config.bind}. Make sure only your private network can reach this port.`);

@@ -1,10 +1,10 @@
-# This machine is a Porthole dev box
+# This machine is a PlatOpypus dev box
 
-You are running inside a shell started from Porthole, a phone-driven console. The person is usually on
+You are running inside a shell started from PlatOpypus, a phone-driven console. The person is usually on
 an iPhone, so keep terminal output compact and avoid wide tables.
 
-You may be one of several agents on this box (Claude Code, Codex CLI, Antigravity CLI). Each is started by Porthole
-with the user's chosen flags; do not change permission modes yourself. Porthole installs this same text for each
+You may be one of several agents on this box (Claude Code, Codex CLI, Antigravity CLI). Each is started by PlatOpypus
+with the user's chosen flags; do not change permission modes yourself. PlatOpypus installs this same text for each
 tool (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`) and refreshes the block between the
 `porthole:begin/end` markers on every update; anything written outside the markers is kept.
 
@@ -13,7 +13,7 @@ with your shell tool exactly as shown, whichever agent you are.
 
 ## Secrets: use the vault, never ask for tokens
 
-API keys and OAuth tokens live in the Porthole vault. Before asking the user for a credential:
+API keys and OAuth tokens live in the PlatOpypus vault. Before asking the user for a credential:
 
 1. Run `vault ls` to see what exists: one line per environment variable (e.g. `SPOTIFY_CLIENT_ID`,
    `SPOTIFY_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`, `PG_URL`), with service, auth style
@@ -55,7 +55,7 @@ Say what it is for every time: the title names the service and the role ("Parle 
 service, and `--note` says what the account can do or where the value goes. Never print the values and never say
 "see above": the phone shows a dropdown of shared credentials with one-tap copy for each field.
 
-Porthole shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
+PlatOpypus shows it as a card with reveal and copy buttons (and a "Save to Vault" shortcut) without the values ever
 appearing in the terminal scrollback.
 
 ## Live services (PORTHOLE.md)
@@ -65,14 +65,14 @@ how to start each service, its port, the hostname it should live on, the Vault n
 the operator commands worth having as buttons. The format is in `/opt/porthole/docs/LIVE.md`. Write it when you add
 a service and keep it current; run `live check` after editing. Never put secret values in it: reference Vault names
 (`password: $ADMIN_PASSWORD`, `needs: [DATABASE_URL]`). The user starts, stops and puts services on their hostname
-from the phone; `live status` shows what Porthole sees. Actions that need the service restarted say `restart: true`
+from the phone; `live status` shows what PlatOpypus sees. Actions that need the service restarted say `restart: true`
 (or `stop_first: true` when they change data the running process holds in memory); never call `svc restart` inside an
 action. When the user starts the live service, it takes over the port from any `svc run` test copy in the same folder,
 so stop your own copy (`svc rm <name>`) once the manifest is done rather than leaving two.
 For a quick way to run a project without you, write a `.portholerun` file in its folder (YAML: `run:` required;
 `port`, `before`, `cwd`, `env` (no secrets), `needs` (Vault names), `share: quick|domain|none`, `hostname`, `open`,
 `run_as: service|agent|root`). The user taps it in Files, sees every command and the account it runs as, and starts
-it with its link; Porthole keeps it out of git. Use PORTHOLE.md instead for a service that should stay live.
+it with its link; PlatOpypus keeps it out of git. Use PORTHOLE.md instead for a service that should stay live.
 When a service manages many things of one kind (rooms, game sessions, users), add a `groups:` entry instead of one
 action per thing: a `list` command printing the current ids (one per line, or JSON `[{"id","label"}]`) and actions
 that use `$GROUP_ITEM`. Give the app a small CLI for this (for example `node scripts/rooms.js list|close <id>`); the
@@ -80,7 +80,7 @@ phone shows each group as a dropdown with the items and their commands, plus "Al
 
 ## Session type and security level
 
-Porthole tells you what kind of session this is. At the start of every session run `echo $PORTHOLE_SESSION
+PlatOpypus tells you what kind of session this is. At the start of every session run `echo $PORTHOLE_SESSION
 $PORTHOLE_SECURITY_LEVEL` and, if `PORTHOLE_SECURITY_FILE` is set, **read that file first and follow it for the whole
 session**; it overrides your defaults on how much security work to do (from "build as fast as possible" for a
 throwaway project to boundary tests every iteration and a daily CVE check for professional work). A `control` session
@@ -98,7 +98,7 @@ restarting a system service) run:
 
 The user approves it on the phone; you get the output and exit code. Ask for the smallest command that does the job,
 one at a time, and say why. Exit code 126 means it was denied or not answered: do not retry in a loop, explain what you
-needed instead. Never try to get root another way. Porthole's own files, other users' homes and the box token are off
+needed instead. Never try to get root another way. PlatOpypus's own files, other users' homes and the box token are off
 limits; the box CLIs (vault, credshare, svc, tunnel, live, project) work as usual.
 
 Every `elevate`, `vault run`, `vault get`, `credshare`, server, link and new network destination you use is kept in an audit log the user reviews, filed
@@ -112,7 +112,7 @@ do not look for the value any other way.
 
 ## Long-running servers
 
-Start anything that should keep running (dev server, API, bot, worker) through Porthole so the phone can see it as a
+Start anything that should keep running (dev server, API, bot, worker) through PlatOpypus so the phone can see it as a
 named server, share it, read its log, stop it completely and restart it:
 
     svc run --name "Parle API" --port 8000 -- npm run dev
@@ -143,6 +143,6 @@ signed in through `GH_TOKEN` from the vault or `gh auth login`.
 
 ## Docker
 
-Docker is available. Containers started from Porthole bind ports to 127.0.0.1 and are reached via a
-tunnel. Prefer `docker compose` files inside the project folder so they show up in Porthole's Docker
+Docker is available. Containers started from PlatOpypus bind ports to 127.0.0.1 and are reached via a
+tunnel. Prefer `docker compose` files inside the project folder so they show up in PlatOpypus's Docker
 section.

@@ -219,7 +219,7 @@ function describeSystem(p) {
     if (/codex/.test(c)) return 'Codex CLI';
     if (/agy|antigravity|gemini/.test(c)) return 'Antigravity CLI';
     if (/code-server/.test(c) || p.process === 'code-server') return 'code-server';
-    if (/\/opt\/porthole\//.test(c)) return 'Porthole';
+    if (/\/opt\/porthole\//.test(c)) return 'PlatOpypus';
     return p.process || 'system';
 }
 

@@ -1,6 +1,6 @@
 // Git and GitHub for project folders. Uses the git and gh CLIs via execFile (no shell). A GH_TOKEN in the
 // vault (general scope) is passed to gh/git so pushes, clones and repo creation work without any interactive
-// login; otherwise `gh auth login --web` from a Porthole shell stores credentials in ~/.config/gh.
+// login; otherwise `gh auth login --web` from a PlatOpypus shell stores credentials in ~/.config/gh.
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -178,7 +178,7 @@ export async function publish(rel, { name, description = '' } = {}) {
     const hasCommit = await git(dir, ['rev-parse', 'HEAD']).then(() => true).catch(() => false);
     if (!hasCommit) {
         await git(dir, ['add', '-A']);
-        await git(dir, ['commit', '--allow-empty', '-m', 'Initial commit from Porthole']);
+        await git(dir, ['commit', '--allow-empty', '-m', 'Initial commit from PlatOpypus']);
     }
     const args = ['repo', 'create', repoName, isPrivate ? '--private' : '--public', '--source', dir, '--remote', 'origin', '--push'];
     if (description) args.push('--description', String(description).slice(0, 200));

@@ -15,7 +15,7 @@
 //   run_as: service                # service (the project's own account, default) | agent | root
 //
 // It runs as a registered server (Services → Servers): stop, restart and logs work as usual, and stopping it closes
-// a quick link. Porthole adds .portholerun to the project's .gitignore: it is about this box, not the code.
+// a quick link. PlatOpypus adds .portholerun to the project's .gitignore: it is about this box, not the code.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -58,7 +58,7 @@ function validate(spec, dir) {
     if (typeof spec.run !== 'string' || !spec.run.trim()) errors.push('run: the command to start it is required.');
     if (spec.before !== undefined && typeof spec.before !== 'string') errors.push('before: one command (use && to chain).');
     if (spec.port !== undefined && !(Number.isInteger(Number(spec.port)) && Number(spec.port) > 0 && Number(spec.port) < 65536)) errors.push('port: 1-65535.');
-    if (Number(spec.port) === config.port) errors.push("port: that is Porthole's own port.");
+    if (Number(spec.port) === config.port) errors.push("port: that is PlatOpypus's own port.");
     if (spec.name !== undefined && !NAME_RE.test(slugName(spec.name))) errors.push('name: letters, digits and dashes.');
     if (spec.cwd !== undefined && (path.isAbsolute(String(spec.cwd)) || String(spec.cwd).split(/[\\/]/).includes('..'))) errors.push('cwd: a folder inside this one.');
     const share = spec.share === undefined ? (spec.port ? 'quick' : 'none') : String(spec.share);
@@ -110,7 +110,7 @@ function ensureIgnored(root) {
     let text = ''; try { text = fs.readFileSync(gi, 'utf8'); } catch { /* new */ }
     if (text.split('\n').some(l => [FILE, `/${FILE}`, `**/${FILE}`].includes(l.trim()))) return false;
     if (!fs.existsSync(path.join(root, '.git')) && !text) return false;   // not a repo: nothing to keep it out of
-    fs.writeFileSync(gi, `${text}${text && !text.endsWith('\n') ? '\n' : ''}# Porthole: how this box runs the project (not part of the code)\n**/${FILE}\n`);
+    fs.writeFileSync(gi, `${text}${text && !text.endsWith('\n') ? '\n' : ''}# PlatOpypus: how this box runs the project (not part of the code)\n**/${FILE}\n`);
     return true;
 }
 
@@ -144,8 +144,8 @@ export async function run(file, hash, { restart = false } = {}) {
         } catch (e) { log('portholerun', `${p.name}: link failed: ${e.message}`); link = { error: e.message }; }
     }
     remember(p.slug, p.file, p.hash);
-    if (v.needs.length) record('credential', 'portholerun', { cwd: root, actor: 'Porthole', via: `.portholerun (${account || v.runAs})`, what: p.name, names: v.needs });
-    if (v.runAs === 'root') record('elevate', 'root-start', { cwd: root, actor: 'Porthole', via: '.portholerun', what: p.name, cmd });
+    if (v.needs.length) record('credential', 'portholerun', { cwd: root, actor: 'PlatOpypus', via: `.portholerun (${account || v.runAs})`, what: p.name, names: v.needs });
+    if (v.runAs === 'root') record('elevate', 'root-start', { cwd: root, actor: 'PlatOpypus', via: '.portholerun', what: p.name, cmd });
     log('portholerun', `${restart ? 're' : ''}started ${p.folder}/${FILE} as ${account || v.runAs}${p.port ? ` on :${p.port}` : ''}${link?.url ? ` → ${link.url}` : ''}`);
     return { ...p, started: true, server: { slug: reg.slug, pid: reg.pid || null }, link: link?.url ? { url: link.url + (p.open || ''), kind: link.kind || p.share } : link?.error ? { error: link.error } : null, addedToGitignore: ignored };
 }

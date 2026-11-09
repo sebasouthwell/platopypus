@@ -1,4 +1,4 @@
-# Updating Porthole
+# Updating PlatOpypus
 
 This file is the contract between a running box and a newer version of this repo. Read it before changing
 anything under `server/lib` that reads or writes state, and before changing `install.sh`.
@@ -75,7 +75,7 @@ with mode 0600. Formats as of version 1.0:
 | `update.json`, `update-result.json`, `update.log`, `update.lock` | update.js, bin/porthole-update | check status, last result, log, lock (pid) |
 | `trash/` | files.js | deleted files/folders, `<ISO-stamp>__<name>` |
 
-nginx: zoned shares add `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` (owned and removed by Porthole);
+nginx: zoned shares add `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` (owned and removed by PlatOpypus);
 `install.sh` renders `/etc/nginx/sites-available/porthole` from `deploy/nginx-porthole.conf` (no certificate yet)
 or `deploy/nginx-porthole-ssl.conf` (certificate present) on **every** run; certbot runs in `certonly` mode and
 never edits nginx config. Do not hand-edit the site file on a box; change the template and release.
@@ -84,7 +84,7 @@ Other locations the app relies on but does not own: `~/.claude`, `~/.agent-profi
 profiles = `CLAUDE_CONFIG_DIR`), `~/.codex`, `~/.antigravity`/`~/.gemini`, the agent instruction files
 `~/.porthole/githooks/pre-push` and `~/.porthole/gitignore_global` (installed by `install.sh`, referenced from the service
 user's global git config), `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and each profile's `CLAUDE.md` (only the block
-between `<!-- porthole:begin -->` and `<!-- porthole:end -->` is Porthole's; it is rewritten by `install.sh` on every update), `~/.config/gh`, `~/.ssh/id_ed25519`,
+between `<!-- porthole:begin -->` and `<!-- porthole:end -->` is PlatOpypus's; it is rewritten by `install.sh` on every update), `~/.config/gh`, `~/.ssh/id_ed25519`,
 `~/apps/<app>/` (volumes for catalogue apps), `~/scratch/<date>-<shell>/` (scratch shells; deleted by the server when
 that shell is ended, never by an update), `<project>/.pasted/` (attachments), `/etc/porthole.env`.
 
@@ -180,7 +180,7 @@ phone's Update button. Mechanism:
   verifies the page, the stamped assets and that `app.js` parses, rolling back otherwise. Registered servers: `services.json` (new), routes `GET/POST /api/servers`, `POST /api/servers/run`,
   `POST /api/servers/<slug>/stop|start`, `GET /api/servers/<slug>/logs`, `DELETE /api/servers/<slug>`; `svc` CLI; tmux
   session prefixes `svc-` and `zoned-` are reserved like `tunnel-`. `/api/services` adds `servers` and `system` (ports
-  owned by Porthole, agents and box daemons, never shareable) and excludes both from `devservers`; links carry
+  owned by PlatOpypus, agents and box daemons, never shareable) and excludes both from `devservers`; links carry
   `kind: quick|zoned`. No migration.
 
 - **1.4.0** â€” publishing flag per project: `projects.json` (new), routes `GET/PUT /api/projects/repo`, `GET /api/projects/repo/all`;
@@ -192,7 +192,7 @@ phone's Update button. Mechanism:
 - **1.5.0** â€” share on your own domain: `zoned.json` (new), routes `GET /api/zoned`, `GET /api/zoned/prereq`, `POST /api/zoned`,
   `DELETE /api/zoned/<slug>`; `tunnels.list()` (and therefore `/api/tunnels`, `/api/services.links`, shared-credential
   `openUrl`) includes zoned entries with `kind: zoned`, `hostname`, `slug`, `connected`; `DELETE /api/tunnels/<port>` on a
-  zoned port removes the hostname. Porthole writes `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` on boxes
+  zoned port removes the hostname. PlatOpypus writes `/etc/nginx/sites-{available,enabled}/porthole-zoned-<slug>` on boxes
   with nginx and removes them again; nothing else under /etc/nginx is touched. tmux prefix `zoned-`. No migration.
 
 - **1.6.0** â€” Vault: required fields may be left empty on save (item reported with `incomplete: [labels]`, and `fields[]`
@@ -200,7 +200,7 @@ phone's Update button. Mechanism:
   are used for the one call, never stored). No state change: an item simply lacks some `fields` keys.
 
 - **1.7.0** â€” "Share on your domain" gains **direct** mode (default on a box with a public address, nginx and a Let's Encrypt
-  certificate for the Porthole hostname): A record â†’ box (proxied like the Porthole record), nginx :80/:443 blocks,
+  certificate for the PlatOpypus hostname): A record â†’ box (proxied like the PlatOpypus record), nginx :80/:443 blocks,
   `certbot certonly --webroot` for the hostname (renewed by certbot's timer), no tunnel process. Items without `mode`
   (1.5.0) are treated as tunnel mode. `/api/zoned/prereq` adds `mode`; entries add `mode`. Remove deletes the
   certificate too (`certbot delete`). Only `/etc/nginx/sites-{available,enabled}/porthole-zoned-*` and
@@ -236,7 +236,7 @@ phone's Update button. Mechanism:
   `POST /api/projects/profile/cve-checked`. `project security`, `project cve-checked`. Shells created without `session` behave
   as before.
 
-- **1.11.0** â€” agents start trusted in the folder picked in Porthole (Claude `.claude.json` projects[dir].hasTrustDialogAccepted,
+- **1.11.0** â€” agents start trusted in the folder picked in PlatOpypus (Claude `.claude.json` projects[dir].hasTrustDialogAccepted,
   Codex `config.toml` [projects."dir"] trust_level, Antigravity/Gemini `trustedFolders.json`), written for the user the agent
   runs as; `POST /api/shells` accepts `firstPrompt` (Claude/Codex as an argument via `PORTHOLE_FIRST_PROMPT`, Antigravity typed
   in). Home gains "I wish for:". No state change.
@@ -254,11 +254,11 @@ phone's Update button. Mechanism:
   questions).
 
 - **1.13.0** â€” one-shot runs: `POST /api/shells` accepts `oneshot: true` (Claude `-p` / `codex exec`, auto-approved, scratch
-  folder); when the session ends Porthole stores `{ name, agent, prompt, started, finished, output }` in `~/.porthole/oneshot/<name>.json`
+  folder); when the session ends PlatOpypus stores `{ name, agent, prompt, started, finished, output }` in `~/.porthole/oneshot/<name>.json`
   (30 kept) and deletes the folder. `GET /api/oneshot`. Home Temp gains a â–¾ menu: Temp session / One-shot / results.
 
 - **1.14.0** â€” live services run as **porthole-svc** (no shell, no logins, group porthole-dev; created by `install.sh` or on
-  first use), and so do their actions; Porthole keeps the log and the stop. `run_as: root` in PORTHOLE.md needs approval on
+  first use), and so do their actions; PlatOpypus keeps the log and the stop. `run_as: root` in PORTHOLE.md needs approval on
   the phone, pinned to a hash of the commands (`POST|DELETE /api/live/<p>/<k>/root`). Starting a live service takes over its
   port from a plain server in the same project folder and refuses other holders; servers that die straight after starting
   report their log. `svc restart` and `POST /api/servers/<slug>/restart` (live slugs restart through live.js; names resolve
@@ -268,7 +268,7 @@ phone's Update button. Mechanism:
   **Make agent-ready** (`GET|POST /api/agent-ready`). Agent-started servers log under the agent's home (they could not
   write to `/root/.porthole`).
 
-- **1.14.1** â€” `porthole.service` gains `KillMode=process`: restarting Porthole (every update) no longer ends the tmux
+- **1.14.1** â€” `porthole.service` gains `KillMode=process`: restarting PlatOpypus (every update) no longer ends the tmux
   server, so shells, servers, live services and tunnels survive updates as `tmux.js` always intended. Before this, each
   update ended every session on the box. No state change.
 
@@ -276,7 +276,7 @@ phone's Update button. Mechanism:
   home `/var/lib/porthole-svc/<project>`), with a POSIX ACL on that project only (plus default ACLs, and `o::---`;
   marker `<project>/.porthole/acl.json`); top-level project folders lose all "other" permissions; agent shells use
   `umask 007`. The 1.14.0 shared `porthole-svc` account is removed from `porthole-dev`. iptables/ip6tables `OUTPUT`
-  rules (re-applied at every start) reject `porthole-svcs` traffic to the EC2 metadata service and Porthole's port; the
+  rules (re-applied at every start) reject `porthole-svcs` traffic to the EC2 metadata service and PlatOpypus's port; the
   live list reports `firewall: { ok, detail }`, `account`, `vaultNames`. **Behaviour change:** a service now receives
   only the Vault names in its `needs:` (before: every general and project value). Root approvals also pin the
   project's code, so 1.14.0 approvals ask once more. `install.sh` adds `acl` and `iptables`. CI (`.github/workflows`):
@@ -315,7 +315,7 @@ phone's Update button. Mechanism:
   **`.portholerun`:** a small YAML file in a project folder (`run`, `port`, `before`, `cwd`, `env`, `needs`,
   `share`, `hostname`, `open`, `run_as`). Files shows a Run card for that folder; tapping shows every command, the
   account (the project's own by default), what gets shared and which Vault names, and runs it only with the hash of
-  what was shown. It runs as a registered server (`run-<name>`), opens its link, and Porthole adds it to the
+  what was shown. It runs as a registered server (`run-<name>`), opens its link, and PlatOpypus adds it to the
   project's .gitignore. No state change.
 
 - **1.17.1** â€” **Drag and drop in Files** (mouse): drop files or whole folders from the computer onto the list
@@ -395,12 +395,12 @@ phone's Update button. Mechanism:
   bot + chat" entries; add one from the page), to its saved chat or one picked from the chats the bot has seen. On by
   default once set up: root requests waiting, sign-ins and lockouts, agents opening public links, servers stopping by
   themselves. Off by default: new connections, agent Vault use, agent commits. Pause 1 h / 8 h. Messages link back to
-  Porthole; nothing can be approved from Telegram. At most 20 per 10 minutes, the rest summarised. **Network egress
+  PlatOpypus; nothing can be approved from Telegram. At most 20 per 10 minutes, the rest summarised. **Network egress
   log** (Audit log â†’ Network): an iptables chain `PORTHOLE-EGRESS` (jumped to from OUTPUT, IPv4 and IPv6) logs new
-  connections from the agent user, `porthole-svc` and the `porthole-svcs` group to the kernel log; Porthole follows
+  connections from the agent user, `porthole-svc` and the `porthole-svcs` group to the kernel log; PlatOpypus follows
   `journalctl -k` and `resolvectl monitor` to name them. Root processes are not logged. The first connection from a
   project to a host is an audit line of the new type `network`. `PORTHOLE_EGRESS=0` turns it off; without journald
-  it reports itself off. New state: `alerts.json`, `egress/` (additive). Porthole now exits cleanly on SIGTERM.
+  it reports itself off. New state: `alerts.json`, `egress/` (additive). PlatOpypus now exits cleanly on SIGTERM.
 - **1.23.0** â€” **Container services.** A `PORTHOLE.md` service may give `image:` instead of `start:` (with
   `container_port`, `volumes: [<folder in the project>:<path in the container>[:ro]]`, `command`, `memory`, `user:
   service|image`). It runs through the service registry as `docker run --rm` attached in the pane (registry `runAs:
@@ -410,22 +410,22 @@ phone's Update button. Mechanism:
   **Update image** button. Live services that were running at shutdown (`stoppedAt` null, session gone) are started
   again 15 s after boot. Egress: `DOCKER-USER` gets a LOG rule for new connections off `docker0` (rows say
   `container "<name>"`) and a REJECT for 169.254.169.254. Root volume default 50 GB in Terraform. No new state.
-- **1.23.1** — Container services: settings under `env:` reach the container by value (`-e K=V`), Vault values and Porthole's own names by name only; `PATH` is never passed. Needed so an image can be given `HOME` or its own settings.
+- **1.23.1** — Container services: settings under `env:` reach the container by value (`-e K=V`), Vault values and PlatOpypus's own names by name only; `PATH` is never passed. Needed so an image can be given `HOME` or its own settings.
 - **1.24.0** — **Stat bubbles.** Every shell, live service, server and container shows its memory (resident plus
   swapped, over the whole process tree; containers from `docker stats`) and CPU (% of one core): amber past 400 MB or
   60 %, red past 900 MB. The Shells tab opens with a box line (memory, swap, load) that turns amber when the box is
   short. New route `GET /api/usage` (lib/usage.js, sampled from /proc at most every 3 s). No new state.
 - **1.25.0** — **Limit reached** (More → Alerts): when the 1-minute load stays over the limit (10, `PORTHOLE_LIMIT_LOAD`
-  or the page) for two 30 s checks, Porthole closes every public quick link, then stops what is not a live service,
+  or the page) for two 30 s checks, PlatOpypus closes every public quick link, then stops what is not a live service,
   worst first (CPU + memory incl. swap, newest first on a tie): registered servers, `.portholerun` runs, containers.
   It stops one, waits 30 s, and goes on only while the load is still over 70 % of the limit; 10-minute cooldown.
   Live services, hostnames on your domain and shells are never touched; nothing is deleted. Alert kind `limit` (on
   by default), audit `limit-reached` / `limit-changed`, routes `GET/PUT /api/limit`, `POST /api/limit/run` (`dry`
   for a preview). New state `limit.json` (`{ on, load, last }`). **Device priority:** the systemd unit gets
   `Nice=-10 CPUWeight=1000 IOWeight=1000 MemoryLow=256M OOMScoreAdjust=-900` (plus `system.slice` `MemoryLow=384M` and an
-  nginx drop-in), Porthole raises its own nice at start in Docker mode, and the tmux server is started through
+  nginx drop-in), PlatOpypus raises its own nice at start in Docker mode, and the tmux server is started through
   `systemd-run --scope` (CPUWeight 100, OOMScoreAdjust 500) at nice 0, so shells, servers and tunnels live outside
-  Porthole's cgroup at normal priority and survive its restarts as before. Existing tmux servers are untouched until
+  PlatOpypus's cgroup at normal priority and survive its restarts as before. Existing tmux servers are untouched until
   they next exit (end every shell once, or reboot, for the new scope).
 - **1.25.1** — Shell scope: `systemd-run --scope` was given `OOMScoreAdjust`, which scopes refuse, so on a systemd box no
   new shell or service could start under 1.25.0. Scopes now carry `CPUWeight`/`IOWeight` only, and any scope failure
@@ -441,6 +441,11 @@ phone's Update button. Mechanism:
   New state `backups.json` (`{ keep, daily, projects: { name: { daily, last, lastError } } }`) and a scratch folder
   `backup-tmp/`. install.sh now installs `zstd` (backups need it; a box updated from an older release gets it on
   update). A spawn failure in a backup fails that backup, never the server.
+- **1.27.0** — **Renamed: Agent PlatOpypus** (PlatOpypus in the app and the docs). Brand only: the UI, README, docs,
+  agent instructions and repository (`github.com/sebasouthwell/platopypus`; the old URL redirects, and the updater's
+  default repo follows). A project may call its manifest `PLATOPYPUS.md`; `PORTHOLE.md` keeps working. The box gets a
+  `plato` command beside `porthole`. Nothing on disk moves: `~/.porthole`, the `porthole` service and accounts, the
+  `PORTHOLE_*` variables, the `X-Porthole` header, `.portholerun` and your hostnames are unchanged (that is a 2.0).
 
 ## Release checklist
 

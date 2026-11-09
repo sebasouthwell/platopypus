@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Porthole box installer for Ubuntu 24.04. Idempotent: safe to re-run for upgrades.
+# PlatOpypus box installer for Ubuntu 24.04. Idempotent: safe to re-run for upgrades.
 #
 # Usage (as root):
 #   PORTHOLE_SRC=/path/to/porthole ./install.sh                      # full box: tools, Tailscale, nginx, systemd
@@ -106,7 +106,7 @@ if [ "$PORTHOLE_USER" = root ]; then   # files root is / for a root install (see
     install -d -m 0755 /Projects
     if [ ! -e "$HOME_DIR/Projects" ]; then ln -s /Projects "$HOME_DIR/Projects"
     elif [ -d "$HOME_DIR/Projects" ] && [ ! -L "$HOME_DIR/Projects" ] && [ -z "$(ls -A "$HOME_DIR/Projects")" ]; then rmdir "$HOME_DIR/Projects" && ln -s /Projects "$HOME_DIR/Projects"
-    elif [ -d "$HOME_DIR/Projects" ] && [ ! -L "$HOME_DIR/Projects" ]; then echo "note: $HOME_DIR/Projects and /Projects both hold projects; merge them (Porthole lists /Projects)"; fi
+    elif [ -d "$HOME_DIR/Projects" ] && [ ! -L "$HOME_DIR/Projects" ]; then echo "note: $HOME_DIR/Projects and /Projects both hold projects; merge them (PlatOpypus lists /Projects)"; fi
 fi
 
 # ---------- agent user (docs/AGENT-USER.md stage 1): AI agents can run without root ----------
@@ -115,7 +115,7 @@ getent group porthole-dev >/dev/null || groupadd --system porthole-dev
 id "$AGENT_USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --user-group "$AGENT_USER"
 usermod -aG porthole-dev "$AGENT_USER"; usermod -aG porthole-dev "$PORTHOLE_USER" 2>/dev/null || true
 passwd -l "$AGENT_USER" >/dev/null 2>&1 || true
-# Live services run as one account per project (ps-<project>, primary group porthole-svcs), created by Porthole on
+# Live services run as one account per project (ps-<project>, primary group porthole-svcs), created by PlatOpypus on
 # first start with an ACL on that project only (server/lib/svcuser.js). The 1.14.0 shared account loses its access.
 getent group porthole-svcs >/dev/null || groupadd --system porthole-svcs
 install -d -m 0755 /var/lib/porthole-svc
@@ -204,13 +204,14 @@ chown "$PORTHOLE_USER:$PORTHOLE_USER" "$APP_DIR/VERSION"
 ln -sf "$APP_DIR/bin/tunnel" /usr/local/bin/tunnel
 ln -sf "$APP_DIR/bin/vault" /usr/local/bin/vault
 ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/porthole
+ln -sf "$APP_DIR/bin/porthole" /usr/local/bin/plato
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credshare
 ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
 ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
 ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
 ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
-# Publishing gate: a global pre-push hook asks Porthole whether the folder is flagged as a repo; .pasted/ never enters git.
+# Publishing gate: a global pre-push hook asks PlatOpypus whether the folder is flagged as a repo; .pasted/ never enters git.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$HOME_DIR/.porthole/githooks"
 install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$APP_DIR/deploy/githooks/pre-push" "$HOME_DIR/.porthole/githooks/pre-push"
 install -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0644 "$APP_DIR/deploy/gitignore_global" "$HOME_DIR/.porthole/gitignore_global"
@@ -227,8 +228,8 @@ install_agent_md() {
         if [ -f "$file" ]; then
             if grep -q '<!-- porthole:begin -->' "$file"; then
                 awk '/<!-- porthole:begin -->/{skip=1} !skip{print} /<!-- porthole:end -->/{skip=0}' "$file"
-            elif grep -q '^# This machine is a Porthole dev box' "$file"; then
-                awk '/^# This machine is a Porthole dev box/{exit} {print}' "$file"
+            elif grep -q '^# This machine is a PlatOpypus dev box' "$file"; then
+                awk '/^# This machine is a PlatOpypus dev box/{exit} {print}' "$file"
             else
                 cat "$file"; printf '\n'
             fi
@@ -260,7 +261,7 @@ if [ "$MODE" = "box" ]; then
     say "systemd service"
     cat > /etc/systemd/system/porthole.service <<EOF
 [Unit]
-Description=Porthole phone console
+Description=PlatOpypus phone console
 After=network-online.target
 Wants=network-online.target
 
@@ -278,14 +279,14 @@ Environment=LANG=C.UTF-8
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=2
-# Stop/restart ends only Porthole's own process: the tmux server (every shell, server, live service and tunnel) lives
-# in this cgroup too and must survive updates. Porthole re-attaches to it on start.
+# Stop/restart ends only PlatOpypus's own process: the tmux server (every shell, server, live service and tunnel) lives
+# in this cgroup too and must survive updates. PlatOpypus re-attaches to it on start.
 KillMode=process
 # Shells need a full environment, so no sandboxing beyond running unprivileged.
 NoNewPrivileges=no
-# The phone must stay responsive whatever the agents do: Porthole goes first for CPU and disk, keeps 256 MB of its
+# The phone must stay responsive whatever the agents do: PlatOpypus goes first for CPU and disk, keeps 256 MB of its
 # memory out of reclaim, and is the last thing the OOM killer picks. Shells, servers and tunnels run in their own
-# scope (see server/lib/tmux.js) at normal priority, so this covers Porthole's own process only.
+# scope (see server/lib/tmux.js) at normal priority, so this covers PlatOpypus's own process only.
 Nice=-10
 CPUWeight=1000
 IOWeight=1000
@@ -305,7 +306,7 @@ EOF
     systemctl try-restart nginx 2>/dev/null || true
 
     # ---------- nginx + let's encrypt ----------
-    # nginx config is rendered by Porthole on every run (safe for updates); certbot only obtains/renews the
+    # nginx config is rendered by PlatOpypus on every run (safe for updates); certbot only obtains/renews the
     # certificate (certonly), never edits config. With a certificate: redirect + 443 server; without: plain 80.
     if [ -n "$PORTHOLE_DOMAIN" ]; then
         [ -n "$LE_EMAIL" ] || { echo "LE_EMAIL is required with PORTHOLE_DOMAIN"; exit 1; }

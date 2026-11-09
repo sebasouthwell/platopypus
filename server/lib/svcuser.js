@@ -2,8 +2,8 @@
 // no sudo, no logins or keys, its own home for caches, and the primary group porthole-svcs (used only to match
 // firewall rules; no file is shared through it). It reaches exactly one folder — its project — through a POSIX ACL;
 // it is not in porthole-dev, and projects carry no permissions for "other", so one compromised app cannot read
-// another project, the agent's home or Porthole's state. The firewall refuses these accounts the EC2 metadata
-// service (the box's AWS role) and Porthole's own API. Porthole (root) stays the controller: it starts the process,
+// another project, the agent's home or PlatOpypus's state. The firewall refuses these accounts the EC2 metadata
+// service (the box's AWS role) and PlatOpypus's own API. PlatOpypus (root) stays the controller: it starts the process,
 // owns the log, and stops or kills the whole process group.
 
 import fs from 'node:fs';
@@ -39,17 +39,17 @@ export function info(user) {
     return { user, uid: Number(uid), gid: Number(gid), home };
 }
 
-// sbin tools by absolute path: Porthole's service PATH may not include sbin.
+// sbin tools by absolute path: PlatOpypus's service PATH may not include sbin.
 const sbin = name => ['/usr/sbin/', '/sbin/', '/usr/bin/', '/bin/'].map(d => d + name).find(f => fs.existsSync(f)) || name;
 const have = async bin => { try { await run('sh', ['-c', `command -v ${bin}`]); return true; } catch { return false; } };
 
-// ---- firewall: no metadata service, no Porthole API for any service account ----
+// ---- firewall: no metadata service, no PlatOpypus API for any service account ----
 let firewall = { ok: null, detail: 'not applied yet' };
 export function firewallState() { return firewall; }
 export async function applyFirewall() {
     const rules = [
         ['iptables', ['-d', '169.254.169.254']],                               // EC2 metadata (instance role keys)
-        ['iptables', ['-d', '127.0.0.1', '-p', 'tcp', '--dport', String(config.port)]], // Porthole's API
+        ['iptables', ['-d', '127.0.0.1', '-p', 'tcp', '--dport', String(config.port)]], // PlatOpypus's API
         ['ip6tables', ['-d', 'fd00:ec2::254']],                                // EC2 metadata over IPv6
         ['ip6tables', ['-d', '::1', '-p', 'tcp', '--dport', String(config.port)]],
     ];
@@ -61,7 +61,7 @@ export async function applyFirewall() {
             done.push(`${bin} ${match.join(' ')}`);
         } catch (e) { failed.push(`${bin}: ${String(e.stderr || e.message).trim().split('\n')[0]}`); }
     }
-    firewall = failed.length ? { ok: false, detail: `Could not add ${failed.length} of ${rules.length} firewall rules (${failed[0]}). Service accounts may reach the metadata service or Porthole's API.` } : { ok: true, detail: 'Service accounts cannot reach the EC2 metadata service or Porthole\'s API.' };
+    firewall = failed.length ? { ok: false, detail: `Could not add ${failed.length} of ${rules.length} firewall rules (${failed[0]}). Service accounts may reach the metadata service or PlatOpypus's API.` } : { ok: true, detail: 'Service accounts cannot reach the EC2 metadata service or PlatOpypus\'s API.' };
     if (failed.length) log('svcuser', firewall.detail); else log('svcuser', `firewall: ${done.length} rules for ${GROUP}`);
     return firewall;
 }
@@ -139,7 +139,7 @@ const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const okName = n => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && !['PATH', 'HOME'].includes(n);
 
 // Shell text that runs cmd as the account. Used inside a root pane shell, so tee and the log stay root's.
-// env -i: the app starts with only its own variables (passed by name from the pane), never Porthole's environment.
+// env -i: the app starts with only its own variables (passed by name from the pane), never PlatOpypus's environment.
 export function wrapShell(user, cmd, envNames = []) {
     const a = info(user); if (!a) throw httpError(500, `No account ${user}.`);
     const pass = envNames.filter(okName).map(n => `${n}="$${n}"`).join(' ');

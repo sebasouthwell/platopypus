@@ -70,7 +70,7 @@ export function set(dir, { level, audience, tier }) {
     const p = { level, ...(level === 'personal' ? { audience } : {}), ...(level === 'professional' ? { tier } : {}), set: Date.now(), ...(prev?.lastCveCheck ? { lastCveCheck: prev.lastCveCheck } : {}) };
     writeShared(path.join(meta, 'project.json'), JSON.stringify(p, null, 2) + '\n');
     const key = docKey(p);
-    writeShared(path.join(meta, 'security.md'), `<!-- Written by Porthole for this project's security level (${key}). Change the level on the phone, not here. -->\n\n` + fs.readFileSync(docPath(key), 'utf8'));
+    writeShared(path.join(meta, 'security.md'), `<!-- Written by PlatOpypus for this project's security level (${key}). Change the level on the phone, not here. -->\n\n` + fs.readFileSync(docPath(key), 'utf8'));
     ensureIgnored(root);
     log('profile', `${path.basename(root)} → ${key}`);
     return get(root);

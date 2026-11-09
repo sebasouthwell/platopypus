@@ -213,7 +213,7 @@ export async function quickRunWithVolumes({ image, name, ports = [], env = {}, r
     for (const p of ports) {
         const host = Number(p.host), cont = Number(p.container);
         if (!Number.isInteger(host) || !Number.isInteger(cont) || host < 1 || host > 65535 || cont < 1 || cont > 65535) throw httpError(400, 'Ports must be 1–65535.');
-        // Bind to loopback: reach it via a Porthole tunnel, not the public interface.
+        // Bind to loopback: reach it via a PlatOpypus tunnel, not the public interface.
         args.push('-p', `127.0.0.1:${host}:${cont}`);
     }
     for (const [k, v] of Object.entries(env)) {

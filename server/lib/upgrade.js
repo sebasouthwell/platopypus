@@ -1,7 +1,7 @@
 // Upgrade repo: rebuild a prototype as a new project at a higher security level, instead of hardening it in place.
 // The original stays untouched; the new project gets a read-only snapshot of it (.porthole/prototype), a brief
 // (.porthole/UPGRADE.md) and a first agent prompt that asks for an architecture proposal before any code.
-// The link between the two lives in Porthole's state (project-links.json), so the original folder is not written to.
+// The link between the two lives in PlatOpypus's state (project-links.json), so the original folder is not written to.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -43,7 +43,7 @@ async function commitOf(dir) {
 }
 
 function brief({ srcName, srcPath, srcLevel, destName, levelKey, levelTitle, commit }) {
-    return `<!-- Written by Porthole when ${destName} was created with "Upgrade repo". -->
+    return `<!-- Written by PlatOpypus when ${destName} was created with "Upgrade repo". -->
 # Upgrade: ${srcName} → ${destName}
 
 **Prototype:** \`${srcPath}\`${commit ? ` (commit ${commit})` : ''} · ${srcLevel || 'no security level set'}
@@ -67,7 +67,7 @@ the user experiences; replace what only made it quick to build.
 4. **Rebuild while keeping the intended behaviour.** Use the prototype as the functional reference. Write new code
    where its structure cannot meet the target level; reuse what is already sound.
 5. **Verify before anything replaces it.** Functional tests, security-boundary tests (every privileged action tried
-   with the wrong role and the wrong object, e.g. another room's id), and a deployment rehearsal as a Porthole live
+   with the wrong role and the wrong object, e.g. another room's id), and a deployment rehearsal as a PlatOpypus live
    service (PORTHOLE.md). Compare behaviour with the prototype before presenting it.
 
 ## First: the proposal (then stop)

@@ -1,9 +1,9 @@
 // Credential vault, modelled on n8n's credentials: each entry is a service + auth style with typed fields,
 // stored AES-256-GCM encrypted in state/vault.json (key in state/vault.key, 0600). Fields are exported to
 // shells as <PREFIX>_<FIELD> environment variables; OAuth2 entries hold client details plus the tokens
-// obtained through Porthole's own redirect endpoint and are refreshed automatically when they expire.
+// obtained through PlatOpypus's own redirect endpoint and are refreshed automatically when they expire.
 //
-// Scope: "general" entries reach every shell Porthole starts; a project-scoped entry (relative folder path)
+// Scope: "general" entries reach every shell PlatOpypus starts; a project-scoped entry (relative folder path)
 // only reaches shells started inside that folder. The `vault` CLI reads the same files, so agents can fetch
 // a token without the user pasting it into a prompt. Values are never listed; reveal is explicit and logged.
 
@@ -249,7 +249,7 @@ export async function reveal(id, who = '', field = null) {
     return { id: it.id, values: out, envName: first, value: first ? out[first] : undefined };
 }
 
-// Decrypted fields of one entry, by field name, for Porthole's own use (alerts send with the Telegram bot token).
+// Decrypted fields of one entry, by field name, for PlatOpypus's own use (alerts send with the Telegram bot token).
 // Never returned by an API route.
 export function valuesOf(id) {
     const raw = load().items.find(i => i.id === id);

@@ -1,7 +1,7 @@
 # Cloud accounts for agents — request, approve, scope (roadmap, not built)
 
 Agents never hold a cloud account's own key. When an agent in a project needs AWS (or another provider), it asks,
-the user approves a scope on the phone, and Porthole hands out short-lived credentials that the provider itself
+the user approves a scope on the phone, and PlatOpypus hands out short-lived credentials that the provider itself
 restricts to that scope. The scope file the agent reads is the explanation; the provider is the enforcement.
 
 ## Flow
@@ -38,11 +38,11 @@ restricts to that scope. The scope file the agent reads is the explanation; the 
    without a tap. Everything is always limited to resources tagged or named for this project, so no checkbox can
    reach another project or anything the box itself uses.
 
-   Porthole owns the translation from checkboxes to each provider's real permissions (AWS IAM actions, GCP roles,
+   PlatOpypus owns the translation from checkboxes to each provider's real permissions (AWS IAM actions, GCP roles,
    Azure built-in roles, Cloudflare token permission groups, Vercel project-scoped tokens) in one mapping file per
    provider. Neither the user nor the agent ever writes provider permission names.
 
-3. **Porthole records the grant** in the project as `cloud-scope.yaml` (read-only for agents, committed only if the
+3. **PlatOpypus records the grant** in the project as `cloud-scope.yaml` (read-only for agents, committed only if the
    user wants) and in its own state, with who approved it and when.
 
 4. **The agent gets credentials, never the key.** `cloud creds aws` (from the project's main folder only, like
@@ -57,21 +57,21 @@ restricts to that scope. The scope file the agent reads is the explanation; the 
 
 ## Account setup: assigned role or stored key
 
-A Cloud accounts profile gets its identity one of two ways. Porthole prefers the first and detects it on its own.
+A Cloud accounts profile gets its identity one of two ways. PlatOpypus prefers the first and detects it on its own.
 
 - **Assigned role (preferred).** The box itself is given an identity by the platform: an EC2 instance profile on AWS,
-  an attached service account on GCP, a managed identity on Azure. Porthole finds it at start-up through the
+  an attached service account on GCP, a managed identity on Azure. PlatOpypus finds it at start-up through the
   platform's metadata service (IMDSv2 on AWS) and shows the profile as *assigned role · no stored key*. Nothing
   secret is stored in the Vault; credentials rotate automatically.
 - **Stored key (fallback).** For accounts the box does not live in, or local test boxes: a key in the Vault, used
-  only to assume the Porthole role in that account.
+  only to assume the PlatOpypus role in that account.
 
-Either way the identity Porthole holds can do exactly one useful thing: assume `porthole-agent`, a role created at
+Either way the identity PlatOpypus holds can do exactly one useful thing: assume `porthole-agent`, a role created at
 setup whose own policy is the outer limit (tag-scoped create/delete, no IAM user or key creation, no billing, no
 organisation changes). Each grant then narrows it further with a session policy for one project and its
 checkboxes. The permission model is the same whichever way the identity arrived.
 
-**Perks of an assigned role, used throughout Porthole** (each still subject to its own checkbox or setting):
+**Perks of an assigned role, used throughout PlatOpypus** (each still subject to its own checkbox or setting):
 backups to the private S3 bucket without a stored key, reading `/porthole/*` SSM parameters at boot, the cost line
 on Cloud accounts from Cost Explorer, Terraform for own-host services without exporting keys, and the box's own
 start/stop schedule.
@@ -79,7 +79,7 @@ start/stop schedule.
 **Keeping agents off the box's identity.** The metadata service is reachable by any process on the box, so it is
 locked down: the instance role itself only allows `sts:AssumeRole` on `porthole-agent` (and the perks above), IMDSv2
 is required with a hop limit of 1 so containers cannot reach it, and an nftables rule drops traffic to
-169.254.169.254 from every user except the one Porthole runs as. That last rule only bites once agents run as their
+169.254.169.254 from every user except the one PlatOpypus runs as. That last rule only bites once agents run as their
 own non-root user, which this design assumes; while agents run as root it is a speed bump, and the narrow instance
 role is what limits the damage.
 

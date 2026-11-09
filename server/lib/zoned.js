@@ -1,8 +1,8 @@
 // "Share on your domain": a hostname in the user's own Cloudflare zone (parle.example.com) in front of a local port.
 //
 // Two modes, picked automatically:
-//   direct  (default on a box with a public address, nginx and Let's Encrypt, i.e. the same setup Porthole itself uses)
-//           1. find the zone; 2. A record hostname → the box (proxied through Cloudflare like the Porthole hostname, so
+//   direct  (default on a box with a public address, nginx and Let's Encrypt, i.e. the same setup PlatOpypus itself uses)
+//           1. find the zone; 2. A record hostname → the box (proxied through Cloudflare like the PlatOpypus hostname, so
 //           the security group stays closed to everything but Cloudflare's edge); 3. nginx server block on :80 with the
 //           ACME path; 4. certbot certonly (webroot) for the hostname; 5. nginx :443 block with that certificate
 //           proxying to the port. Renewal rides on certbot's timer. No tunnel process at all.
@@ -96,7 +96,7 @@ async function findZone(token, hostname) {
     }
     throw httpError(404, `No Cloudflare zone for ${hostname} is visible to this token.`);
 }
-// The box's public address: the A record Porthole itself is served from (no metadata-service dependency).
+// The box's public address: the A record PlatOpypus itself is served from (no metadata-service dependency).
 async function boxAddress(token, zone) {
     const recs = await cf(token, 'GET', `/zones/${zone.id}/dns_records?type=A&name=${encodeURIComponent(porthole())}`);
     if (!recs.length) throw httpError(502, `No A record for ${porthole()} in the zone; cannot tell the box's address.`);
@@ -120,7 +120,7 @@ const PROXY = port => `
         proxy_buffering off;
         proxy_connect_timeout 3s;`;
 function blockHttp(host) {
-    return `# Porthole share: ${host}. Created and removed by Porthole; do not edit.
+    return `# PlatOpypus share: ${host}. Created and removed by PlatOpypus; do not edit.
 server {
     listen 80;
     listen [::]:80;
@@ -148,7 +148,7 @@ server {
 `;
 }
 function blockLoopback(host, port) {
-    return `# Porthole share (tunnel): ${host} → 127.0.0.1:${port}. Created and removed by Porthole; do not edit.
+    return `# PlatOpypus share (tunnel): ${host} → 127.0.0.1:${port}. Created and removed by PlatOpypus; do not edit.
 server {
     listen 127.0.0.1:80;
     server_name ${host};
@@ -211,10 +211,10 @@ export async function list() {
 export async function create({ port, hostname, name = '', takeOver = false }) {
     const p = Number(port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) throw httpError(400, 'Port must be between 1 and 65535.');
-    if (p === config.port) throw httpError(403, 'Porthole itself cannot be exposed this way.');
+    if (p === config.port) throw httpError(403, 'PlatOpypus itself cannot be exposed this way.');
     const host = String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
     if (!HOST_RE.test(host)) throw httpError(400, 'Hostname must be a full name in your domain, like app.example.com.');
-    if (host === porthole()) throw httpError(403, 'That is the Porthole hostname.');
+    if (host === porthole()) throw httpError(403, 'That is the PlatOpypus hostname.');
     const token = cfToken();
     if (!token) throw httpError(412, (await prereq()).reason);
     const slug = slugify(host);
@@ -237,7 +237,7 @@ export async function create({ port, hostname, name = '', takeOver = false }) {
         if (mode === 'direct') {
             it.via = 'nginx + Let\'s Encrypt';
             const addr = await boxAddress(token, zone);
-            const rec = await cf(token, 'POST', `/zones/${zone.id}/dns_records`, { type: 'A', name: host, content: addr.ip, proxied: addr.proxied, ttl: 1, comment: 'Porthole share' });
+            const rec = await cf(token, 'POST', `/zones/${zone.id}/dns_records`, { type: 'A', name: host, content: addr.ip, proxied: addr.proxied, ttl: 1, comment: 'PlatOpypus share' });
             it.dnsRecordId = rec.id;
             await nginxApply(slug, blockHttp(host));
             await certbotObtain(host);
@@ -253,7 +253,7 @@ export async function create({ port, hostname, name = '', takeOver = false }) {
             it.token = encrypt(String(runToken));
             const service = nginx ? 'http://127.0.0.1:80' : `http://${it.origin}:${p}`;
             await cf(token, 'PUT', `/accounts/${zone.accountId}/cfd_tunnel/${tunnel.id}/configurations`, { config: { ingress: [{ hostname: host, service, originRequest: nginx ? { httpHostHeader: host } : {} }, { service: 'http_status:404' }] } });
-            const rec = await cf(token, 'POST', `/zones/${zone.id}/dns_records`, { type: 'CNAME', name: host, content: `${tunnel.id}.cfargotunnel.com`, proxied: true, ttl: 1, comment: 'Porthole share (tunnel)' });
+            const rec = await cf(token, 'POST', `/zones/${zone.id}/dns_records`, { type: 'CNAME', name: host, content: `${tunnel.id}.cfargotunnel.com`, proxied: true, ttl: 1, comment: 'PlatOpypus share (tunnel)' });
             it.dnsRecordId = rec.id;
             if (nginx) await nginxApply(slug, blockLoopback(host, p));
             await startSession(it, String(runToken));

@@ -327,7 +327,7 @@ mkdir -p /Projects/smoke-live/www && echo smoke-container > /Projects/smoke-live
     sh('rm -rf /Projects/smoke-live');
 }
 
-// 6h2. Live services run as their project's own account (ps-<project>); Porthole controls them. Typed inputs, stop_first, take-over, restart, root approval.
+// 6h2. Live services run as their project's own account (ps-<project>); PlatOpypus controls them. Typed inputs, stop_first, take-over, restart, root approval.
 {
     const { execFileSync } = await import('node:child_process');
     const sh = (cmd) => execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -405,20 +405,20 @@ rm -rf /Projects/smoke-other && mkdir -p /Projects/smoke-other && echo other-pro
     check('the live service runs as its project account', owner === 'ps-smoke-count', owner);
     const svcSh = (cmd) => { try { return sh(`/usr/sbin/runuser -u ps-smoke-count -- bash -c ${JSON.stringify(cmd)} 2>&1; echo "rc=$?"`); } catch (e) { return String(e.stdout || e.message); } };
     check('the account cannot read another project (even world-readable files)', /rc=[1-9]/.test(svcSh('cat /Projects/smoke-other/secret.txt')) && !/other-project-secret/.test(svcSh('cat /Projects/smoke-other/secret.txt')), svcSh('cat /Projects/smoke-other/secret.txt').slice(0, 120));
-    check('the account cannot read the agent home or Porthole state', /rc=[1-9]/.test(svcSh('ls /home/agent')) && /rc=[1-9]/.test(svcSh('ls /root/.porthole')));
+    check('the account cannot read the agent home or PlatOpypus state', /rc=[1-9]/.test(svcSh('ls /home/agent')) && /rc=[1-9]/.test(svcSh('ls /root/.porthole')));
     check('the account is not in porthole-dev', !/porthole-dev/.test(sh('id ps-smoke-count')), sh('id ps-smoke-count').trim());
     check('the account can write its own project', /rc=0/.test(svcSh('touch /Projects/smoke-count/data/probe && echo ok')));
     const fw = (await call('/api/live')).body.find(p => p.project === 'smoke-count')?.services[0]?.firewall;
     if (fw?.ok) {
-        check('the account cannot reach Porthole\'s API', /rc=[1-9]/.test(svcSh('curl -s -m 3 -o /dev/null http://127.0.0.1:7331/api/me')));
+        check('the account cannot reach PlatOpypus\'s API', /rc=[1-9]/.test(svcSh('curl -s -m 3 -o /dev/null http://127.0.0.1:7331/api/me')));
         check('the account cannot reach the metadata service', /rc=[1-9]/.test(svcSh('curl -s -m 3 -o /dev/null http://169.254.169.254/')));
     } else console.log(`SKIP  firewall checks — ${fw?.detail || 'no state'} (run the container with --cap-add NET_ADMIN)`);
     const envKeys = JSON.parse(await get('/env') || '[]');
-    check('the service sees no Porthole environment', !envKeys.some(k => /^PORTHOLE_(TOKEN|STATE|PORT)$|^TMUX|^SSH_/.test(k)) && envKeys.includes('PORTHOLE_SERVICE'), envKeys.join(' '));
+    check('the service sees no PlatOpypus environment', !envKeys.some(k => /^PORTHOLE_(TOKEN|STATE|PORT)$|^TMUX|^SSH_/.test(k)) && envKeys.includes('PORTHOLE_SERVICE'), envKeys.join(' '));
     check('the service gets no Vault value it did not list under needs', !envKeys.includes('SMOKE_GENERAL_SECRET'), envKeys.join(' '));
-    check('Porthole (root) still has the log', /./.test(sh('cat /root/.porthole/services/live-smoke-count-web.log; echo x')));
+    check('PlatOpypus (root) still has the log', /./.test(sh('cat /root/.porthole/services/live-smoke-count-web.log; echo x')));
     r = await call('/api/live/smoke-count/web/actions/0', { method: 'POST' });
-    check('actions run as the project account without Porthole secrets', r.status === 200 && /^ps-smoke-count/.test(r.body.output) && !/SMOKE_GENERAL_SECRET/.test(r.body.output) && !/PORTHOLE_TOKEN|TMUX/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 200));
+    check('actions run as the project account without PlatOpypus secrets', r.status === 200 && /^ps-smoke-count/.test(r.body.output) && !/SMOKE_GENERAL_SECRET/.test(r.body.output) && !/PORTHOLE_TOKEN|TMUX/.test(r.body.output), JSON.stringify(r.body.output).slice(0, 200));
     for (let i = 0; i < 5; i++) await get('/click');
     await sleep(500);
     r = await call('/api/live/smoke-count/web/actions/1', { method: 'POST' });
@@ -678,7 +678,7 @@ await call('/api/files/trash', { method: 'POST', body: { path: 'smoke-git' } });
 
 // 8. Tunnels.
 r = await call('/api/tunnels', { method: 'POST', body: { port: 7331 } });
-check('tunnelling Porthole itself is refused', r.status === 403);
+check('tunnelling PlatOpypus itself is refused', r.status === 403);
 r = await call('/api/tunnels');
 check('tunnels list has ports array', r.status === 200 && Array.isArray(r.body.ports));
 if (DO_TUNNEL) {
@@ -793,7 +793,7 @@ await call(`/api/vault/${projectId}`, { method: 'DELETE' });
         });
     });
     await new Promise(ok => tgMock.listen(7398, '127.0.0.1', ok));
-    // A separate Porthole process that sends through the stand-in (the server itself talks to the real Bot API).
+    // A separate PlatOpypus process that sends through the stand-in (the server itself talks to the real Bot API).
     const viaMock = code => new Promise((ok, no) => execFile('node', ['--input-type=module', '-e', `const a = await import('/opt/porthole/server/lib/alerts.js'); ${code}`], { cwd: '/', env: { ...process.env, PORTHOLE_TELEGRAM_API: 'http://127.0.0.1:7398' }, timeout: 20000 }, (e, out, err) => e ? no(new Error(err || e.message)) : ok(out)));
 
     r = await call('/api/alerts');
@@ -1200,7 +1200,7 @@ EOF`);
     sh('rm -rf /Projects/smoke-limit');
 }
 
-// 8c3. Device priority: Porthole runs at nice -10, the shells it starts at nice 0.
+// 8c3. Device priority: PlatOpypus runs at nice -10, the shells it starts at nice 0.
 {
     const { execFileSync } = await import('node:child_process');
     const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });

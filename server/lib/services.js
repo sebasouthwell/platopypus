@@ -1,5 +1,5 @@
 // Registered servers: long-running processes the user (or an agent) wants to see and control as a thing of their
-// own — not just "something is listening on :8000". A server is either started by Porthole in its own tmux session
+// own — not just "something is listening on :8000". A server is either started by PlatOpypus in its own tmux session
 // (`svc run`) so it can be stopped, restarted and its log read, or an existing process registered by pid/port
 // (`svc add`) so it can at least be stopped cleanly. Stopping kills the whole process group, then closes any tunnel
 // on its port. Records live in state/services.json; logs in state/services/<slug>.log.
@@ -131,8 +131,8 @@ export async function get(slug) {
 // Start a command in its own tmux session and register it.
 export async function runServer({ name, port, cwd, cmd, project = null, env = {}, owner = null, live = null, runAs = null, account = null }) {
     // Agent-started servers run as the agent user. Live services run as their project account (no logins, no secrets)
-    // unless their manifest's root run was approved; Porthole, as root, keeps the log and the stop/kill. A container
-    // service's pane runs the docker CLI as Porthole, with argv composed by live.js; the app inside runs as the account.
+    // unless their manifest's root run was approved; PlatOpypus, as root, keeps the log and the stop/kill. A container
+    // service's pane runs the docker CLI as PlatOpypus, with argv composed by live.js; the app inside runs as the account.
     const asAgent = !!owner;
     const asService = !asAgent && runAs === 'service';
     const asContainer = !asAgent && runAs === 'container';
@@ -141,7 +141,7 @@ export async function runServer({ name, port, cwd, cmd, project = null, env = {}
     if (!Array.isArray(cmd) || !cmd.length || cmd.some(c => typeof c !== 'string')) throw httpError(400, 'Command is required.');
     const p = port === undefined || port === null || port === '' ? null : tunnels.validPort(port);
     if (port && !p) throw httpError(400, 'Port must be between 1 and 65535.');
-    if (p === config.port) throw httpError(403, 'That is Porthole\'s own port.');
+    if (p === config.port) throw httpError(403, 'That is PlatOpypus\'s own port.');
     const dir = cwd && fs.existsSync(cwd) ? cwd : config.home;
     const session = SESSION_PREFIX + slug;
     const db = load();
@@ -180,12 +180,12 @@ export async function add({ name, pid, port, cwd, project = null, owner = null }
     const slug = slugify(name);
     const p = port === undefined || port === null || port === '' ? null : tunnels.validPort(port);
     if (port && !p) throw httpError(400, 'Port must be between 1 and 65535.');
-    if (p === config.port) throw httpError(403, 'That is Porthole\'s own port.');
+    if (p === config.port) throw httpError(403, 'That is PlatOpypus\'s own port.');
     let id = Number(pid) || null;
     if (!id && p) id = await pidOnPort(p);
     if (!id) throw httpError(400, 'Give --pid, or a --port something is already listening on.');
     if (!pidAlive(id)) throw httpError(404, `No process with pid ${id}.`);
-    if (id === process.pid) throw httpError(403, 'That is Porthole itself.');
+    if (id === process.pid) throw httpError(403, 'That is PlatOpypus itself.');
     if (owner && agentUser.proc(id)?.uid !== agentUser.info()?.uid) throw httpError(403, 'An agent-user shell can only register its own processes.');
     const db = load();
     db.items[slug] = { slug, name: String(name).slice(0, 60), port: p, cwd: cwd || null, cmd: null, pid: id, session: null, project, created: Date.now(), stoppedAt: null, log: null, external: true, cmdline: cmdlineOf(id), ...(owner ? { owner } : {}) };
@@ -212,13 +212,13 @@ export async function stop(slug, { keepTunnel = false } = {}) {
 export async function start(slug) {
     const it = await get(slug);
     if (slug.startsWith('live-')) throw httpError(409, 'Start live services from the Live section so their environment is loaded.');
-    if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; Porthole does not know how to start it.');
+    if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; PlatOpypus does not know how to start it.');
     return runServer({ name: it.name, port: it.port, cwd: it.cwd, cmd: it.cmd, project: it.project, owner: it.owner || null, runAs: it.runAs || null, account: it.account || null });
 }
 
 export async function restart(slug) {
     const it = await get(slug);
-    if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; Porthole does not know how to start it again.');
+    if (!Array.isArray(it.cmd) || !it.cmd.length) throw httpError(400, 'This server was registered from a running process; PlatOpypus does not know how to start it again.');
     await stop(slug, { keepTunnel: true });
     return runServer({ name: it.name, port: it.port, cwd: it.cwd, cmd: it.cmd, project: it.project, owner: it.owner || null, runAs: it.runAs || null, account: it.account || null });
 }

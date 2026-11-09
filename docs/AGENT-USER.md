@@ -1,8 +1,8 @@
 # Agents without root — migration plan
 
-Today every shell, agent and Porthole itself run as root. The goal: AI agents run as an unprivileged `agent` user,
-ask for root per command through the phone, and can only reach the Vault, cloud credentials and Porthole's API
-through narrow, audited doors. Porthole itself keeps running as root (it manages nginx, Docker, tmux, certificates).
+Today every shell, agent and PlatOpypus itself run as root. The goal: AI agents run as an unprivileged `agent` user,
+ask for root per command through the phone, and can only reach the Vault, cloud credentials and PlatOpypus's API
+through narrow, audited doors. PlatOpypus itself keeps running as root (it manages nginx, Docker, tmux, certificates).
 
 The change touches files agents depend on (their logins and configs, project folder ownership), so it is rolled out
 in three stages. Each stage is safe to update into and to roll back from.
@@ -14,20 +14,20 @@ in three stages. Each stage is safe to update into and to roll back from.
   `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md`. Codex is already global.
 - New shells get **Run as: agent user / root**. Root stays the default; every existing shell, profile and login is
   untouched.
-- An agent-user shell may only start in a project under `/Projects`, a scratch folder or `/home/agent`. Porthole makes
+- An agent-user shell may only start in a project under `/Projects`, a scratch folder or `/home/agent`. PlatOpypus makes
   that folder group-writable for `porthole-dev` (group ownership + setgid on folders) the first time; files stay owned
   by whoever made them, and root shells keep full access, so mixing both kinds in one project works.
 - Each agent-user shell gets its own **shell token** (in its environment as `PORTHOLE_TOKEN`). The box CLIs (`vault`,
   `credshare`, `svc`, `tunnel`, `live`, `project`, `elevate`) sign in with it and get a **restricted session**: only
   the routes those CLIs need. Files, shells, Docker, the Vault editor, security settings, updates and the terminal
   WebSocket are refused. The box token and `vault.key` are unreadable to the agent user.
-- **`vault get`** from an agent-user shell goes through the API: Porthole checks the calling process belongs to that
+- **`vault get`** from an agent-user shell goes through the API: PlatOpypus checks the calling process belongs to that
   shell, runs as the agent user, and that its real working directory (read from `/proc`, not claimed) is the
   project's main folder, then returns general or that project's values only.
 - **`elevate -- <command>`** asks for root for one command. The phone shows a banner; the request names the shell,
   folder and command. **Allow once**, **Allow this shell for 30 minutes** (pure elevation, no further prompts), or
   **Deny**. Approved commands run as root in that folder with a 10-minute limit; output and exit code go back to the
-  agent and into the Porthole log.
+  agent and into the PlatOpypus log.
 - Servers started with `svc run` from an agent-user shell run as the agent user; it can stop only servers it owns.
   Live services are started from the phone only (an agent can still `live check` and `live status`).
 
@@ -47,8 +47,8 @@ Rollback: AI agents → Undo move restores the renamed root copies; the agent-us
 ## Stage 2b — services off root (1.14.0, done)
 
 - Live services and their actions run as one account per project (`ps-<project>`, ACL on that project only, no
-  porthole-dev, firewall: no metadata service, no Porthole API, Vault limited to `needs:`); `run_as: root` needs a
-  phone approval pinned to the commands and the project's code (1.15.0). Porthole stays the root controller.
+  porthole-dev, firewall: no metadata service, no PlatOpypus API, Vault limited to `needs:`); `run_as: root` needs a
+  phone approval pinned to the commands and the project's code (1.15.0). PlatOpypus stays the root controller.
 - **Files → Make agent-ready** for projects created before stage 1.
 
 ## Stage 3 — root by grant only (2.0.0, MAJOR)

@@ -1,4 +1,4 @@
-// AI agents that can run in a Porthole shell, their per-agent flags, and Claude Code profiles.
+// AI agents that can run in a PlatOpypus shell, their per-agent flags, and Claude Code profiles.
 //
 // A Claude "profile" is an isolated config directory (credentials, settings, history) selected with
 // CLAUDE_CONFIG_DIR — the same mechanism the account-switcher tools use. Profiles live in

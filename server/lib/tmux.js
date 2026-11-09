@@ -42,15 +42,15 @@ export async function hasSession(name) {
 }
 
 // The tmux server (and so every shell, server, live service and tunnel under it) runs in its own systemd scope at
-// normal priority, outside Porthole's service cgroup: Porthole keeps its Nice/CPUWeight/MemoryLow to itself, the
-// OOM killer prefers the shells, and the scope outlives a Porthole restart. The scope is created by whichever
+// normal priority, outside PlatOpypus's service cgroup: PlatOpypus keeps its Nice/CPUWeight/MemoryLow to itself, the
+// OOM killer prefers the shells, and the scope outlives a PlatOpypus restart. The scope is created by whichever
 // new-session call starts the server; later clients just talk to it. Without systemd (Docker mode) this is plain tmux.
 const haveSystemd = () => fs.existsSync('/run/systemd/system') && ['/usr/bin/systemd-run', '/bin/systemd-run'].some(f => fs.existsSync(f));
 function launcher() {
     const out = [];
     const prio = (() => { try { return os.getPriority(); } catch { return 0; } })();
     const pre = haveSystemd() ? ['systemd-run', '--quiet', '--scope', '--collect', `--unit=porthole-shells-${Date.now().toString(36)}`, '-p', 'CPUWeight=100', '-p', 'IOWeight=100', '--'] : [];
-    if (prio < 0) out.push('nice', '-n', String(-prio));   // children at normal priority, not Porthole's raised one
+    if (prio < 0) out.push('nice', '-n', String(-prio));   // children at normal priority, not PlatOpypus's raised one
     return [...pre, ...out];
 }
 

@@ -1,8 +1,8 @@
 // Push alerts to the phone through a Telegram bot from the Vault (a general "Telegram bot + chat" entry).
-// Porthole reads the bot token itself when it sends; it is never given to agents or put in a shell.
+// PlatOpypus reads the bot token itself when it sends; it is never given to agents or put in a shell.
 //
 // What is sent: a one-line summary, the project, and for root requests the command as asked. Never secret values,
-// command output or logs. Alerts only point at Porthole: approving or denying is done in Porthole after signing in,
+// command output or logs. Alerts only point at PlatOpypus: approving or denying is done in PlatOpypus after signing in,
 // never from Telegram (a Telegram account must not become a way to grant root).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,9 +16,9 @@ const TG_API = (process.env.PORTHOLE_TELEGRAM_API || 'https://api.telegram.org')
 
 export const KINDS = [
     { key: 'root', title: 'Root requests waiting for you', sub: 'An agent asked to run something as root.', def: true },
-    { key: 'signin', title: 'Sign-ins and lockouts', sub: 'Someone signed in to Porthole, or an address was locked out after failed attempts.', def: true },
+    { key: 'signin', title: 'Sign-ins and lockouts', sub: 'Someone signed in to PlatOpypus, or an address was locked out after failed attempts.', def: true },
     { key: 'link', title: 'Agents opening public links', sub: 'A quick link or a hostname on your domain, started by an agent.', def: true },
-    { key: 'limit', title: 'Limit reached', sub: 'The box was overloaded and Porthole closed public links and stopped servers and containers that are not live services.', def: true },
+    { key: 'limit', title: 'Limit reached', sub: 'The box was overloaded and PlatOpypus closed public links and stopped servers and containers that are not live services.', def: true },
     { key: 'backup', title: 'A backup fails', sub: 'A project backup to S3 did not complete.', def: true },
     { key: 'crash', title: 'A server stops by itself', sub: 'A registered server or live service was running and is not any more, without anyone stopping it.', def: true },
     { key: 'egress', title: 'Connections to somewhere new', sub: 'An agent or a service connected to a host it has not used before.', def: false },
@@ -144,7 +144,7 @@ async function pump() {
             while (sent.length && now - sent[0] > CAP_MS) sent.shift();
             if (sent.length >= CAP) { dropped += queue.length; queue.length = 0; break; }
             const { kind, text } = queue.shift();
-            if (dropped && sent.length < CAP - 1) { const n = dropped; dropped = 0; queue.unshift({ kind, text }); await deliver(format('test', `${n} more alert${n === 1 ? '' : 's'} were held back (more than ${CAP} in 10 minutes). Open Porthole's audit log for the rest.`)).catch(() => {}); sent.push(Date.now()); continue; }
+            if (dropped && sent.length < CAP - 1) { const n = dropped; dropped = 0; queue.unshift({ kind, text }); await deliver(format('test', `${n} more alert${n === 1 ? '' : 's'} were held back (more than ${CAP} in 10 minutes). Open PlatOpypus's audit log for the rest.`)).catch(() => {}); sent.push(Date.now()); continue; }
             try { await deliver(format(kind, text)); }
             catch (e) { const c = load(); c.lastError = { at: Date.now(), message: e.message.slice(0, 200) }; save(c); log('alerts', `send failed: ${e.message}`); }
             sent.push(Date.now());
@@ -166,7 +166,7 @@ export function notify(kind, text, { key = null, quietMs = 10 * 60_000 } = {}) {
 }
 
 export async function test() {
-    await deliver(format('test', 'Porthole alerts are on. This is a test message.'));
+    await deliver(format('test', 'PlatOpypus alerts are on. This is a test message.'));
     return settings();
 }
 
@@ -178,7 +178,7 @@ const short = (s, n = 300) => { const t = String(s || ''); return t.length > n ?
 // Called for every new audit line (audit.onRecord).
 export function fromAudit(l) {
     if (l.type === 'elevate' && l.action === 'request' && !l.auto)
-        notify('root', `Root request${proj(l)}\n${l.actor || 'an agent'} wants to run:\n${short(l.cmd)}${l.reason ? `\nReason: ${short(l.reason, 200)}` : ''}\nOpen Porthole to allow or deny (expires in 10 min).`);
+        notify('root', `Root request${proj(l)}\n${l.actor || 'an agent'} wants to run:\n${short(l.cmd)}${l.reason ? `\nReason: ${short(l.reason, 200)}` : ''}\nOpen PlatOpypus to allow or deny (expires in 10 min).`);
     else if (l.type === 'activity' && (l.action === 'tunnel-start' || l.action === 'hostname-add') && l.actor !== 'phone')
         notify('link', `${l.action === 'tunnel-start' ? 'Public link opened' : 'Hostname added'}${proj(l)}\n${l.actor}: ${short(l.what, 200)}`, { key: `${l.action}:${l.what}` });
     else if (l.type === 'credential' && (l.action === 'agent-run' || l.action === 'agent-read'))
@@ -188,7 +188,7 @@ export function fromAudit(l) {
 }
 
 export function fromAuth(ev) {
-    if (ev.type === 'signin') notify('signin', `Signed in to Porthole with ${ev.how}\nfrom ${ev.addr}${ev.ua ? `\n${short(ev.ua, 120)}` : ''}\nNot you? Sign out other devices in More → Security.`);
+    if (ev.type === 'signin') notify('signin', `Signed in to PlatOpypus with ${ev.how}\nfrom ${ev.addr}${ev.ua ? `\n${short(ev.ua, 120)}` : ''}\nNot you? Sign out other devices in More → Security.`);
     if (ev.type === 'lockout') notify('signin', `Sign-in locked for 15 minutes after 5 failed attempts\nfrom ${ev.addr}`, { key: ev.addr });
 }
 

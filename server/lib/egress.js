@@ -2,12 +2,12 @@
 // porthole-svc), with the host name it looked up, the project and the shell or service it came from.
 //
 // How: an iptables chain (PORTHOLE-EGRESS, jumped to from OUTPUT) LOGs the first packet of each new connection from
-// those accounts to the kernel log, with the owner's uid. Porthole follows the kernel log (journalctl -k -f) and the
+// those accounts to the kernel log, with the owner's uid. PlatOpypus follows the kernel log (journalctl -k -f) and the
 // resolver (resolvectl monitor), so an address can be shown as the name that was looked up for it.
 // Kept: per day, one row per (who, project, host, port) with a count, first and last time. The first time a project
 // reaches a host it has not used in 90 days is also an audit line ("network"), which can raise an alert.
 //
-// Not covered: processes running as root (root shells, agents started as root, Porthole itself, apt), and lookups that
+// Not covered: processes running as root (root shells, agents started as root, PlatOpypus itself, apt), and lookups that
 // bypass the box resolver (DNS over HTTPS): those connections show the address only.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -77,7 +77,7 @@ function userOf(uid) {
     return users.byUid.get(Number(uid)) || `uid ${uid}`;
 }
 
-// The process behind a source port, while the connection is still open: its folder and its Porthole shell name.
+// The process behind a source port, while the connection is still open: its folder and its PlatOpypus shell name.
 let lookups = 0;
 async function procOf(proto, sport) {
     if (lookups >= 8) return null;   // a burst of connections: count them, skip naming the process

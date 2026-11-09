@@ -1,4 +1,4 @@
-// Live services: projects describe how they run in PORTHOLE.md (YAML front matter, see docs/LIVE.md) and Porthole
+// Live services: projects describe how they run in PORTHOLE.md (YAML front matter, see docs/LIVE.md) and PlatOpypus
 // runs, exposes and operates them from the phone. A live service runs through the servers registry (services.js)
 // under the slug live-<project>-<key>, gets its environment from the manifest plus the Vault (general + that
 // project's scope), and its hostname through zoned.js (nginx + Let's Encrypt, with a "coming up" page whenever the
@@ -46,7 +46,7 @@ const slugOf = (project, key) => servicesMgr.slugify(`live ${project} ${key}`);
 
 // ---- manifest ----
 export function manifestPath(root) {
-    for (const rel of ['PORTHOLE.md', 'docs/PORTHOLE.md']) { const p = path.join(root, rel); if (fs.existsSync(p)) return p; }
+    for (const rel of ['PLATOPYPUS.md', 'docs/PLATOPYPUS.md', 'PORTHOLE.md', 'docs/PORTHOLE.md']) { const p = path.join(root, rel); if (fs.existsSync(p)) return p; }
     return null;
 }
 
@@ -56,7 +56,7 @@ export function parseManifest(text) {
     let data;
     try { data = parseYaml(m[1]) || {}; } catch (e) { return { data: null, errors: [`YAML: ${e.message.split('\n')[0]}`] }; }
     const errors = [], warnings = [];
-    if (data.porthole !== undefined && Number(data.porthole) !== 1) warnings.push(`porthole: ${data.porthole} is newer than this Porthole understands (1).`);
+    if (data.porthole !== undefined && Number(data.porthole) !== 1) warnings.push(`porthole: ${data.porthole} is newer than this PlatOpypus understands (1).`);
     const svcs = data.services && typeof data.services === 'object' ? data.services : {};
     for (const [key, s] of Object.entries(svcs)) {
         const where = `services.${key}`;
@@ -74,7 +74,7 @@ export function parseManifest(text) {
             if (s.user !== undefined && !['service', 'image'].includes(s.user)) errors.push(`${where}.user: service (the default: the project's account) or image (whatever the image runs as).`);
         } else if (typeof s.start !== 'string' || !s.start.trim()) errors.push(`${where}.start: required (the command that runs it), or image: for a container.`);
         if (s.port !== undefined && !(Number.isInteger(Number(s.port)) && Number(s.port) > 0 && Number(s.port) < 65536)) errors.push(`${where}.port: 1-65535.`);
-        if (Number(s.port) === config.port) errors.push(`${where}.port: that is Porthole's own port.`);
+        if (Number(s.port) === config.port) errors.push(`${where}.port: that is PlatOpypus's own port.`);
         if (s.hostname !== undefined && !/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(String(s.hostname).toLowerCase())) errors.push(`${where}.hostname: a full name like app.example.com.`);
         if (s.hostname && !s.port) errors.push(`${where}.hostname: needs a port to serve.`);
         if (s.update !== undefined && !STRATEGIES.includes(s.update)) errors.push(`${where}.update: one of ${STRATEGIES.join(', ')}.`);
@@ -256,7 +256,7 @@ export async function prepareAccount(p) {
     const a = await svcUser.ensure(p.name, p.root);
     return a.user;
 }
-// Porthole's own environment minus anything secret: an action never sees the box token or Porthole's settings.
+// PlatOpypus's own environment minus anything secret: an action never sees the box token or PlatOpypus's settings.
 function actionBaseEnv() {
     const keep = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TERM'];
     return Object.fromEntries(keep.filter(k => process.env[k]).map(k => [k, process.env[k]]));
@@ -333,8 +333,8 @@ export async function start(project, key) {
     const cmd = runAs === 'container' ? await containerArgv(p, key, s, account, env, port) : ['bash', '-lc', s.start];
     const reg = await servicesMgr.runServer({ name: `live ${p.name} ${key}`, port, cwd, cmd, project: p.name, env, runAs, account, live: { project: p.name, key, title: s.title || key } });
     const given = (Array.isArray(s.needs) ? s.needs : []).map(String).filter(n => n in env);
-    if (given.length) record('credential', 'service-start', { project: p.name, actor: 'Porthole', via: `live service (${account || runAs})`, what: `${p.name}/${key}`, names: given });
-    if (runAs === 'root') record('elevate', 'root-start', { project: p.name, actor: 'Porthole', via: 'live service', what: `${p.name}/${key}`, cmd: String(s.start) });
+    if (given.length) record('credential', 'service-start', { project: p.name, actor: 'PlatOpypus', via: `live service (${account || runAs})`, what: `${p.name}/${key}`, names: given });
+    if (runAs === 'root') record('elevate', 'root-start', { project: p.name, actor: 'PlatOpypus', via: 'live service', what: `${p.name}/${key}`, cmd: String(s.start) });
     log('live', `started ${project}/${key}`);
     return tookOver ? { ...reg, tookOver } : reg;
 }
@@ -347,7 +347,7 @@ export async function restart(project, key) {
 }
 
 // ---- container services: image: instead of start: ----
-// The pane runs `docker run` (attached, --rm) as Porthole, so the service registry, log, stop and hostname work as for
+// The pane runs `docker run` (attached, --rm) as PlatOpypus, so the service registry, log, stop and hostname work as for
 // any process. argv is composed here from checked fields, never from free text in the file, so nothing an agent writes
 // runs as root. Inside, the app runs as the project's account; it sees its project folders only, bound to loopback.
 // Vault values go in by name (-e NAME) from the pane's environment: they are never on the command line.
@@ -369,7 +369,7 @@ async function containerArgv(p, key, s, account, env, port) {
         if (!asImage && !pv.ro) { try { if (fs.statSync(host).uid !== a.uid) await run('chown', ['-R', `${a.uid}:${a.gid}`, host], { timeout: 120_000 }); } catch (e) { log('live', `chown ${host}: ${e.message}`); } }
         args.push('-v', `${host}:${pv.cont}${pv.ro ? ':ro' : ''}`);
     }
-    // Settings from the file (not secret) go in by value; Vault values and Porthole's names by name only, so they are
+    // Settings from the file (not secret) go in by value; Vault values and PlatOpypus's names by name only, so they are
     // taken from the pane's environment and never appear on the command line. PATH stays the image's own.
     const fixed = s.env && typeof s.env === 'object' ? s.env : {};
     for (const k of Object.keys(env)) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || k === 'PATH') continue; args.push('-e', k in fixed ? `${k}=${env[k]}` : k); }

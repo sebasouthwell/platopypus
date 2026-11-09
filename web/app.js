@@ -1,4 +1,4 @@
-// Porthole v3 front end. Plain ES module, no build step.
+// PlatOpypus v3 front end. Plain ES module, no build step.
 // Tabs: Home · Shells · Services · Files · More (+ pushed pages: Vault, Security, Claude). Sheets: terminal, editor.
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -33,7 +33,7 @@ function noteServerVersion(v) {
     if (v === serverVersion || reloadOffered) return;
     reloadOffered = true;
     const el = $('#toast');
-    el.innerHTML = `Porthole was updated to ${esc(v)} · <button class="linkish" id="toast-reload">Reload</button>`;
+    el.innerHTML = `PlatOpypus was updated to ${esc(v)} · <button class="linkish" id="toast-reload">Reload</button>`;
     el.classList.remove('bad'); el.hidden = false; clearTimeout(toastTimer);
     $('#toast-reload').onclick = () => location.reload();
 }
@@ -488,7 +488,7 @@ $('#wish-now').addEventListener('click', async () => {
     try {
         let agentKey = localStorage.getItem('porthole.agent') || 'claude'; if (once && !['claude', 'codex'].includes(agentKey)) agentKey = 'claude';
         const note = once ? 'one-shot run in a scratch folder; it is destroyed when you finish, so answer fully in your final message' : 'temporary session in a scratch folder that is deleted when this shell ends';
-        await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: agentKey, scratch: true, oneshot: once, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}\n\n(From Porthole: ${note}. Just do it; keep anything worth keeping out of this folder.)` } });
+        await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: agentKey, scratch: true, oneshot: once, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}\n\n(From PlatOpypus: ${note}. Just do it; keep anything worth keeping out of this folder.)` } });
         $('#wish-text').value = ''; openTerminal(name, 'Home');
     } catch (ex) { toast(ex.message, true); }
     btn.disabled = false;
@@ -569,7 +569,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
             try { await api('/api/files/mkdir', { method: 'POST', body: { path: parts.join('/') || '.', name: leaf } }); } catch (ex) { if (ex.status !== 409) { toast(ex.message, true); return; } }
         }
         const body = { name: finalName, kind, cwd: folder || '.', agent, yolo, resume, profile, scratch, runAs };
-        if (kind === 'agent' && prompt) body.firstPrompt = `${prompt}\n\n(From Porthole: you are in ${folder ? '/' + folder.replace(/^\/+/, '') : 'the home folder'}${newFolder ? ', a new empty project folder' : ''}. Restate the goal in one line, then get going.)`;
+        if (kind === 'agent' && prompt) body.firstPrompt = `${prompt}\n\n(From PlatOpypus: you are in ${folder ? '/' + folder.replace(/^\/+/, '') : 'the home folder'}${newFolder ? ', a new empty project folder' : ''}. Restate the goal in one line, then get going.)`;
         if (kind === 'agent') {
             const session = await sessionTypeDialog(folder);
             if (!session) return newShellDialog(folder, kind, finalName, { ...opts, firstPrompt: prompt || firstPrompt });
@@ -660,7 +660,7 @@ async function upgradeRepoDialog(rel, name) {
 // .portholerun: show exactly what will run (as whom, where, what gets shared, which Vault names), then run it.
 async function portholerunDialog(rel) {
     let pl; try { pl = await api(`/api/portholerun?path=${encodeURIComponent(rel)}`); } catch (ex) { return toast(ex.message, true); }
-    const who = pl.runAs === 'root' ? '<span class="tag danger">root</span> full control of the box' : pl.runAs === 'agent' ? `the agent user <span class="mono">${esc(pl.account)}</span>` : `<span class="mono">${esc(pl.account)}</span>, this project's own account (no logins, no Porthole access)`;
+    const who = pl.runAs === 'root' ? '<span class="tag danger">root</span> full control of the box' : pl.runAs === 'agent' ? `the agent user <span class="mono">${esc(pl.account)}</span>` : `<span class="mono">${esc(pl.account)}</span>, this project's own account (no logins, no PlatOpypus access)`;
     const share = !pl.port ? 'nothing (no port)' : pl.share === 'none' ? `nothing; stays local on :${pl.port}` : pl.share === 'domain' ? `<span class="mono">${esc(pl.hostname || '')}</span> (your domain, public)` : `a public quick link to :${pl.port} (closes after 4 h)`;
     const missing = pl.needs.filter(n => !n.present).map(n => n.name);
     const blocked = pl.errors.length || missing.length;
@@ -675,7 +675,7 @@ async function portholerunDialog(rel) {
           ${pl.env.length ? `<div class="row plain"><span class="ico">${icon('settings')}</span><div class="main"><div class="title">Settings</div><div class="sub mono" style="white-space:normal">${pl.env.map(esc).join(' ')}</div></div></div>` : ''}
         </div>
         ${missing.length ? `<p class="sub warn" style="margin-top:8px">Add ${missing.map(esc).join(', ')} to the Vault first.</p>` : ''}
-        ${pl.gitignored ? '' : '<p class="sub" style="margin-top:8px">Porthole adds <span class="mono">.portholerun</span> to the project\'s .gitignore when it runs.</p>'}
+        ${pl.gitignored ? '' : '<p class="sub" style="margin-top:8px">PlatOpypus adds <span class="mono">.portholerun</span> to the project\'s .gitignore when it runs.</p>'}
         ${pl.link?.url ? `<p class="sub" style="margin-top:8px">Link: <a href="${esc(pl.link.url + (pl.open || ''))}" target="_blank" rel="noopener">${esc(pl.link.url.replace(/^https:\/\//, ''))}</a></p>` : ''}`}
         <div class="buttons">
           ${blocked ? '' : pl.running ? `<button class="primary" data-pr="restart">${icon('restart')}Restart</button><button data-pr="stop">${icon('stop')}Stop</button>` : `<button class="${pl.runAs === 'root' ? 'danger' : 'primary'}" data-pr="run">${icon('play')}Run${pl.runAs === 'root' ? ' as root' : ''}</button>`}
@@ -809,7 +809,7 @@ function projectsView(s, credChip) {
     if (!up.length && !box.parts.some(x => x.running)) html += `<p class="empty">Nothing is running. Run a project from Files or below, or tap <b>+</b> to share a port or start an app.</p>`;
     if (up.length) html += `<div class="pgrid">${up.map(([p, i]) => projectCard(p, i, credChip)).join('')}</div>`;
     if (box.parts.length || s.system?.length) {
-        html += `<h2 class="section"><span class="bullet"></span>Box<span class="meta">not in a project</span></h2><section class="pcard box"><div class="pcard-parts">${partsHtml(box.parts, credChip)}${s.system?.length ? `<details class="pgroup"><summary class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">System ports<span class="tag dim">${s.system.length}</span></div><div class="sub">Porthole, agents and box services · not shareable</div></div></summary>${s.system.map(d => `<div class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">${esc(d.what)}</div><div class="sub">${esc(d.process)} · <span class="mono">${esc(d.addr)}:${d.port}</span></div></div></div>`).join('')}</details>` : ''}</div></section>`;
+        html += `<h2 class="section"><span class="bullet"></span>Box<span class="meta">not in a project</span></h2><section class="pcard box"><div class="pcard-parts">${partsHtml(box.parts, credChip)}${s.system?.length ? `<details class="pgroup"><summary class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">System ports<span class="tag dim">${s.system.length}</span></div><div class="sub">PlatOpypus, agents and box services · not shareable</div></div></summary>${s.system.map(d => `<div class="row prow"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">${esc(d.what)}</div><div class="sub">${esc(d.process)} · <span class="mono">${esc(d.addr)}:${d.port}</span></div></div></div>`).join('')}</details>` : ''}</div></section>`;
     }
     if (idle.length) html += `<details class="pidle"${up.length ? '' : ' open'}><summary class="section"><span class="bullet"></span>Not running<span class="meta">${idle.length}</span></summary><div class="pgrid">${idle.map(([p, i]) => projectCard(p, i, credChip)).join('')}</div></details>`;
     return html;
@@ -1394,7 +1394,7 @@ async function loadServices() {
             </div>`).join('')}</div>`;
         }
         if (s.system?.length) {
-            html += `<details class="sys"><summary><span class="bullet"></span>System · ${s.system.length} local-only port${s.system.length === 1 ? '' : 's'}<span class="meta">Porthole, agents, box services · not shareable</span></summary>
+            html += `<details class="sys"><summary><span class="bullet"></span>System · ${s.system.length} local-only port${s.system.length === 1 ? '' : 's'}<span class="meta">PlatOpypus, agents, box services · not shareable</span></summary>
             <div class="list">${s.system.map(d => `<div class="row plain"><span class="ico dim">${icon('settings')}</span><div class="main"><div class="title">${esc(d.what)}</div><div class="sub">${esc(d.process)} · <span class="mono">${esc(d.addr)}:${d.port}</span></div></div></div>`).join('')}</div></details>`;
         }
     }
@@ -1539,7 +1539,7 @@ async function livePage(p, key) {
     const { panel, close } = openDialog(`<h2>${icon(v.worker ? 'cpu' : 'globe')}${esc(v.title)}</h2>
         <p class="muted">${esc(p.name)}${p.summary ? ` · ${esc(p.summary)}` : ''}</p>
         <p class="sub">${v.running ? '<span class="live">● running</span>' : 'stopped'}${v.port ? ` · <span class="mono">:${v.port}</span>` : ' · worker'}${p.commit ? ` · <span class="mono">${esc(p.commit)}</span>` : ''}${v.update ? ` · updates: ${esc(v.update)}` : ''}</p>
-        <p class="sub">${v.runAs === 'root' ? '<span class="tag danger">runs as root</span> approved for these exact commands · <button class="linkish" data-a="unroot">Revoke</button>' : v.runAs === 'blocked' ? '' : `Runs as <span class="mono">${esc(v.account || 'its own account')}</span>, an account for this project only: no logins, no Porthole access, no other project. ${v.vaultNames.length ? `Vault: only ${v.vaultNames.map(esc).join(', ')}.` : 'No Vault values.'} Porthole controls it as root.${v.firewall && v.firewall.ok === false ? `<br><span class="warn">${esc(v.firewall.detail)}</span>` : ''}`}</p>
+        <p class="sub">${v.runAs === 'root' ? '<span class="tag danger">runs as root</span> approved for these exact commands · <button class="linkish" data-a="unroot">Revoke</button>' : v.runAs === 'blocked' ? '' : `Runs as <span class="mono">${esc(v.account || 'its own account')}</span>, an account for this project only: no logins, no PlatOpypus access, no other project. ${v.vaultNames.length ? `Vault: only ${v.vaultNames.map(esc).join(', ')}.` : 'No Vault values.'} PlatOpypus controls it as root.${v.firewall && v.firewall.ok === false ? `<br><span class="warn">${esc(v.firewall.detail)}</span>` : ''}`}</p>
         ${v.runAs === 'blocked' ? `<div class="banner danger" style="margin:10px 0"><b>This service asks to run as root.</b> PORTHOLE.md says <span class="mono">run_as: root</span>. Root can read every secret on the box, so only allow it if the app really needs it (binding a low port, Docker). The approval covers the start command, every action and the project's code as they are now; if any of them changes, it asks again.<div class="buttons"><button class="danger" data-a="root">Allow as root</button></div></div>` : ''}
         <div class="menu">
           ${v.running ? `<button data-a="stop">${icon('stop')}Stop</button><button data-a="restart">${icon('restart')}Restart</button>` : `<button data-a="start">${icon('play')}Start</button>`}
@@ -1922,9 +1922,9 @@ function updatePlanDialog(u) {
     return new Promise(resolve => {
         const plan = Array.isArray(u.plan) ? u.plan : null;
         const steps = plan === null ? '<p class="sub">The upgrade plan could not be read; the updater still works it out and logs it before changing anything.</p>'
-            : plan.length ? `<p class="muted">This update changes data on the box in ${plan.length} step${plan.length === 1 ? '' : 's'}. Porthole archives its state first and puts it back if any step or the new version fails.</p><div class="list">${plan.map(m => `<div class="row plain"><span class="ico brass">${icon('shield')}</span><div class="main"><div class="title">${esc(m.title)} <span class="tag dim">${esc(m.version)}</span></div><div class="sub">${esc(m.detail || '')}</div></div></div>`).join('')}</div>`
+            : plan.length ? `<p class="muted">This update changes data on the box in ${plan.length} step${plan.length === 1 ? '' : 's'}. PlatOpypus archives its state first and puts it back if any step or the new version fails.</p><div class="list">${plan.map(m => `<div class="row plain"><span class="ico brass">${icon('shield')}</span><div class="main"><div class="title">${esc(m.title)} <span class="tag dim">${esc(m.version)}</span></div><div class="sub">${esc(m.detail || '')}</div></div></div>`).join('')}</div>`
             : '<p class="muted">No data changes: only the app is replaced.</p>';
-        const { panel, close } = openDialog(`<h2>${icon('refresh')}Update to ${esc(u.latestVersion)}?</h2>${steps}<p class="sub" style="margin-top:10px">Porthole restarts once. Shells, servers, tunnels, containers, files and the Vault stay as they are; if the new version does not come up healthy, the previous version and its data come back automatically.</p><div class="buttons"><button class="primary" data-ok>Update now</button><button data-close>Cancel</button></div>`);
+        const { panel, close } = openDialog(`<h2>${icon('refresh')}Update to ${esc(u.latestVersion)}?</h2>${steps}<p class="sub" style="margin-top:10px">PlatOpypus restarts once. Shells, servers, tunnels, containers, files and the Vault stay as they are; if the new version does not come up healthy, the previous version and its data come back automatically.</p><div class="buttons"><button class="primary" data-ok>Update now</button><button data-close>Cancel</button></div>`);
         $('[data-ok]', panel).onclick = () => { close(); resolve(true); };
         $('.dialog-backdrop').addEventListener('click', () => resolve(false), { once: true });
         $('[data-close]', panel).addEventListener('click', () => resolve(false), { once: true });
@@ -1946,7 +1946,7 @@ function serverMenu(d) {
     });
 }
 function registerServerDialog(port, label = '') {
-    const { panel, close } = openDialog(`<h2>${icon('devserver')}Register port ${port}</h2><p class="muted">Gives this process a name so it can be stopped, shared and tracked as a server. Porthole will not know how to restart it; for that, start it with <span class="mono">svc run</span>.</p>
+    const { panel, close } = openDialog(`<h2>${icon('devserver')}Register port ${port}</h2><p class="muted">Gives this process a name so it can be stopped, shared and tracked as a server. PlatOpypus will not know how to restart it; for that, start it with <span class="mono">svc run</span>.</p>
         <div class="field"><label for="rs-name">Name</label><input id="rs-name" type="text" value="${esc(label)}" autocorrect="off"></div>
         <div class="buttons"><button class="primary" data-ok>Register</button><button data-close>Cancel</button></div>`);
     const go_ = async () => { try { await api('/api/servers', { method: 'POST', body: { name: $('#rs-name', panel).value, port } }); close(); toast('Registered'); loadServices(); } catch (ex) { toast(ex.message, true); } };
@@ -2066,7 +2066,7 @@ function startSomethingDialog() {
 function runImageDialog(prefill = '') {
     const { panel, close } = openDialog(`
         <h2>${icon('container')}Run a container</h2>
-        <p class="muted">Type an image. Porthole pulls it and shows its ports, default environment and volumes so you can adjust them before it starts.</p>
+        <p class="muted">Type an image. PlatOpypus pulls it and shows its ports, default environment and volumes so you can adjust them before it starts.</p>
         <div class="field"><label for="dr-image">Image</label><div style="display:flex;gap:8px"><input id="dr-image" type="text" class="mono" value="${esc(prefill)}" placeholder="nginx:alpine · ghcr.io/org/app:tag" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="pill accent" data-lookup>${icon('search')}Look up</button></div></div>
         <div data-details></div>
         <div class="buttons" data-initial><button data-close>Cancel</button></div>`);
@@ -2355,7 +2355,7 @@ function bindExpand() {
             if (x === 'shell') return newShellDialog(rel, 'shell');
             if (x === 'claude') return newShellDialog(ex.previousElementSibling?.dataset.type === 'dir' ? rel : state.filesPath, 'agent');
             if (x === 'trash') {
-                if (!(await confirmDialog({ title: `Delete "${name}"?`, text: 'It moves to Porthole\'s trash on the box, so it can be recovered from a shell.', action: 'Delete' }))) return;
+                if (!(await confirmDialog({ title: `Delete "${name}"?`, text: 'It moves to PlatOpypus\'s trash on the box, so it can be recovered from a shell.', action: 'Delete' }))) return;
                 try { await api('/api/files/trash', { method: 'POST', body: { path: rel } }); toast('Deleted'); state.expanded = null; loadFiles(state.filesPath); } catch (e) { toast(e.message, true); }
             }
         });
@@ -2653,7 +2653,7 @@ async function loadUpdate() {
     const last = u.lastResult ? `<div class="sub">last update: ${u.lastResult.ok ? 'ok' : 'failed'} · ${esc(u.lastResult.message || '')} · ${fmtAgo(u.lastResult.at)}</div>` : '';
     $('#update-card').innerHTML = `
         <div class="row"><span class="ico ${u.available ? 'brass' : u.inProgress ? 'warn' : ''}">${icon(u.inProgress ? 'refresh' : u.available ? 'cloud-down' : 'check')}</span>
-          <div class="main"><div class="title">Porthole ${esc(v.version || '?')}${v.sha ? `<span class="tag dim">${esc(v.sha)}</span>` : ''}</div><div class="sub">${u.inProgress ? 'updating…' : line}</div>${last}</div>
+          <div class="main"><div class="title">PlatOpypus ${esc(v.version || '?')}${v.sha ? `<span class="tag dim">${esc(v.sha)}</span>` : ''}</div><div class="sub">${u.inProgress ? 'updating…' : line}</div>${last}</div>
           ${u.inProgress ? '' : u.available ? `<button class="pill accent" data-upd="apply">${icon('cloud-down')}Update</button>` : `<button class="pill" data-upd="check">${icon('refresh')}Check</button>`}
           <button class="more" data-upd="menu" aria-label="Update actions">${icon('more_h')}</button>
         </div>`;
@@ -2675,7 +2675,7 @@ function showUpdateOverlay(u = null) {
     if (overlayPolling) return;
     overlayPolling = true;
     o.dataset.state = 'working'; $('#upd-actions').hidden = true; $('#upd-logview').hidden = true;
-    $('#upd-kicker').textContent = 'Updating Porthole';
+    $('#upd-kicker').textContent = 'Updating PlatOpypus';
     $('#upd-note').textContent = 'Your shells, links and containers keep running. This page reloads by itself.';
     updStage('fetch');
     const started = Date.now();
@@ -2898,7 +2898,7 @@ function vaultMenu(t) {
     const sw = $('[data-inshells]', panel);
     if (sw) sw.onclick = async () => {
         const on = !t.inShells;
-        if (on && !(await confirmDialog({ title: `Put ${t.name} into every new shell?`, text: 'Each new shell, and every agent in it, will have this value in its environment from the start. Porthole logs that once, when the shell starts; uses after that cannot be seen.', action: 'Put into new shells', danger: true }))) return vaultMenu(t);
+        if (on && !(await confirmDialog({ title: `Put ${t.name} into every new shell?`, text: 'Each new shell, and every agent in it, will have this value in its environment from the start. PlatOpypus logs that once, when the shell starts; uses after that cannot be seen.', action: 'Put into new shells', danger: true }))) return vaultMenu(t);
         try { await api(`/api/vault/${t.id}`, { method: 'PUT', body: { inShells: on } }); t.inShells = on; toast(on ? 'New shells will get it' : 'New shells will not get it; running shells keep theirs until they end'); loadVault(); vaultMenu(t); }
         catch (ex) { toast(ex.message, true); }
     };
@@ -3259,7 +3259,7 @@ function auditStatus(e) {
     if (e.action === 'service-action' && e.code) return `<span class="tag" style="color:var(--flare)">exit ${e.code}</span>`;
     return '';
 }
-const auditWho = e => e.action === 'commit' ? `${e.author}${e.hash ? ` · ${e.hash.slice(0, 7)}` : ''}` : (e.actor || 'Porthole');
+const auditWho = e => e.action === 'commit' ? `${e.author}${e.hash ? ` · ${e.hash.slice(0, 7)}` : ''}` : (e.actor || 'PlatOpypus');
 async function loadAudit() {
     const q = new URLSearchParams();
     if (auditState.type) q.set('type', auditState.type);

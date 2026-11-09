@@ -101,7 +101,7 @@ export async function backup(project, { who = 'phone' } = {}) {
         const { st, c } = s3();
         const rels = pathsOf(p);
         if (!rels.length) throw httpError(400, 'Nothing to back up: add backup.paths to PORTHOLE.md or a container volume.');
-        for (const tool of ['tar', 'zstd']) { try { await run('sh', ['-c', `command -v ${tool}`]); } catch { throw httpError(500, `${tool} is not installed on this box; run the Porthole update (it installs it).`); } }
+        for (const tool of ['tar', 'zstd']) { try { await run('sh', ['-c', `command -v ${tool}`]); } catch { throw httpError(500, `${tool} is not installed on this box; run the PlatOpypus update (it installs it).`); } }
         fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
         const stamp = new Date(started).toISOString().replace(/[:]/g, '-').replace(/\.\d{3}Z$/, 'Z');
         const name = `${stamp}.tar.zst`;

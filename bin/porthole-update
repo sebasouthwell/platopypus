@@ -14,7 +14,7 @@ set -uo pipefail
 # Callers (containers, a service with a short PATH) may lack sbin, where useradd/groupadd/iptables live.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
-REPO="${PORTHOLE_UPDATE_REPO:-sebasouthwell/porthole}"
+REPO="${PORTHOLE_UPDATE_REPO:-sebasouthwell/platopypus}"
 BRANCH="${PORTHOLE_UPDATE_BRANCH:-stable}"
 SRC="${PORTHOLE_SRC:-/opt/porthole-src}"
 APP="${PORTHOLE_APP:-/opt/porthole}"

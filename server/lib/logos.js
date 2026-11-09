@@ -1,4 +1,4 @@
-// Logos for Docker images, shown on container rows. Official and verified Docker Hub images publish one; Porthole
+// Logos for Docker images, shown on container rows. Official and verified Docker Hub images publish one; PlatOpypus
 // fetches it once, keeps it under state/logos, and serves it from its own origin (the phone never contacts Docker Hub).
 // Images from other registries, or without a logo, get none (remembered for a week so a list stays quick).
 import fs from 'node:fs';

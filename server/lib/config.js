@@ -19,13 +19,13 @@ export const config = {
     bind: process.env.PORTHOLE_BIND || '127.0.0.1',
     // Directory the file browser and new shells are jailed to.
     root: path.resolve(process.env.PORTHOLE_ROOT || home),
-    // Where Porthole keeps its own state (token, shell metadata, tunnel logs, trash).
+    // Where PlatOpypus keeps its own state (token, shell metadata, tunnel logs, trash).
     state: path.resolve(process.env.PORTHOLE_STATE || path.join(home, '.porthole')),
     // Cookie `Secure` flag. Only turn off for plain-http local testing.
     insecureCookie: process.env.PORTHOLE_INSECURE_COOKIE === '1',
     // Extra allowed Origins for WebSocket/CSRF checks (comma separated). Same-host is always allowed.
     allowedOrigins: (process.env.PORTHOLE_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-    // Where published container ports live. 127.0.0.1 on a real box; host.docker.internal when Porthole itself
+    // Where published container ports live. 127.0.0.1 on a real box; host.docker.internal when PlatOpypus itself
     // runs in a container that talks to the host's Docker daemon (local testing).
     dockerHost: process.env.PORTHOLE_DOCKER_HOST || '127.0.0.1',
     // Quick tunnels die after this many minutes unless renewed.
@@ -34,7 +34,7 @@ export const config = {
     maxUploadMb: envInt('PORTHOLE_MAX_UPLOAD_MB', 512),
     // Login session lifetime in days (rolling).
     sessionDays: envInt('PORTHOLE_SESSION_DAYS', 7),
-    // Dedicated tmux server so Porthole's sessions don't collide with the user's own tmux.
+    // Dedicated tmux server so PlatOpypus's sessions don't collide with the user's own tmux.
     tmuxSocket: 'porthole',
     // Shell used for plain sessions.
     shell: process.env.SHELL || '/bin/bash',

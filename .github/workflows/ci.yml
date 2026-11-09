@@ -61,7 +61,7 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
       - name: Build the box image (install.sh on Ubuntu 24.04)
         run: docker build -t porthole:ci .
-      - name: Start a throwaway Porthole
+      - name: Start a throwaway PlatOpypus
         run: |
           docker run -d --name porthole-ci --init --cap-add NET_ADMIN -p 127.0.0.1:7332:7331 \
             -e PORTHOLE_TOKEN=porthole-test -e PORTHOLE_ALLOW_PASSWORD_ONLY=1 \

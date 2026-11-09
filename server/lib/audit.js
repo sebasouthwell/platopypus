@@ -149,7 +149,7 @@ export function query({ type = null, project = null, limit = 300, days = 30 } = 
     return { events: events.slice(-n).reverse(), total: events.length, projects, days: span, retention: retention() };
 }
 
-// Commits in each project's git history (agents commit with git directly, so Porthole never sees the call).
+// Commits in each project's git history (agents commit with git directly, so PlatOpypus never sees the call).
 // Marked as an agent's when the author or a Co-Authored-By trailer names one. Cached briefly: git log per repo.
 const execFileP = promisify(execFile);
 const AGENT_RE = /\b(claude|codex|gemini|copilot|antigravity|agent)\b|noreply@anthropic\.com/i;

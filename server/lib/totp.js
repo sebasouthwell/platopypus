@@ -70,12 +70,12 @@ export function enabled() {
 }
 
 // Step 1: generate a secret and hold it as pending until a valid code proves the app has it.
-export function setup(label = 'Porthole') {
+export function setup(label = 'PlatOpypus') {
     const sec = load();
     const secret = base32Encode(crypto.randomBytes(20));
     sec.pending = { secret, created: Date.now() };
     save(sec);
-    const issuer = 'Porthole';
+    const issuer = 'PlatOpypus';
     const otpauth = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(label)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
     log('auth', 'TOTP setup started');
     return { secret, otpauth };

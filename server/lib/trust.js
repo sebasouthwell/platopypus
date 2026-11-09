@@ -1,5 +1,5 @@
-// Pre-accept each agent's "do you trust this folder?" prompt for the folder a Porthole shell starts in, so an agent
-// opened on the phone goes straight to work. Only ever for the exact folder the user picked in Porthole; everything is
+// Pre-accept each agent's "do you trust this folder?" prompt for the folder a PlatOpypus shell starts in, so an agent
+// opened on the phone goes straight to work. Only ever for the exact folder the user picked in PlatOpypus; everything is
 // best-effort (a format change in an agent's config must never stop the shell from starting).
 //
 //   Claude Code   <config>/.claude.json  projects[dir].hasTrustDialogAccepted = true  (config = CLAUDE_CONFIG_DIR's

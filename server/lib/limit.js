@@ -48,7 +48,7 @@ export async function candidates() {
         out.push({ kind: r.slug.startsWith('run-') ? 'run' : 'server', name: r.slug, title: r.name, created: r.created || 0, mem: u.mem, cpu: u.cpu, stop: () => services.stop(r.slug) });
     }
     const liveSlugs = new Set(servers.filter(r => r.live).map(r => r.slug));
-    // Never the container Porthole itself runs in (docker mode: the hostname is the container id).
+    // Never the container PlatOpypus itself runs in (docker mode: the hostname is the container id).
     const self = os.hostname();
     for (const c of containers) {
         if (c.state !== 'running' || liveSlugs.has(c.name) || c.name.startsWith('live-') || (c.id && self && c.id.startsWith(self))) continue;
@@ -80,7 +80,7 @@ export async function act({ reason = 'load', dry = false, force = false } = {}) 
         }
         plan.left = cands.filter(c => !plan.stopped.some(x => x.name === c.name)).map(view);
         const c = load(); c.last = { at: plan.at, reason, load: plan.load, stopped: plan.stopped.length, links: plan.links.length }; save(c);
-        record('activity', 'limit-reached', { actor: force ? 'phone' : 'Porthole', via: force ? 'Alerts page' : 'limit guard', what: `${reason}: closed ${plan.links.length} link${plan.links.length === 1 ? '' : 's'}, stopped ${plan.stopped.map(x => x.name).join(', ') || 'nothing'}` });
+        record('activity', 'limit-reached', { actor: force ? 'phone' : 'PlatOpypus', via: force ? 'Alerts page' : 'limit guard', what: `${reason}: closed ${plan.links.length} link${plan.links.length === 1 ? '' : 's'}, stopped ${plan.stopped.map(x => x.name).join(', ') || 'nothing'}` });
         alerts.notify('limit', `Limit reached (load ${plan.load} on ${s.cpus} vCPU)\n${plan.links.length ? `Closed ${plan.links.length} public link${plan.links.length === 1 ? '' : 's'}. ` : ''}${plan.stopped.length ? `Stopped: ${plan.stopped.map(x => `${x.title} (${x.mem} MB)`).join(', ')}.` : 'Nothing to stop: only live services and shells are running.'}\nLive services and shells were left alone.`);
         return plan;
     } finally { busy = false; }

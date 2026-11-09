@@ -62,8 +62,8 @@ jobs:
           echo "--- notes ---"; cat notes.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Porthole $VERSION" "$SHA"
+          git tag -a "$TAG" -m "PlatOpypus $VERSION" "$SHA"
           git push origin "$TAG"
-          gh release create "$TAG" --title "Porthole $VERSION" --notes-file notes.md --verify-tag --latest
+          gh release create "$TAG" --title "PlatOpypus $VERSION" --notes-file notes.md --verify-tag --latest
           echo "### Released $TAG" >> "$GITHUB_STEP_SUMMARY"
           cat notes.md >> "$GITHUB_STEP_SUMMARY"

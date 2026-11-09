@@ -1,4 +1,4 @@
-# Porthole
+# Agent PlatOpypus
 
 A phone-first web console for your own Linux dev box. Open it on a phone and you get real terminals running
 AI coding agents, a file browser with upload and editing, one-tap public links to anything that listens on a
@@ -34,7 +34,7 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   flavours: a native box editor or a Docker project editor that sees one folder.
 - **Vault** — an n8n-style credential store: a catalogue of ~80 services, each with typed fields for its auth
   style (API key, token, user+password, client pair, AWS keys, webhook URL, bot+chat, SMTP, connection URL,
-  JSON file, SSH key, **OAuth2** with PKCE and automatic refresh through Porthole's own redirect endpoint).
+  JSON file, SSH key, **OAuth2** with PKCE and automatic refresh through PlatOpypus's own redirect endpoint).
   Every field is exported to shells as `<PREFIX>_<FIELD>` (`TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`,
   `SPOTIFY_ACCESS_TOKEN`…), general or per project, and the agents are told to use `vault ls` / `vault get`
   instead of asking you.
@@ -44,7 +44,7 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   update strategy, operator actions, links, credentials). Services lists them first with Start/Stop, and each has a
   page where actions are buttons, credentials are tap-to-copy and Put on hostname sets up DNS, nginx and a Let's
   Encrypt certificate (a coming-up page shows until the service answers). Format: docs/LIVE.md.
-- **I wish for:** on Home — write what you want; Porthole proposes a new project folder named after it, asks the usual
+- **I wish for:** on Home — write what you want; PlatOpypus proposes a new project folder named after it, asks the usual
   agent, session and security questions, and starts the agent with your text as its first message. Agents start
   already trusting the folder you picked, so there is no trust prompt.
 - **Session types and security levels** — starting an agent asks: project work or a control session (moving files,
@@ -69,7 +69,7 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
   work. Phone attachments in `.pasted/` are ignored by git everywhere.
 - **Servers** — `svc run --name "API" --port 8000 -- npm run dev` starts a process in its own logged session and lists
   it on Services as a named server with Stop (whole process group, plus its public link), Start, Logs and Share.
-  `svc add --port 8000` registers something already running. Box plumbing (Porthole, agents' local ports,
+  `svc add --port 8000` registers something already running. Box plumbing (PlatOpypus, agents' local ports,
   code-server, daemons) sits under a collapsed System group with no Share button.
 - **Shared credentials** — More → Shared credentials lists everything agents handed over, grouped by project, with
   live/gone status and one-tap stale cleanup. Separate from the Vault on purpose: the Vault is what agents use, this is
@@ -81,7 +81,7 @@ Design reference: `web/design/mockup.html` (served at `/design/mockup.html` on a
 
 ## Security model
 
-Porthole is root-level control of a box, so every layer assumes the one before it can fail.
+PlatOpypus is root-level control of a box, so every layer assumes the one before it can fail.
 
 | Layer | What |
 |---|---|
@@ -91,7 +91,7 @@ Porthole is root-level control of a box, so every layer assumes the one before i
 | Session | HttpOnly + Secure + SameSite=Strict cookie, 256-bit id, 7-day rolling **with a 30-day absolute cap**, persisted; "Sign out others". Any credential change (password, passkey added/removed, two-step on/off) signs out every other device. The client address comes from the socket; `X-Real-IP` is honoured only when the connection comes from the local reverse proxy. |
 | Requests | Same-host Origin and `X-Porthole: 1` header on every mutation; WebSocket upgrades need cookie + Origin. CSP, nosniff, no-referrer, frame-ancestors self. |
 | Files | Paths resolved with realpath against the configured root; names sanitised; upload cap; atomic editor writes; delete = move to trash. Inline previews serve html/svg/xml/js as plain text under a `sandbox` CSP. |
-| Tunnels | Public URLs → warning in UI, auto-expiry (4 h; 20 min for editors), Porthole's own port refused, and a watcher that closes a tunnel when the process behind it disappears. |
+| Tunnels | Public URLs → warning in UI, auto-expiry (4 h; 20 min for editors), PlatOpypus's own port refused, and a watcher that closes a tunnel when the process behind it disappears. |
 | Vault | AES-256-GCM, key file 0600, values never listed, reveal is explicit and logged, reserved env names blocked, project scope only reaches shells in that folder. |
 | Docker | Arguments validated and exec'd without a shell; containers bind to loopback. |
 | Process | Runs as root by default (`PORTHOLE_USER=ubuntu` for a confined install). Loopback-only token sign-in remains for the box's own `vault`/`tunnel` CLIs; requests through the reverse proxy can never use it. |
@@ -104,7 +104,7 @@ this file.
 
 Ubuntu 24.04, any cloud. Put the repo on the box and run the installer as root. It installs Node 22, tmux,
 cloudflared, Docker, GitHub CLI, Claude Code, Codex CLI, Antigravity CLI, code-server, Tailscale, the
-Porthole service, and (when a domain is given) nginx with a Let's Encrypt certificate.
+PlatOpypus service, and (when a domain is given) nginx with a Let's Encrypt certificate.
 
 ```bash
 git clone https://github.com/<you>/porthole /opt/porthole-src
@@ -132,8 +132,8 @@ docker compose exec porthole node /tmp/smoke.mjs     # ~5 min end-to-end suite, 
 
 Open `http://127.0.0.1:7331/`, setup token `porthole-test`. The compose file mounts the host Docker socket so
 the Docker features can be exercised, sets `PORTHOLE_DOCKER_HOST=host.docker.internal` (container ports live on
-the host when Porthole itself runs in a container), and allows password-only setup because passkeys need
-https or localhost. On a real box Porthole runs natively and none of that applies.
+the host when PlatOpypus itself runs in a container), and allows password-only setup because passkeys need
+https or localhost. On a real box PlatOpypus runs natively and none of that applies.
 
 ## Layout
 
@@ -154,7 +154,7 @@ scripts/           make-icons.mjs (PWA icons), make-sprite.mjs (Lucide sprite)
 The box checks the public repo once a day (and on demand under More) and shows "Update available" with the
 latest commit messages. **Update** shows a "shutting down for approximately 5 minutes" screen and runs a
 detached updater: fetch the repo into `/opt/porthole-src`, snapshot `/opt/porthole`, re-run `install.sh`,
-restart only the Porthole service, and roll back automatically if the API is not healthy within 30 seconds.
+restart only the PlatOpypus service, and roll back automatically if the API is not healthy within 30 seconds.
 State (`~/.porthole`), your files, tmux sessions, Docker and nginx are never touched; the page reloads itself
 when the service is back. Point it at a fork with `PORTHOLE_UPDATE_REPO=owner/repo`. **`UPDATE.md`** is the contract for new versions:
 how the updater runs, every state file and its shape, and the rules for changing them compatibly.
@@ -179,7 +179,7 @@ need (or `vault env` in a shell). Then destroy the machine.
   lockout; `/api/login/token` is loopback-only.
 - **Everything else:** session cookie required; mutations also require same-host Origin and `X-Porthole: 1`;
   WebSocket upgrades require cookie + Origin. Inputs: shell names `^[A-Za-z0-9][\w-]{0,39}$`; ports 1–65535
-  (Porthole's own refused); image/container/compose names by regex and passed as argv; vault env names
+  (PlatOpypus's own refused); image/container/compose names by regex and passed as argv; vault env names
   `UPPER_SNAKE` with reserved names blocked; git paths via the root resolver, repo specs by regex, messages as
   argv. Secrets are never listed. Error messages carry only the last lines of tool stderr.
 

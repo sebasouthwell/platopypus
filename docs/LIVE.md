@@ -1,9 +1,9 @@
-# Porthole Live — the standard for a project that runs as a live service
+# PlatOpypus Live — the standard for a project that runs as a live service
 
-A project tells Porthole how to run, expose, update and back it up through one file in its root: **`PORTHOLE.md`**.
-The file is Markdown with a YAML front matter block. The front matter is the contract Porthole reads; the body is
+A project tells PlatOpypus how to run, expose, update and back it up through one file in its root: **`PORTHOLE.md`**.
+The file is Markdown with a YAML front matter block. The front matter is the contract PlatOpypus reads; the body is
 free text for people and agents (what the project is, how it works, gotchas). Agents are expected to write and keep
-this file current; the user approves what Porthole does with it from the phone.
+this file current; the user approves what PlatOpypus does with it from the phone.
 
 ## The file
 
@@ -38,7 +38,7 @@ services:
       - label: Set counter
         run: printf '{"count":%s}' "$INPUT_COUNT" > data/count.json
         stop_first: true
-        inputs:                   # the phone shows a form; Porthole checks every value before running
+        inputs:                   # the phone shows a form; PlatOpypus checks every value before running
           - name: count           # reaches the command as $INPUT_COUNT (always quote it)
             label: New total
             type: integer         # string | integer | number | boolean | choice
@@ -75,7 +75,7 @@ services:
 data:
   - engine: postgres              # postgres | redis | mysql | mongo | sqlite
     version: "16"
-    env: DATABASE_URL             # Vault entry Porthole creates (project scope) with the connection URL
+    env: DATABASE_URL             # Vault entry PlatOpypus creates (project scope) with the connection URL
   - engine: sqlite
     path: data/app.db
 backup:
@@ -88,19 +88,19 @@ Free text. What the service does, where things live, what an operator should kno
 
 Everything under `services`, `data` and `backup` is optional; a project with only `name` is still a project.
 
-## What Porthole does with it
+## What PlatOpypus does with it
 
 | Feature | Behaviour |
 |---|---|
 | **Live services section** | Every service in every project's `PORTHOLE.md` is listed, with running/stopped, the live address, the pinned git commit and whether dev is ahead. |
 | **Start / Stop** | `start` runs in its own logged session (the `svc` registry) with the service's `env` and the Vault entries named in `needs` for the project's scope. Stop kills the whole process group. |
-| **Containers** | A service with `image:` instead of `start:` runs as a Docker container through the same registry: Start/Stop, the log, the hostname, actions, pins and alerts all work the same. Porthole composes the `docker run` from the checked fields (image, port, volumes, memory, command), so nothing written in the file runs as root. Inside, the app runs as the project's account with all capabilities dropped, sees only the folders under `volumes:` (inside the project), and is bound to loopback. **Update image** on the service page pulls the image again and restarts the service if it changed. Containers are logged in the Network tab by name and are kept off the metadata service. Live services that were running when the box went down are started again at boot. |
-| **Hostname** | Setting `hostname` (or tapping Share on your domain) provisions it **before** the app exists: DNS record to the box, nginx block, Let's Encrypt certificate, with Porthole's own placeholder page answering on https. Once the service is running and healthy, nginx is switched to its port. Removing the service removes the nginx block, the certificate and the DNS record. |
+| **Containers** | A service with `image:` instead of `start:` runs as a Docker container through the same registry: Start/Stop, the log, the hostname, actions, pins and alerts all work the same. PlatOpypus composes the `docker run` from the checked fields (image, port, volumes, memory, command), so nothing written in the file runs as root. Inside, the app runs as the project's account with all capabilities dropped, sees only the folders under `volumes:` (inside the project), and is bound to loopback. **Update image** on the service page pulls the image again and restarts the service if it changed. Containers are logged in the Network tab by name and are kept off the metadata service. Live services that were running when the box went down are started again at boot. |
+| **Hostname** | Setting `hostname` (or tapping Share on your domain) provisions it **before** the app exists: DNS record to the box, nginx block, Let's Encrypt certificate, with PlatOpypus's own placeholder page answering on https. Once the service is running and healthy, nginx is switched to its port. Removing the service removes the nginx block, the certificate and the DNS record. |
 | **Actions** | Each action is a button on the service page. It runs in the service's folder, the output is shown on the phone and kept in the service log. `confirm: true` asks first. |
 | **Groups** | `groups:` under a service lists things the service manages: rooms, sessions, users. Each group has a `label`, a `list` command that prints the current items (one id per line, `id<TAB>label` for a name, or JSON `[{"id","label","sub"}]`), and `actions` that run for one item with `$GROUP_ITEM` set to its id (and `$GROUP` to the label). On the service page each group is a dropdown, closed until opened, under the main actions; tapping an item opens its commands, and **All N** runs an action once per item (`all: false` keeps an action to single items; a `restart`/`stop_first` happens once at the end). Ids must come from the list: the phone cannot send one that is not in it, ids are limited to letters, digits and `._:@+-=/`, and inputs are checked as for actions. Example: `groups: [{ label: Rooms, item: room, list: node scripts/rooms.js, actions: [{ label: Close, run: node scripts/room.js close "$GROUP_ITEM", confirm: true }] }]` |
 | **Pins and recents** | Any action, group or single item (a room) can be pinned to Home and the desktop sidebar (**Pin to Home…** on the service page, **Pin** on an item's sheet). A pinned action runs in one tap, after its confirmation or inputs; a pinned group or item opens its sheet. Home also lists the last commands run (**Recent**), which reopen their sheet without running. Running cards show the service's groups and first three actions as chips. Pins point by label and item id, are checked when opened (a closed room shows as gone), and go through the same routes and checks as the service page. |
 | **Credentials** | Shown with reveal/copy. Values come from the Vault by env name. Cards handed over by agents with `credshare` for the same port appear beside them, tagged *from agent*; Porthole-generated ones (database passwords) are tagged *generated*. |
-| **Data** | Each `data` engine runs as a managed container with its own volume under `~/data/<project>/<engine>`, bound to loopback, never shareable. Porthole creates the project-scoped Vault entry named in `env` with the connection URL. |
+| **Data** | Each `data` engine runs as a managed container with its own volume under `~/data/<project>/<engine>`, bound to loopback, never shareable. PlatOpypus creates the project-scoped Vault entry named in `env` with the connection URL. |
 | **Backup** | From the phone (More → Backups, or the service page): `backup.paths` plus every folder a container service mounts, as one `tar.zst` with owners kept, to a private S3 bucket configured in the Vault (service *Backup storage (S3)*: key, secret, bucket, region; a key limited to that bucket). The service is frozen (SIGSTOP / docker pause) for the seconds the files are read, never stopped. Restore stops the service, keeps the current folders in `.porthole/restore-undo-…`, puts the archive back and starts again. Retention keeps the last N per project (14); an optional daily run at a chosen hour per project. Engine dumps (pg_dump and friends) come with data engines. |
 | **Dev and live** | Live runs from its own checkout under `~/live/<project>` pinned to a commit; development continues in `~/Projects/<project>`. When dev is ahead, the service page says so and offers Update. A second agent can be started in the live checkout for hot fixes. |
 | **Update strategy** | Per service, asked on the phone the first time: **full** (stop, replace the checkout, reset data, start, for stateless apps), **preserve-data** (stop, update code, keep data, run the migration action if there is one, start), **patch** (run the service's `patch` command, no reset). A backup before updating is offered when the project has data. |
@@ -132,11 +132,11 @@ server `run-<name>` (stop, restart, logs in Services), and `.portholerun` is add
 - Create or update `PORTHOLE.md` whenever you add a service, change how it starts, or add a command an operator will
   want again. Keep `actions` small and useful; they become buttons.
 - **Who runs what.** Each project's services and actions run as that project's own account, `ps-<project>`: no
-  login shell, no sudo, no AI logins, no Porthole token. It reaches exactly one folder, its project, through an ACL;
+  login shell, no sudo, no AI logins, no PlatOpypus token. It reaches exactly one folder, its project, through an ACL;
   it is not in `porthole-dev`, and project folders give nothing to "other", so a compromised app cannot read another
-  project, the agent's home or Porthole's state. The firewall refuses these accounts the EC2 metadata service (the
-  box's AWS role) and Porthole's API. Its environment is only the manifest's `env` plus the Vault names listed under
-  `needs:`, nothing else from the Vault. Porthole stays root and is the controller: it starts the process, keeps the
+  project, the agent's home or PlatOpypus's state. The firewall refuses these accounts the EC2 metadata service (the
+  box's AWS role) and PlatOpypus's API. Its environment is only the manifest's `env` plus the Vault names listed under
+  `needs:`, nothing else from the Vault. PlatOpypus stays root and is the controller: it starts the process, keeps the
   log, and stops or kills the whole process group.
 - **Root.** `run_as: root` is for the rare app that needs it (low port, Docker socket). The phone must approve it, and
   the approval is pinned to the start, patch and action commands **and the project's code**: with git, every tracked
@@ -152,21 +152,21 @@ server `run-<name>` (stop, restart, logs in Services), and `.portholerun` is add
 - Actions run in the service folder with the service's environment plus `PORTHOLE_SERVICE` (its slug). Never
   restart the service from inside the command (`svc restart …`): use `restart: true`, or `stop_first: true` when the
   command edits data the running process keeps in memory and would write back (a counter, a cache, a SQLite file
-  open in WAL mode). Porthole stops, runs, then starts, and reports each step in the output.
+  open in WAL mode). PlatOpypus stops, runs, then starts, and reports each step in the output.
 - Starting a live service takes over its port from a plain server started in the same project folder (an agent's
   `svc run` while testing); any other process on that port is reported and the start is refused.
 - Never write secret values into the file. Reference Vault env names (`$ADMIN_PASSWORD`, `needs:`).
-- `live check` validates the file; `live status` shows what Porthole sees; `live deploy <service>` asks Porthole to
+- `live check` validates the file; `live status` shows what PlatOpypus sees; `live deploy <service>` asks PlatOpypus to
   start or update it (the user confirms on the phone for updates that touch data).
-- Do not create DNS records, certificates, nginx blocks or tunnels yourself. Set `hostname` and let Porthole do it.
+- Do not create DNS records, certificates, nginx blocks or tunnels yourself. Set `hostname` and let PlatOpypus do it.
 
 ## Decisions
 
 1. **Where the file lives:** `PORTHOLE.md` in the project root or `docs/PORTHOLE.md`; the root one wins if both exist.
-2. **Services with no port** (workers, bots, game servers on raw UDP) are allowed. Porthole suggests running them on
-   their own host; there they are controlled only through Porthole (Terraform lifecycle + the admin API), with no
+2. **Services with no port** (workers, bots, game servers on raw UDP) are allowed. PlatOpypus suggests running them on
+   their own host; there they are controlled only through PlatOpypus (Terraform lifecycle + the admin API), with no
    hostname. On this box they run like any other service, just without Share.
-3. **Before a service is up** its hostname shows a Porthole "coming up" page, served by nginx over https. The same
+3. **Before a service is up** its hostname shows a PlatOpypus "coming up" page, served by nginx over https. The same
    page shows whenever the service is stopped or restarting, so the address never errors.
 4. **Raw ports:** a service may declare `expose: [{ port: 27015, proto: udp }]` for clients that do not speak http
    (game servers). On its own host these become security-group rules; on this box they are refused (the box only
@@ -179,15 +179,15 @@ service can move between them.
 
 | | **On this box** | **On its own host** (roadmap) |
 |---|---|---|
-| Where | the Porthole box, next to your shells and agents | a separate cloud machine created by Terraform for this service |
+| Where | the PlatOpypus box, next to your shells and agents | a separate cloud machine created by Terraform for this service |
 | Cost | nothing extra | the host's hourly price, bounded by its lifetime |
 | Isolation | shares the box, its disk and the agents' access | separate machine; a compromise of the service cannot reach the box, the Vault or your shells |
 | Lifetime | until you stop it | until you stop it, or self-destructs at a set expiry |
-| Control | directly, as with any registered server | through a small admin API on the host, authenticated with a per-host key that Porthole holds |
+| Control | directly, as with any registered server | through a small admin API on the host, authenticated with a per-host key that PlatOpypus holds |
 | Good for | dev previews, small always-on tools, anything cheap | public game nights, anything strangers will hit, anything you want gone afterwards |
 
 The service page shows the same controls in both modes (start, stop, actions, logs, backup, update); only the
-transport differs. For an external host, Porthole talks to its admin API over https with that host's credential,
+transport differs. For an external host, PlatOpypus talks to its admin API over https with that host's credential,
 which can do nothing except operate that one service and is destroyed with the host.
 
 ### Static sites on a static host (roadmap)
@@ -195,16 +195,16 @@ which can do nothing except operate that one service and is destroyed with the h
 A service declared `static: { build: npm run build, output: dist }` (no `start`, no port) can be published to a static
 host instead of running anywhere. First integration: **Vercel** — a Vercel account sits under Cloud accounts like the
 others (an access token in the Vault), Publish runs the build on the box, uploads the output with the Vercel API,
-and attaches the service's hostname (Porthole adds the DNS record in Cloudflare and Vercel issues the certificate).
+and attaches the service's hostname (PlatOpypus adds the DNS record in Cloudflare and Vercel issues the certificate).
 The service page shows the deployment URL, the last deploy and its commit, with Publish and Remove. Rules:
 
 - Static only: no server process, no data engines, no `actions` that need a running service.
-- Vercel's free Hobby plan is for personal, non-commercial use; Porthole says so when the account is added.
-- **Cloudflare Pages** is the natural second integration: same flow, uses the Cloudflare token Porthole already has.
+- Vercel's free Hobby plan is for personal, non-commercial use; PlatOpypus says so when the account is added.
+- **Cloudflare Pages** is the natural second integration: same flow, uses the Cloudflare token PlatOpypus already has.
 
 ## Later: ephemeral hosts (roadmap, not built)
 
-Run a live service on its own short-lived cloud machine instead of the Porthole box, e.g. a game server for one night.
+Run a live service on its own short-lived cloud machine instead of the PlatOpypus box, e.g. a game server for one night.
 
 - **Cloud accounts** work like the AI agent profiles: a page under More lists providers (AWS first), each with one
   or more named accounts ("personal", "work sandbox") you sign in to once and switch between. Each account shows
@@ -219,17 +219,17 @@ Run a live service on its own short-lived cloud machine instead of the Porthole 
   all (management goes through SSM and the admin API). Egress stays open for package installs and git.
 - **Every host comes ready:** nginx, certbot and the coming-up page are installed by cloud-init before the project is
   cloned, so the hostname answers on https within minutes, then switches to the service once its health check passes.
-- Porthole renders a Terraform stack per host from a template, applies it with its own state under
+- PlatOpypus renders a Terraform stack per host from a template, applies it with its own state under
   `~/.porthole/ephemeral/<id>/`, boots the instance with cloud-init that clones the project at the pinned commit and
   starts the service from `PORTHOLE.md`, then points the chosen hostname at it with nginx + Let's Encrypt on that host.
 - **Admin API** on each host: a tiny agent (start, stop, status, logs, actions, backup) bound behind nginx on the
-  host's hostname under a random path, requiring a per-host key generated at creation. **Porthole holds the key**
+  host's hostname under a random path, requiring a per-host key generated at creation. **PlatOpypus holds the key**
   (encrypted in its own state, like a tunnel run token) and uses it whenever you operate the service from the
   phone; it is never exported to shells or agents, and it is revoked with the host. The host never has the cloud
-  access key either; only Porthole does.
-- **Expiry is enforced three ways**, so it holds even if Porthole is off: the instance's shutdown behaviour is
+  access key either; only PlatOpypus does.
+- **Expiry is enforced three ways**, so it holds even if PlatOpypus is off: the instance's shutdown behaviour is
   `terminate` and cloud-init schedules `shutdown -h` at expiry; an EventBridge one-shot terminates it at expiry plus a
-  margin; Porthole runs `terraform destroy` at expiry and removes the DNS record. EBS volumes delete on termination.
-- **"Leaves nothing behind"** means no running resources, disks, addresses, DNS records or Porthole state remain.
+  margin; PlatOpypus runs `terraform destroy` at expiry and removes the DNS record. EBS volumes delete on termination.
+- **"Leaves nothing behind"** means no running resources, disks, addresses, DNS records or PlatOpypus state remain.
   It cannot mean no record at all: the provider keeps billing lines and, if enabled, CloudTrail events.
 - Data from the host is only kept if you press Backup before expiry (same private S3 bucket as above).

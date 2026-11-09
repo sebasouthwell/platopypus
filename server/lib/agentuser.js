@@ -1,4 +1,4 @@
-// The unprivileged user AI agents run as (docs/AGENT-USER.md). Porthole stays root; agent-user shells run their
+// The unprivileged user AI agents run as (docs/AGENT-USER.md). PlatOpypus stays root; agent-user shells run their
 // command through runuser, sign in to the API with a per-shell token, and ask for root per command (elevate.js).
 
 import fs from 'node:fs';
@@ -131,7 +131,7 @@ const mv = (from, to) => run('mv', ['-T', from, to], { timeout: 300_000 });
 const LOGIN_ITEMS = ['.claude', '.claude.json', '.agent-profiles', '.codex', '.gemini', '.antigravity'];
 const markerFile = () => path.join(config.state, 'logins-moved.json');
 export function loginsMoved() { try { return JSON.parse(fs.readFileSync(markerFile(), 'utf8')); } catch { return null; } }
-// The home whose AI logins Porthole uses: the agent user's once moved, otherwise root's.
+// The home whose AI logins PlatOpypus uses: the agent user's once moved, otherwise root's.
 export function loginHome() { const a = info(); return a && loginsMoved() ? a.home : config.home; }
 
 export function rootLogins() { return LOGIN_ITEMS.filter(i => fs.existsSync(path.join(config.home, i))); }

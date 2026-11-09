@@ -101,7 +101,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
         if (oneshot) {
             // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
-            // throwaway folder. Output is tee'd to /tmp so Porthole can keep it after the shell and folder are gone.
+            // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
             const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
