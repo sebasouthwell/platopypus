@@ -529,6 +529,10 @@ phone's Update button. Mechanism:
   direct child of a tab or page is held in the content column (`.tab > *` margins are now `!important`).
   `plato reset-auth`: the 2.1.1 fix had a line break inside the token command and crashed after clearing the logins;
   fixed here (2.1.1 was never released).
+- **2.2.1** — the paper editor gets an Agent pane: ask for a change to the paper (the open file and any selected text
+  go with it), with a saved version recommended first. New routes `GET /api/research/:slug/versions` (uncommitted
+  files, last version), `POST …/revert` (paper back to the last version), `POST …/edits` (one agent run; one at a time).
+  Edit requests are stored with the topic's questions (`kind: "edit"`). No state change outside a topic.
 
 ## Release checklist
 

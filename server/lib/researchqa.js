@@ -83,3 +83,26 @@ export async function addToPaper(slug, id, { agent = 'claude' } = {}) {
     return q;
 }
 export function remove(slug, id) { const dir = topicPath(slug); const f = qFile(dir, id); if (!T.exists(f)) throw httpError(404, 'No such question.'); fs.rmSync(f); return { ok: true }; }
+
+// ---------- the editor's agent panel: ask for a change to the paper ----------
+const editPrompt = q => `The user is editing their paper and asked you for this change.
+
+Request (${q.id}): ${q.text}
+${q.file ? `\nThey have paper/${q.file} open.` : ''}${q.selection ? `\nThey selected this text:\n<<<\n${q.selection}\n>>>` : ''}
+
+How:
+1. Read notes/decisions.md, and template/structure.md if it exists.
+2. Make the change in paper/ and nothing wider than what was asked. Keep their wording wherever they did not ask for it to change.
+3. A new claim needs a source: research find / research read, then research cite <id> [--at mm:ss | --page n] --claim "…" for the \\cite. Never invent a reference.
+4. research build, and fix what it reports.
+5. Tell them what you did in two or three plain sentences (which file, what changed, anything you could not do): research reply ${q.id} --text "…"
+Do not ask the user anything in this run. Do not commit: versions are theirs to save.`;
+
+export async function edit(slug, text, { agent = 'claude', file = '', selection = '' } = {}) {
+    const dir = topicPath(slug); const t = String(text || '').trim(); if (t.length < 3) throw httpError(400, 'Say what you want changed.');
+    if (list(slug).some(q => q.kind === 'edit' && q.status === 'waiting' && !q.problem)) throw httpError(409, 'An agent is already changing the paper. Wait for it to finish.');
+    const q = { id: crypto.randomBytes(5).toString('hex'), topic: slug, kind: 'edit', text: t.slice(0, 2000), file: /^[\w./-]{1,80}$/.test(String(file)) ? String(file) : '', selection: String(selection || '').slice(0, 6000), status: 'waiting', created: Date.now(), toPaper: null };
+    save(dir, q); record('activity', 'research-edit-request', { actor: 'phone', what: `${slug}: ${q.text.slice(0, 100)}`, cwd: dir });
+    await dispatch(slug, dir, q, editPrompt(q), agent);
+    return q;
+}

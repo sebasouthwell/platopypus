@@ -80,3 +80,19 @@ export async function upload(slug, req, name) {
         return { id, title: meta.title || base, key: c.key, pages: meta.pages || null, doi: doi.ok ? doi.doi : null, needsMeta: !doi.ok };
     } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
 }
+
+// What the editor shows before an agent is let loose on the paper: is there anything not yet in a version?
+export async function state(slug) {
+    const dir = await ensureRepos(slug); const paper = path.join(dir, 'paper');
+    const changed = (await git(paper, ['status', '--porcelain'])).split('\n').filter(Boolean).map(l => l.slice(3));
+    let last = null; try { const [id, t, ...m] = (await git(paper, ['log', '-1', '--format=%h%x09%ct%x09%s'])).trim().split('\t'); if (id) last = { id, at: Number(t) * 1000, message: m.join('\t') }; } catch { /* no version yet */ }
+    return { dirty: changed.length > 0, changed: changed.slice(0, 30), last };
+}
+// Put the paper back to the last saved version (what an agent or you changed since then is dropped).
+export async function revert(slug) {
+    const dir = await ensureRepos(slug); const paper = path.join(dir, 'paper');
+    const st = await state(slug); if (!st.last) throw httpError(409, 'There is no saved version to go back to.');
+    await git(paper, ['checkout', '--', '.']); await git(paper, ['clean', '-fd', '-q']);
+    record('activity', 'research-revert', { actor: 'phone', what: `${slug}: back to ${st.last.id} (${st.changed.length} file${st.changed.length === 1 ? '' : 's'} dropped)`, cwd: dir });
+    return { ok: true, last: st.last, dropped: st.changed };
+}

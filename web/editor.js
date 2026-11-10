@@ -25,7 +25,7 @@
     // "both" keeps the source open beside the preview, so you can write against the original and see the result.
     function pane(p) {
         S.pane = p; const both = p === 'both'; localStorage.setItem('editor.pane', both ? 'both' : 'preview');
-        $('#preview').hidden = !(p === 'preview' || both); $('#source').hidden = !(p === 'source' || both); $('#spelling').hidden = p !== 'spelling';
+        $('#preview').hidden = !(p === 'preview' || both); $('#source').hidden = !(p === 'source' || both); $('#spelling').hidden = p !== 'spelling'; $('#agent').hidden = p !== 'agent'; if (p === 'agent') drawAgent();
         $('#side').classList.toggle('both', both); $('#grid').classList.toggle('wide-side', both);
         if (both && !$('#source').innerHTML.trim()) $('#source').innerHTML = '<div class="empty">Open a source from References, or click a citation, and it stays here while you write.</div>';
         if (p === 'spelling') checkSpelling(); $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.pane === p));
@@ -180,6 +180,48 @@
         let m = re.exec(code.value); if (!m) { re.lastIndex = 0; m = re.exec(code.value); } if (!m) return toast('Not found in this file.', true);
         view('edit'); code.focus(); code.setSelectionRange(m.index, m.index + w.length);
         const line = code.value.slice(0, m.index).split('\n').length; code.scrollTop = Math.max(0, (line - 6) * parseFloat(getComputedStyle(code).lineHeight));
+    }
+
+    // ----- agent: ask for a change to the paper, with a saved version to fall back on -----
+    let agentPoll = null;
+    async function drawAgent() {
+        const box = $('#agent'); if (box.hidden) return;
+        let st, qs; try { [st, qs] = await Promise.all([api(`/api/research/${enc}/versions`), api(`/api/research/${enc}/questions`)]); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        const edits = qs.questions.filter(q => q.kind === 'edit').reverse(); const busy = edits.some(q => q.status === 'waiting' && !q.problem);
+        const sel = code.value.slice(code.selectionStart, code.selectionEnd); const keep = $('#ag-text')?.value || '';
+        const when = st.last ? new Date(st.last.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+        box.innerHTML = `<div class="ag-ver ${st.dirty ? 'warn' : ''}"><div><b>${st.dirty ? 'You have changes that are not in a version' : st.last ? 'Everything is saved in a version' : 'No version saved yet'}</b><span>${st.dirty ? `${esc(st.changed.join(', '))}. Save a version before the agent edits, so you can go back.` : st.last ? `Last version ${esc(when)}: ${esc(st.last.message)}` : 'Save one before the agent edits, so you can go back.'}</span></div>${st.dirty || !st.last ? '<button class="btn" id="ag-save">Save version</button>' : ''}</div>
+            <textarea id="ag-text" rows="4" placeholder="What should the agent change? For example: tighten the introduction, or add a paragraph on pumped hydro losses with sources." ${busy ? 'disabled' : ''}></textarea>
+            <div class="ag-row"><span class="muted">${sel.trim() ? `Your selection (${sel.length} characters) goes with it.` : `It will know you have ${esc(S.cur || 'no file')} open. Select text to point at a passage.`}</span><button class="btn pri" id="ag-run" ${busy ? 'disabled' : ''}>${busy ? 'Working…' : 'Ask the agent'}</button></div>
+            <div id="ag-choice"></div>
+            ${st.last && st.dirty ? '<div class="ag-row"><span class="muted">Not happy with the changes since the last version?</span><button class="pill" id="ag-revert">Go back to the last version</button></div>' : ''}
+            ${edits.map(q => `<div class="ag-item"><p class="q">${esc(q.text)}</p>${q.status === 'waiting' ? `<p class="muted">${q.problem ? esc(q.problem) : 'The agent is working on it…'}</p>` : `<p class="a">${esc(q.answer || '')}</p>`}</div>`).join('')}`;
+        $('#ag-text').value = keep;
+        const saveVersion = async msg => { if (!(await save())) return false; try { await api(`/api/research/${enc}/commit`, { method: 'POST', body: { message: msg } }); return true; } catch (e) { toast(e.message, true); return false; } };
+        const sv = $('#ag-save'); if (sv) sv.onclick = async () => { if (await saveVersion('Saved from the editor')) { toast('Version saved'); drawAgent(); } };
+        const run = async () => {
+            const text = $('#ag-text').value.trim(); if (!text) return toast('Say what you want changed.', true);
+            try { await api(`/api/research/${enc}/edits`, { method: 'POST', body: { text, file: S.cur || '', selection: sel, agent: localStorage.getItem('porthole.agent') || 'claude' } }); $('#ag-text').value = ''; } catch (e) { toast(e.message, true); }
+            drawAgent();
+        };
+        $('#ag-run').onclick = async () => {
+            if (!$('#ag-text').value.trim()) return toast('Say what you want changed.', true);
+            if (!(await save())) return;
+            const now = await api(`/api/research/${enc}/versions`);
+            if (!now.dirty && now.last) return run();
+            // Recommended, not forced: a version first means one tap undoes whatever the agent does.
+            $('#ag-choice').innerHTML = `<div class="ag-ask"><p>Save a version first? Then you can go back if you do not like what the agent does.</p><div><button class="btn pri" id="ag-yes">Save version, then ask</button><button class="btn" id="ag-no">Ask without saving</button></div></div>`;
+            $('#ag-yes').onclick = async () => { if (await saveVersion('Before the agent edits')) run(); }; $('#ag-no').onclick = run;
+        };
+        const rv = $('#ag-revert'); if (rv) rv.onclick = async () => {
+            $('#ag-choice').innerHTML = `<div class="ag-ask"><p>Drop every change since the last version (${esc(when)})? This cannot be undone.</p><div><button class="btn" id="ag-rv-yes">Yes, go back</button><button class="btn" id="ag-rv-no">Keep my changes</button></div></div>`;
+            $('#ag-rv-no').onclick = drawAgent;
+            $('#ag-rv-yes').onclick = async () => { try { await api(`/api/research/${enc}/revert`, { method: 'POST', body: {} }); S.dirty = false; S.conflict = false; await loadAll(); if (S.cur) await openFile(S.cur).catch(() => openFile('main.tex')); toast('Back to the last version'); } catch (e) { toast(e.message, true); } pane('agent'); };
+        };
+        clearTimeout(agentPoll);
+        if (busy) agentPoll = setTimeout(async () => { await drawAgent(); }, 5000);
+        else if (S.agentWasBusy) { await loadAll(); if (S.cur && !S.dirty) await openFile(S.cur).catch(() => {}); pane('agent'); await refreshPreview(); toast('The agent has finished: the file is reloaded'); }   // pick up what it wrote
+        S.agentWasBusy = busy;
     }
 
     // ----- the preview, with clickable citations -----
