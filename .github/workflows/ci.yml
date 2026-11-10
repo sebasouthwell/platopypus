@@ -73,6 +73,8 @@ jobs:
           set -o pipefail
           docker exec -e TUNNEL=0 porthole-ci bash -lc 'cd /opt/porthole/server && node /opt/test/smoke.mjs' | tee smoke.txt
           grep -q '^all checks passed' smoke.txt
+      - name: Research tools (parts needing LaTeX, ffmpeg or OCR print SKIP on this image)
+        run: docker exec porthole-ci bash -lc 'node /opt/test/research.mjs'
       - name: Browser probe (headless Chromium)
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i --no-audit --no-fund playwright@1 >/dev/null

@@ -1,12 +1,12 @@
 {
-  "name": "Porthole",
-  "short_name": "Porthole",
-  "description": "A window onto your dev box: shells, files, tunnels.",
+  "name": "Agent PlatOpypus",
+  "short_name": "PlatOpypus",
+  "description": "Your dev box from your phone: agents, shells, files, services, research.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0F1A26",
-  "theme_color": "#0F1A26",
+  "background_color": "#0A1120",
+  "theme_color": "#0A1120",
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }

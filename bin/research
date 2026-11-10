@@ -1,0 +1,171 @@
+#!/usr/bin/env node
+// research: the tools an agent uses inside a Research topic (/Research/<Topic>). They do the heavy reading on the box
+// (captions, Whisper, OCR, PDF text) and give you small, searchable text, so you never paste a whole source into the chat.
+//
+//   research status                         the topic: sources, what was read, what is waiting on the user
+//   research add <url|file> [--note "why"]  fetch a web page, PDF or video into sources/<id>/ (prints id + short summary)
+//   research transcript <id>                captions if the video has them; otherwise asks the user to allow the audio
+//                                           download, then Whisper (--engine local|openai, --model small)
+//   research frames <id> [--every 30]       frames from a video, read with OCR first (asks the user once)
+//   research see <id> <f0003> [f0004…]      hand chosen frames to YOU as images (asks the user); prints file paths to open
+//   research find "<words>" [--source id]   search every source; prints a few short snippets with where they are
+//   research read <id> [--at 14:32 --for 2m | --page 3 | --chunk 5 | --from 0]   a small excerpt (max ~3000 characters)
+//   research cite <id> [--at 14:32 | --page 3] --claim "…" [--quote "…"]   BibTeX entry + the \cite{} to paste; logs the claim
+//   research build                          latexmk; prints warnings and the first errors, never the whole log
+//   research ask "<what>"                   a free-form question for the user (a card on their phone), waits for the answer
+//   research wait <ask-id>                  wait for an earlier ask
+//   research doctor | setup                 which tools are installed; install the missing ones (needs root)
+//
+// Costs are counted and shown to the user: prefer find/read over reading whole sources.
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const R = await import(path.join(here, '..', 'server', 'lib', 'researchtools.js'));
+
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+const flags = {}; const pos = [];
+for (let i = 1; i < argv.length; i++) { const a = argv[i]; if (a.startsWith('--')) { const k = a.slice(2); const v = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true; flags[k] = v; } else pos.push(a); }
+const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
+
+function topicDir() {
+    let d = process.cwd();
+    for (;;) { if (fs.existsSync(path.join(d, '.platopypus', 'research.json'))) return d; const up = path.dirname(d); if (up === d) break; d = up; }
+    die('Not inside a research topic. cd to /Research/<Topic> first.');
+}
+
+try {
+    switch (cmd) {
+        case 'status': {
+            const t = topicDir(); const meta = R.readJson(path.join(t, '.platopypus', 'research.json'), {}); const c = R.costOf(t);
+            console.log(`${meta.title || path.basename(t)}  (${t})`);
+            const src = R.listSources(t); console.log(`${src.length} source${src.length === 1 ? '' : 's'}:`);
+            for (const s of src) console.log(`  ${s.id}  ${s.kind.padEnd(5)} ${String(s.chars).padStart(7)} chars  ${s.title.slice(0, 60)}${s.state.transcript ? `  [transcript: ${s.state.transcript}]` : s.kind === 'video' ? '  [no transcript yet]' : ''}${s.needsMeta ? `  [author/year unknown: research meta ${s.id}]` : ''}${s.state.frames ? `  [${s.state.frames.count} frames]` : ''}`);
+            console.log(`read so far: ${c.excerpts} excerpts, ${c.searches} searches, ${c.readChars} chars; ingested by tools: ${c.ingestedChars} chars; images shown: ${c.imagesSent}`);
+            const asks = path.join(t, '.platopypus', 'asks'); const pend = fs.existsSync(asks) ? fs.readdirSync(asks).map(f => R.readJson(path.join(asks, f))).filter(a => a?.status === 'pending') : [];
+            if (pend.length) console.log(`waiting on the user: ${pend.map(a => `${a.id} (${a.title})`).join('; ')}`);
+            break;
+        }
+        case 'add': {
+            if (!pos[0]) die('usage: research add <url|file> [--note "why this source"]');
+            const r = await R.addSource(topicDir(), pos[0], { note: flags.note || '' });
+            console.log(r.summary);
+            if (r.meta.kind === 'video') console.log(`\nNext: research transcript ${r.meta.id}`);
+            break;
+        }
+        case 'transcript': {
+            if (!pos[0]) die('usage: research transcript <id> [--engine local|openai] [--model small]');
+            const r = await R.transcript(topicDir(), pos[0], { engine: flags.engine, model: flags.model, lang: flags.lang || 'en', keepAudio: !!flags['keep-audio'], seconds: Number(flags.wait || 600), vttFile: flags.vtt || null });
+            console.log(`${r.id}: transcript from ${r.how}, ${r.minutes} min, ${r.cues} segments, ${r.chars} chars. Search it: research find "…" --source ${r.id}`);
+            break;
+        }
+        case 'frames': {
+            if (!pos[0]) die('usage: research frames <id> [--every 30]');
+            const r = await R.frames(topicDir(), pos[0], { every: Number(flags.every || 30), seconds: Number(flags.wait || 600), videoFile: flags.file || null });
+            console.log(`${r.id}: ${r.frames} frames read with OCR (${r.withText} had text, now searchable). Frames with little text (likely charts or images): ${r.visual.join(' ') || 'none'}\nLook at some with: research see ${r.id} ${r.visual[0] || 'f0001'}`);
+            break;
+        }
+        case 'see': {
+            if (pos.length < 2) die('usage: research see <id> <frame> [frame…]');
+            const out = await R.see(topicDir(), pos[0], pos.slice(1), { seconds: Number(flags.wait || 600) });
+            console.log('Open these image files to look at them:'); for (const o of out) console.log(`  ${o.file}   (at ${o.at}${o.ocr ? `; OCR: ${o.ocr}` : ''})`);
+            break;
+        }
+        case 'find': {
+            if (!pos[0]) die('usage: research find "<words>" [--source s01] [--limit 8]');
+            const hits = R.find(topicDir(), pos.join(' '), { source: flags.source || null, limit: Number(flags.limit || 8) });
+            if (!hits.length) console.log('No matches. Try other words, or add more sources.');
+            for (const h of hits) console.log(`${h.id} @${h.loc}: ${h.snippet}\n`);
+            break;
+        }
+        case 'read': {
+            if (!pos[0]) die('usage: research read <id> [--at 14:32 --for 2m | --page 3 | --chunk 5 | --from 0]');
+            const r = R.readExcerpt(topicDir(), pos[0], { at: flags.at ?? null, span: flags.for || '90s', page: flags.page ?? null, chunk: flags.chunk ?? null, from: Number(flags.from || 0) });
+            console.log(`${r.id} "${r.title}" — ${r.where}\n\n${r.text}`);
+            break;
+        }
+        case 'meta': {
+            if (!pos[0]) die('usage: research meta <id>                      first + last page, to work out who wrote it\n       research meta <id> --doi 10.x/y           take the entry from the DOI\n       research meta <id> --title "…" --author "A and B" --year 2024 [--type article]');
+            const t = topicDir();
+            if (flags.doi && flags.doi !== true) { const r = await R.resolveDoi(t, pos[0], flags.doi); console.log(r.ok ? `${pos[0]}: from DOI ${r.doi}: "${r.title}" by ${r.author} (${r.year})` : `DOI lookup failed: ${r.reason}`); if (r.ok) R.setMeta(t, pos[0], {}); break; }
+            if (flags.title || flags.author || flags.year) { const r = R.setMeta(t, pos[0], { title: flags.title, author: flags.author, year: flags.year, type: flags.type }); console.log(`${r.id}: "${r.title}" by ${r.author} (${r.year}); cite key ${r.key}${r.renamedFrom ? ` (was ${r.renamedFrom}: update any \\cite that used it)` : ''}`); break; }
+            const m = R.metaPages(t, pos[0]);
+            console.log(`${m.id}: currently "${m.current.title}" by ${m.current.author || '?'} (${m.current.year || '?'}), ${m.pages} pages\n\n--- first page ---\n${m.first}\n${m.last ? `\n--- last page ---\n${m.last}\n` : ''}\nSet it with: research meta ${m.id} --title "…" --author "Surname, First and Surname, First" --year YYYY [--type article|book|report|misc]`);
+            break;
+        }
+        case 'cite': {
+            if (!pos[0]) die('usage: research cite <id> [--at 14:32 | --page 3] --claim "…" [--quote "…"]');
+            const r = R.cite(topicDir(), pos[0], { at: flags.at ?? null, page: flags.page ?? null, quote: flags.quote === true ? '' : flags.quote || '', claim: flags.claim === true ? '' : flags.claim || '' });
+            console.log(`${r.latex}\n(entry ${r.key} is in paper/refs.bib${flags.claim ? '; claim logged in notes/claims.md' : ''})`);
+            break;
+        }
+        case 'build': {
+            const r = await R.build(topicDir());
+            console.log(r.ok ? `Built paper/build/main.pdf: ${r.pages} pages, ${r.warnings} warning${r.warnings === 1 ? '' : 's'}, ${(r.ms / 1000).toFixed(1)} s.` : `Build FAILED.\n${r.errors.map(e => '  ! ' + e).join('\n') || '  (see paper/build/main.log)'}`);
+            if (r.undefinedCites.length) console.log(`Undefined citations: ${r.undefinedCites.join(', ')} (add them with research cite)`);
+            process.exit(r.ok ? 0 : 2);
+        }
+        case 'ask': {
+            if (!pos[0]) die('usage: research ask "<question>" [--options "A|B|C"] [--multi] [--why "what depends on it"] [--later]\n  --later: do not wait; carry on and pick the answer up with: research answers');
+            const a = await R.ask({ type: 'question', title: pos.join(' ').slice(0, 300), detail: { options: typeof flags.options === 'string' ? flags.options.split('|') : [], multi: !!flags.multi, why: typeof flags.why === 'string' ? flags.why : '', later: !!flags.later }, topic: path.basename(topicDir()) });
+            if (flags.later) { console.log(`Asked (ask ${a.id}). Carry on with what does not depend on it; check with: research answers`); break; }
+            const done = a.status === 'pending' ? await R.waitAsk(a.id, { seconds: Number(flags.wait || 600) }) : a;
+            console.log(done.status === 'pending' ? `Still waiting (ask ${a.id}); research wait ${a.id}` : `${done.status}${done.answer ? `: ${done.answer}` : ''}`);
+            process.exit(done.status === 'allowed' ? 0 : done.status === 'pending' ? 3 : 4);
+        }
+        case 'reply': {
+            // Hand an answer to a question the user asked in the app (or say where it went in the paper).
+            if (!pos[0]) die('usage: research reply <question-id> --file <answer.txt> | --text "…" | --added "<section>"');
+            const t = topicDir(); const f = path.join(t, '.platopypus', 'questions', `${pos[0].replace(/[^a-f0-9]/g, '')}.json`); const q = R.readJson(f);
+            if (!q) die(`No question ${pos[0]}.`);
+            if (typeof flags.added === 'string') { q.toPaper = 'done'; q.section = flags.added.slice(0, 120); q.addedAt = Date.now(); }
+            else {
+                const text = typeof flags.file === 'string' ? fs.readFileSync(flags.file, 'utf8') : typeof flags.text === 'string' ? flags.text : pos.slice(1).join(' ');
+                if (!text.trim()) die('The answer is empty.');
+                q.answer = text.trim().slice(0, 6000); q.status = 'answered'; q.answeredAt = Date.now();
+            }
+            fs.writeFileSync(f, JSON.stringify(q, null, 2)); console.log(typeof flags.added === 'string' ? `Marked as added to "${q.section}".` : 'Answer delivered to the app.');
+            break;
+        }
+        case 'answers': {
+            // What the user answered or noted in the app since you last looked (--all: everything).
+            const t = topicDir(); const dir = path.join(t, '.platopypus', 'asks'); const seenF = path.join(t, '.platopypus', 'seen.json'); const seen = new Set(R.readJson(seenF, []) || []);
+            const all = (fs.existsSync(dir) ? fs.readdirSync(dir) : []).map(f => R.readJson(path.join(dir, f))).filter(a => a && (a.type === 'question' || a.type === 'note')).sort((x, y) => x.created - y.created);
+            const fresh = all.filter(a => a.status !== 'pending' && (flags.all || !seen.has(a.id)));
+            for (const a of fresh) console.log(a.type === 'note' ? `NOTE from the user: ${a.answer}\n` : `Q: ${a.title}\nA: ${a.status === 'denied' ? '(skipped: use your judgement)' : a.answer}\n`);
+            const pend = all.filter(a => a.status === 'pending');
+            const qd = path.join(t, '.platopypus', 'questions'); const open = (fs.existsSync(qd) ? fs.readdirSync(qd) : []).map(f => R.readJson(path.join(qd, f))).filter(q => q && (q.status === 'waiting' || q.toPaper === 'requested') && Date.now() - (q.toPaperAt || q.created) > 90_000);
+            for (const q of open) console.log(q.status === 'waiting' ? `QUESTION from the user (${q.id}), not answered yet: ${q.text}\n  Answer from the sources (under 250 words, plain text, [s03 14:32] after each claim), then: research reply ${q.id} --file <file>\n` : `ADD TO PAPER (${q.id}): the user wants this answer worked into the paper: "${q.text}"\n  Then: research reply ${q.id} --added "<section>"\n`);
+            if (!fresh.length && !open.length) console.log('Nothing new from the user.');
+            if (pend.length) console.log(`Still unanswered: ${pend.map(a => `"${a.title}"`).join('; ')}`);
+            try { fs.writeFileSync(seenF, JSON.stringify([...new Set([...seen, ...fresh.map(a => a.id)])])); } catch { /* read-only: they show again next time */ }
+            break;
+        }
+        case 'wait': {
+            if (!pos[0]) die('usage: research wait <ask-id>');
+            const done = await R.waitAsk(pos[0], { seconds: Number(flags.wait || 600) });
+            console.log(done.status === 'pending' ? 'still waiting' : `${done.status}${done.answer ? `: ${done.answer}` : ''}`);
+            process.exit(done.status === 'allowed' ? 0 : done.status === 'pending' ? 3 : 4);
+        }
+        case 'doctor': {
+            const d = await R.doctor();
+            for (const [k, v] of Object.entries(d)) console.log(`${v.path ? 'ok     ' : 'MISSING'} ${k.padEnd(15)} ${v.why}`);
+            if (Object.values(d).some(v => !v.path)) console.log('\nInstall the missing ones (as root): research setup');
+            break;
+        }
+        case 'setup': {
+            if (process.getuid && process.getuid() !== 0) die('Run as root, or ask the user (research ask "install research tools: apt + pip").');
+            const sh = c => { console.log('$ ' + c); const r = spawnSync('bash', ['-lc', c], { stdio: 'inherit' }); if (r.status !== 0) die(`failed: ${c}`); };
+            sh('DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended lmodern latexmk poppler-utils ffmpeg tesseract-ocr zip python3-pip aspell aspell-en aspell-fr');
+            sh('pip3 install --break-system-packages -q yt-dlp faster-whisper');
+            const d = await R.doctor(); for (const [k, v] of Object.entries(d)) console.log(`${v.path ? 'ok     ' : 'MISSING'} ${k}`);
+            break;
+        }
+        default:
+            console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n'));
+            process.exit(cmd ? 2 : 0);
+    }
+} catch (e) { die(`research: ${e.message}`, e.status === 408 ? 3 : 1); }

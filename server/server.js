@@ -37,6 +37,12 @@ import * as alerts from './lib/alerts.js';
 import * as egress from './lib/egress.js';
 import * as usage from './lib/usage.js';
 import * as limit from './lib/limit.js';
+import * as activity from './lib/activity.js';
+import * as research from './lib/research.js';
+import * as editor from './lib/researcheditor.js';
+import * as repo from './lib/researchrepo.js';
+import * as qa from './lib/researchqa.js';
+import * as template from './lib/researchtemplate.js';
 import * as backups from './lib/backup.js';
 import os from 'node:os';
 import * as logos from './lib/logos.js';
@@ -77,6 +83,7 @@ elevate.setShellLookup(name => shells.shellMeta(name)?.cwd || null);
 const AGENT_ROUTES = [
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
+    ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
     ['GET', /^\/api\/live$/], ['GET', /^\/api\/live\/check$/],
@@ -100,6 +107,8 @@ const ACTIVITY = [
     ['POST', /^\/api\/live\/([^/]{1,80})\/([a-z0-9-]{1,31})\/pull$/, 'image-pull', (m, b, r) => ({ what: `${decodeURIComponent(m[1])}/${m[2]} · ${r?.image || ''} (${r?.changed ? (r.restarted ? 'new image, restarted' : 'new image') : 'no change'})`, project: decodeURIComponent(m[1]) })],
     ['POST', /^\/api\/portholerun\/run$/, 'portholerun', (m, b, r) => ({ what: r?.slug || '', cwd: b.abs ? String(b.abs).replace(/\/[^/]*$/, '') : undefined })],
     ['POST', /^\/api\/rename\/finish$/, 'rename-finished', (m, b, r) => ({ what: `shells and services moved to the plato socket; restarted ${(r?.restarted || []).join(', ') || 'nothing'}` })],
+    ['PUT', /^\/api\/keepalive$/, 'keepalive-set', (m, b, r) => ({ what: `Box kept on until ${r?.keepAlive ? new Date(r.keepAlive.until).toUTCString() : '?'}${r?.keepAlive?.reason ? ` (${r.keepAlive.reason})` : ''}` })],
+    ['DELETE', /^\/api\/keepalive$/, 'keepalive-cleared', () => ({ what: 'Keep-alive cleared' })],
     ['PUT', /^\/api\/limit$/, 'limit-changed', (m, b, r) => ({ what: `Limit reached guard ${r?.on ? 'on' : 'off'}, load over ${r?.load}` })],
     ['PUT', /^\/api\/alerts$/, 'alerts-changed', (m, b, r) => ({ what: `Telegram alerts${r?.botName ? ` via ${r.botName}` : ''}: ${r ? Object.entries(r.on).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : ''}${r?.pausedUntil ? ' (paused)' : ''}` })],
     ['POST', /^\/api\/git\/(commit|push|pull|publish|init|clone)$/, m => `git-${m[1]}`, (m, b) => ({ what: m[1] === 'commit' ? String(b.message || '').split(String.fromCharCode(10))[0].slice(0, 160) : m[1] === 'clone' ? String(b.repo || '') : '', cwd: b.path ? files.resolveInRoot(b.path) : b.dest ? files.resolveInRoot(b.dest) : undefined })],
@@ -339,6 +348,8 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, elevate.request(session.agent, { cmd: b.cmd, cwd: pr.cwd, reason: b.reason }));
             }
             if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
+            if (p === '/api/agent/research/ask' && method === 'POST') { const b = await readJson(req, 16 * 1024); const pr = await caller(b.pid); return send(res, 201, research.createAsk(pr.cwd, b)); }
+            if ((am = p.match(/^\/api\/agent\/research\/ask\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, research.getAsk(sh.cwd, am[1]));
             if (p === '/api/servers/run' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.runServer({ ...b, env: {}, owner: session.agent })); }
             if (p === '/api/servers' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.add({ ...b, owner: session.agent })); }
             if ((am = p.match(/^\/api\/tunnels\/(\d{1,5})$/)) && method === 'DELETE' && zoned.byPort(am[1])) return send(res, 403, { error: 'Hostnames on your domain are removed from the phone.' });
@@ -640,6 +651,73 @@ const server = http.createServer(async (req, res) => {
         if ((m = p.match(/^\/api\/backups\/([^/]{1,80})$/)) && method === 'GET') return send(res, 200, await backups.list(decodeURIComponent(m[1])));
         if ((m = p.match(/^\/api\/backups\/([^/]{1,80})$/)) && method === 'POST') return send(res, 200, await backups.backup(decodeURIComponent(m[1])));
         if ((m = p.match(/^\/api\/backups\/([^/]{1,80})\/restore$/)) && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await backups.restore(decodeURIComponent(m[1]), String(b.name || ''))); }
+        // Research: topics under /Research, the paper's pages, sources, exports, and the asks agents wait on.
+        if (p === '/api/research' && method === 'GET') return send(res, 200, { topics: research.list(), asks: research.pendingAsks() });
+        if (p === '/api/research' && method === 'POST') return send(res, 201, await research.create(await readJson(req, 16 * 1024)));
+        if (p === '/api/research/tools' && method === 'GET') return send(res, 200, await (await import('./lib/researchtools.js')).doctor());
+        if (p === '/api/research/asks' && method === 'GET') return send(res, 200, research.pendingAsks());
+        if ((m = p.match(/^\/api\/research\/([\w.-]{1,60})(?:\/(.*))?$/)) && (method === 'GET' || method === 'POST')) {
+            const [slug, rest = ''] = [m[1], m[2] || ''];
+            const sendFile = (file, type, name, { inline = false, remove = false } = {}) => {
+                const st = fs.statSync(file);
+                res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'Cache-Control': 'no-store', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'" });
+                const rs = fs.createReadStream(file); rs.pipe(res); if (remove) res.on('close', () => fs.rm(file, { force: true }, () => {}));
+            };
+            let r2;
+            if (rest === '' && method === 'GET') return send(res, 200, research.detail(slug));
+            if (rest === 'files' && method === 'GET') return send(res, 200, { files: editor.files(slug), bib: editor.bibEntries(slug), lang: editor.language(slug), langs: editor.LANGS });
+            if (rest === 'language' && method === 'POST') return send(res, 200, editor.setLanguage(slug, String((await readJson(req, 4096)).lang || '')));
+            if (rest === 'spell' && method === 'POST') return send(res, 200, await editor.spell(slug, (await readJson(req, 3 * 1024 * 1024)).text || ''));
+            if (rest === 'spell/learn' && method === 'POST') return send(res, 200, editor.learnWord(slug, (await readJson(req, 4096)).word));
+            if (rest === 'file' && method === 'GET') return send(res, 200, editor.readFile(slug, url.searchParams.get('path')));
+            if (rest === 'file' && method === 'POST') { const b = await readJson(req, 3 * 1024 * 1024); return send(res, 200, editor.writeFile(slug, b.path, b.text, { baseMtime: b.baseMtime })); }
+            if (rest === 'section' && method === 'POST') return send(res, 201, editor.newSection(slug, (await readJson(req, 4096)).name));
+            if (rest === 'cite' && method === 'POST') { const b = await readJson(req, 8192); return send(res, 200, editor.citeSource(slug, String(b.id || ''), { at: b.at || null, page: b.page || null, claim: b.claim || '' })); }
+            if (rest === 'sources' && method === 'POST') { const b = await readJson(req, 8192); return send(res, 201, await editor.addSource(slug, b.url, b.note)); }
+            if (rest === 'upload' && method === 'POST') return send(res, 201, await repo.upload(slug, req, url.searchParams.get('name') || ''));
+            if (rest === 'commit' && method === 'POST') return send(res, 200, await repo.commit(slug, (await readJson(req, 4096).catch(() => ({}))).message));
+            if (rest === 'history' && method === 'GET') return send(res, 200, { versions: await repo.history(slug) });
+            if (rest === 'questions' && method === 'GET') return send(res, 200, { questions: qa.list(slug) });
+            if (rest === 'questions' && method === 'POST') { const b = await readJson(req, 8192); return send(res, 201, await qa.ask(slug, b.text, { agent: b.agent })); }
+            if ((r2 = rest.match(/^questions\/([a-f0-9]{10})\/(add|remove)$/)) && method === 'POST') { const b = await readJson(req, 4096).catch(() => ({})); return send(res, 200, r2[2] === 'add' ? await qa.addToPaper(slug, r2[1], { agent: b.agent }) : qa.remove(slug, r2[1])); }
+            if (rest === 'template' && method === 'GET') return send(res, 200, template.get(slug));
+            if (rest === 'template' && method === 'POST') return send(res, 201, await template.upload(slug, req, url.searchParams.get('name') || '', { adopt: url.searchParams.get('adopt') === '1' }));
+            if (rest === 'template/remove' && method === 'POST') return send(res, 200, template.remove(slug));
+            if (rest === 'note' && method === 'POST') return send(res, 201, research.addNote(slug, (await readJson(req, 8192)).text));
+            if (rest === 'links' && method === 'GET') return send(res, 200, await editor.links(slug));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/page\/(\d{1,4})$/)) && method === 'GET') return sendFile(await editor.sourcePage(slug, r2[1], r2[2]), 'image/png', `${r2[1]}-${r2[2]}.png`, { inline: true });
+            if (rest === 'build' && method === 'POST') { const r = await research.build(slug); if (r.ok) await repo.commit(slug, `Build: ${r.pages} page${r.pages === 1 ? '' : 's'}`).catch(() => {}); return send(res, 200, r); }
+            if (rest === 'pdf' && method === 'GET') return sendFile(research.pdfFile(slug), 'application/pdf', `${slug}.pdf`, { inline: url.searchParams.get('download') !== '1' });
+            if ((r2 = rest.match(/^page\/(\d{1,4})$/)) && method === 'GET') return sendFile(research.pageFile(slug, r2[1]), 'image/png', `page-${r2[1]}.png`, { inline: true });
+            if ((r2 = rest.match(/^source\/(s\d{2,4})$/)) && method === 'GET') return send(res, 200, research.sourceView(slug, r2[1], { from: url.searchParams.get('from') || 0 }));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/frame\/(f\d{4}\.jpg)$/)) && method === 'GET') return sendFile(research.frameFile(slug, r2[1], r2[2]), 'image/jpeg', r2[2], { inline: true });
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/original$/)) && method === 'GET') return sendFile(research.sourceOriginal(slug, r2[1]), 'application/pdf', `${r2[1]}.pdf`);
+            if ((r2 = rest.match(/^export\/(pdf|bib|tex|zip)$/)) && method === 'GET') { const e = await research.exportFile(slug, r2[1]); return sendFile(e.file, e.type, e.name, { remove: !!e.remove }); }
+            if ((r2 = rest.match(/^asks\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 4096).catch(() => ({})); return send(res, 200, research.decide(slug, r2[1], { allow: r2[2] === 'allow', answer: b.answer })); }
+        }
+
+        // Keep-alive and power status: is an agent working, is the box kept on, may it be powered off.
+        if (p === '/api/keepalive' && method === 'GET') return send(res, 200, { keepAlive: activity.keepAlive() });
+        if (p === '/api/keepalive' && method === 'PUT') return send(res, 200, { keepAlive: activity.setKeepAlive(await readJson(req, 4096)) });
+        if (p === '/api/keepalive' && method === 'DELETE') return send(res, 200, { keepAlive: activity.clearKeepAlive() });
+        if (p === '/api/activity' && method === 'GET') return send(res, 200, await activity.status({}));
+        // Power status: one answer to "may this box be powered off now?", the way a health check answers "is it up?".
+        // Read-only and the same for every caller: a cloud schedule, cron, a UPS script, a home-automation rule.
+        if (p === '/api/power' && method === 'GET') {
+            const st = await activity.status({ settle: url.searchParams.get('settle') === '0' ? 0 : 20_000 }); const d = activity.decide(st);
+            return send(res, 200, { canPowerOff: !!d.stop, why: d.why, message: d.message, agents: st.agents, keepAlive: st.keepAlive });
+        }
+        // The same question, asked by whatever is about to act on the answer: this one is recorded and sends the alert.
+        if ((p === '/api/power/check' || p === '/api/autostop/check') && method === 'POST') {
+            const b = await readJson(req, 4096).catch(() => ({}));
+            const st = await activity.status({ settle: b.dry ? 0 : 20_000 });
+            const d = activity.decide(st);
+            if (!b.dry) {
+                audit.record('activity', d.stop ? 'autostop' : 'autostop-skipped', { actor: String(session.how || '').includes('local token') ? 'schedule' : 'phone', via: 'auto-stop', what: d.message });
+                await alerts.notifyNow('autostop', d.stop ? 'The box is powering off now (automatic power-off): no agent is working and it is not kept on.' : `${d.message} The automatic power-off was skipped this time.`);
+            }
+            return send(res, 200, { ...d, canPowerOff: !!d.stop, agents: st.agents, keepAlive: st.keepAlive, dry: !!b.dry });
+        }
         // Limit reached: the overload guard (settings, a dry run of what it would stop, and "do it now").
         if (p === '/api/limit' && method === 'GET') return send(res, 200, limit.settings());
         if (p === '/api/limit' && method === 'PUT') return send(res, 200, limit.configure(await readJson(req, 4096)));
@@ -783,6 +861,7 @@ auth.events.on('signin', alerts.fromAuth);
 auth.events.on('lockout', alerts.fromAuth);
 setInterval(() => alerts.checkServers(services).catch(() => {}), 30_000);
 setInterval(() => limit.check().catch(() => {}), 30_000);
+activity.start();
 setInterval(() => backups.tick().catch(() => {}), 60_000);
 setInterval(() => alerts.checkCommits(audit).catch(() => {}), 5 * 60_000);
 for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.stop(); } catch { /* exiting */ } process.exit(0); });

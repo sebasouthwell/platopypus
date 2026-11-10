@@ -54,7 +54,7 @@ Shipped as a normal release with a migration step `2.0.0-rename`:
 
 Rollback: the updater's health check fails → previous release's code is put back → it finds its state through the `~/.porthole` symlink, its app through `/opt/porthole`, reads `PORTHOLE_*` which 2.0 still sets, and the old unit name is re-created by its own install.sh. The one thing it cannot undo is the tmux socket, which is why step 6 happens last and only after the health check passed.
 
-## Phase 2: 2.1.0 (accounts and groups)
+## Phase 2: a later 2.x (accounts and groups)
 
 `porthole-dev` → `plato-dev`, `porthole-svcs` → `plato-svcs`, `porthole-svc` → `plato-svc`. `groupmod -n` / `usermod -l` keep GIDs and UIDs, so nothing on disk changes meaning. Ships with a `down()` the updater runs if it has to roll back 2.1.0.
 

@@ -230,6 +230,8 @@ ln -sf "$APP_DIR/bin/credshare" /usr/local/bin/credentialshare
 ln -sf "$APP_DIR/bin/svc" /usr/local/bin/svc
 ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
 ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
+ln -sf "$APP_DIR/bin/research" /usr/local/bin/research
+install -d -m 0755 /Research 2>/dev/null || true
 ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
 # Publishing gate: a global pre-push hook asks PlatOpypus whether the folder is flagged as a repo; .pasted/ never enters git.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$STATE_DIR/githooks"

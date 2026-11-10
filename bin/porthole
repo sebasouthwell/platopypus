@@ -8,6 +8,10 @@
 #   plato sessions      sign every device out (credentials stay).
 #   plato status        service, version, credential summary.
 #   plato update        run the self-updater now (same as More → Update).
+#   plato power            may the box be powered off now? JSON, and an exit code like a health check: 0 = yes,
+#                          3 = no (an agent is working, or it is kept on). Read-only. For any scheduler or script.
+#   plato power --check    the same, recorded in the audit log with an alert: for whatever is about to act on it.
+#   plato activity      which agents are working right now (no side effects).
 set -euo pipefail
 
 STATE="${PLATO_STATE:-${PORTHOLE_STATE:-}}"; [ -n "$STATE" ] || { if [ -e "${HOME:-/root}/.platopypus" ] || [ ! -e "${HOME:-/root}/.porthole" ]; then STATE="${HOME:-/root}/.platopypus"; else STATE="${HOME:-/root}/.porthole"; fi; }
@@ -26,7 +30,8 @@ restart_service() {
 case "${1:-}" in
     reset-auth)
         rm -f "$SEC" "$STATE/auth-sessions.json"
-        tr -dc 'A-Za-z0-9_-' < /dev/urandom | head -c 32 > "$STATE/token"; echo >> "$STATE/token"; chmod 600 "$STATE/token"
+        # (not `tr … | head`: under pipefail the SIGPIPE from head ended this script before the restart, 2.0.2 and earlier)
+        node -e 'process.stdout.write(require("crypto").randomBytes(24).toString("base64url") + "\n")' > "$STATE/token"; chmod 600 "$STATE/token"
         echo "passkeys, password, two-step codes and sessions removed."
         echo "new setup token: $(cat "$STATE/token")"
         echo "open the site: it shows the setup screen; enter this token and create a passkey."
@@ -59,6 +64,19 @@ case "${1:-}" in
         ;;
     update)
         exec bash "$APP/bin/plato-update"
+        ;;
+    power|autostop-check|activity)
+        # Sign in to the local server with the box token (loopback only), then ask.
+        PORT="${PLATO_PORT:-${PORTHOLE_PORT:-7331}}"; JAR="$(mktemp)"; trap 'rm -f "$JAR"' EXIT
+        TOK="${PLATO_TOKEN:-${PORTHOLE_TOKEN:-}}"; [ -n "$TOK" ] || TOK="$(cat "$STATE/token" 2>/dev/null)"
+        [ -n "$TOK" ] || { echo '{"error":"no token"}'; exit 1; }
+        curl -fsS -c "$JAR" -H 'Content-Type: application/json' -H 'X-Plato: 1' -d "{\"token\":\"$TOK\"}" "http://127.0.0.1:$PORT/api/login/token" >/dev/null || { echo '{"error":"sign-in failed"}'; exit 1; }
+        if [ "$1" = activity ]; then curl -fsS -b "$JAR" -H 'X-Plato: 1' "http://127.0.0.1:$PORT/api/activity"
+        elif [ "$1" = power ] && [ "${2:-}" != --check ]; then
+            OUT="$(curl -fsS -m 60 -b "$JAR" -H 'X-Plato: 1' "http://127.0.0.1:$PORT/api/power")" || { echo '{"error":"no answer"}'; exit 1; }
+            echo "$OUT"; case "$OUT" in *'"canPowerOff":true'*) exit 0 ;; *) exit 3 ;; esac
+        else curl -fsS -m 60 -b "$JAR" -H 'X-Plato: 1' -H 'Content-Type: application/json' -X POST -d "{\"dry\":$([ "${2:-}" = --dry ] && echo true || echo false)}" "http://127.0.0.1:$PORT/api/power/check"; fi
+        echo
         ;;
     *)
         sed -n '2,10p' "$0"

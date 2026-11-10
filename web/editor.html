@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper editor</title>
+<meta name="theme-color" content="#0A1120">
+<link rel="icon" type="image/svg+xml" href="/mascot.svg">
+<link rel="stylesheet" href="/editor.css">
+</head>
+<body>
+<header id="bar">
+  <a class="back" href="/" id="back"><img src="/mascot.svg" alt="" width="26" height="26">Research</a>
+  <h1 id="title">Paper</h1>
+  <span id="state" class="muted"></span>
+  <label class="chk">Language <select id="lang" aria-label="Language of this paper"></select></label>
+  <label class="chk"><input type="checkbox" id="autobuild"> Build on save</label>
+  <button id="version" class="btn" title="Keep a version in this topic's local history">Save version</button>
+  <button id="save" class="btn">Save</button>
+  <button id="build" class="btn pri">Build</button>
+</header>
+<nav id="views" role="tablist">
+  <button data-view="files" class="on">Files</button>
+  <button data-view="edit">Edit</button>
+  <button data-view="side">Preview</button>
+</nav>
+<main id="grid" data-view="edit">
+  <aside id="rail">
+    <div class="h">Files <button id="newsec" class="mini" title="New section">+ section</button></div>
+    <ul id="files"></ul>
+    <div class="h">References <button id="addsrc" class="mini" title="Add a web page, PDF link or video as a source">+ source</button><button id="addpdf" class="mini" title="Upload a PDF from this device">+ PDF</button><input id="pdffile" type="file" accept="application/pdf,.pdf" multiple hidden></div>
+    <input id="refq" type="search" placeholder="Search references" autocomplete="off">
+    <ul id="refs"></ul>
+  </aside>
+  <section id="ed">
+    <div id="wrap"><div id="gutter" aria-hidden="true"></div><textarea id="code" spellcheck="true" lang="en-GB" autocapitalize="off" autocomplete="off"></textarea></div>
+    <div id="cites"><span class="muted">Put the cursor in a \cite{…} to see its source. Ctrl/Cmd-click a key to open it.</span></div>
+    <div id="problems"></div>
+  </section>
+  <section id="side">
+    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Source + preview</button><button data-pane="spelling">Spelling</button></div>
+    <div id="preview"></div>
+    <div id="source" hidden></div>
+    <div id="spelling" hidden></div>
+  </section>
+</main>
+<div id="toast" role="status"></div>
+<script src="/editor.js"></script>
+</body>
+</html>

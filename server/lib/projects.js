@@ -31,9 +31,22 @@ export function repoFlag(absDir) {
     return { flag: 'local', dir: norm(absDir), set: null };
 }
 
+// Research (/Research/<Topic>): sources, notes, uploaded PDFs and transcripts never leave the box. The one exception
+// is the paper itself (/Research/<Topic>/paper: the LaTeX and refs.bib), which may go to a PRIVATE repo, never public.
+const researchRoot = () => norm(path.join(config.root, 'Research'));
+export function researchPlace(absDir) {
+    const rel = path.relative(researchRoot(), norm(absDir));
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null;          // not research at all
+    const parts = rel.split(path.sep).filter(Boolean);
+    return { paper: parts.length >= 2 && parts[1] === 'paper', paperRoot: parts.length === 2 && parts[1] === 'paper' };
+}
+const RESEARCH_REASON = 'Research files stay on this box and are never pushed. Only the paper folder (the LaTeX and refs.bib) can be published, and only to a private repo.';
+
 export function setRepoFlag(absDir, flag) {
     if (!FLAGS.includes(flag)) throw httpError(400, 'Flag must be local, private or public.');
     const dir = norm(absDir);
+    const rp = researchPlace(dir);
+    if (rp && flag !== 'local' && (!rp.paperRoot || flag !== 'private')) throw httpError(400, RESEARCH_REASON);
     if (dir === '/' || dir === config.home) throw httpError(400, 'Flag a project folder, not the whole box.');
     const db = load();
     if (flag === 'local') delete db.repos[dir]; else db.repos[dir] = { flag, set: Date.now() };
@@ -45,6 +58,9 @@ export function setRepoFlag(absDir, flag) {
 // Used by the pre-push hook and by git.publish().
 export function allowPush(absDir) {
     const f = repoFlag(absDir);
+    const rp = researchPlace(absDir);
+    // Checked here as well as in setRepoFlag, so a flag edited by hand in projects.json still cannot open research up.
+    if (rp && (!rp.paper || f.flag !== 'private' || !researchPlace(f.dir)?.paperRoot)) return { allowed: false, ...f, flag: 'local', reason: RESEARCH_REASON };
     if (f.flag === 'local') return { allowed: false, ...f, reason: `"${path.basename(f.dir)}" is local only. On the phone: Files → this folder → Repo → choose Private or Public to allow publishing.` };
     return { allowed: true, ...f, reason: `${f.flag} repo` };
 }

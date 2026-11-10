@@ -148,3 +148,10 @@ signed in through `GH_TOKEN` from the vault or `gh auth login`.
 Docker is available. Containers started from PlatOpypus bind ports to 127.0.0.1 and are reached via a
 tunnel. Prefer `docker compose` files inside the project folder so they show up in PlatOpypus's Docker
 section.
+
+## Research sessions
+
+If `echo $PLATO_SESSION` prints `research`, you are in `/Research/<Topic>` writing a paper from sources. Read
+`$PLATO_SECURITY_FILE` first (it is this topic's brief) and use the `research` tools: `research add`, `find`, `read`,
+`transcript`, `frames`, `cite`, `build`, `ask`. Never paste a whole source into the chat; search and read small excerpts.
+Downloading a video, taking frames and showing images to you all wait for the user's Allow on their phone.

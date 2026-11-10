@@ -36,7 +36,7 @@ export function allowedFolder(dir) {
     const a = info(); if (!a) return false;
     const real = fs.realpathSync(dir);
     // Agent scratch folders live under its home; root's ~/scratch is not reachable for this user.
-    const roots = [path.join(config.root, 'Projects'), a.home].map(r => { try { return fs.realpathSync(r); } catch { return r; } });
+    const roots = [path.join(config.root, 'Projects'), path.join(config.root, 'Research'), a.home].map(r => { try { return fs.realpathSync(r); } catch { return r; } });
     return roots.some(r => real === r || real.startsWith(r + path.sep));
 }
 

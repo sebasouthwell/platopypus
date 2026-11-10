@@ -90,6 +90,7 @@
     <div class="tiles">
       <button class="tile" data-act="agent"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>AI agent</button>
       <button class="tile" data-act="upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
+      <button class="tile" data-act="research"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg></span>Research</button>
       <button class="tile" data-act="scratch"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-zap"/></svg></span>Quick task</button>
       <button class="tile" data-act="shell"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</button>
     </div>
@@ -119,6 +120,11 @@
   <section id="tab-files" class="tab" data-tab="files" hidden>
     <header class="topbar"><h1 id="files-title">Files</h1></header>
     <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+    <nav id="files-places" class="places" aria-label="Go to">
+      <button data-place="home"><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</button>
+      <button data-place="Projects"><svg class="i"><use href="/sprite.svg#i-folder"/></svg>Projects</button>
+      <button data-place="Research"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg>Research</button>
+    </nav>
     <div class="actions4">
       <button class="tile" id="files-upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
       <button class="tile" id="files-mkdir"><span class="ico"><svg class="i"><use href="/sprite.svg#i-folder-plus"/></svg></span>New folder</button>
@@ -142,6 +148,7 @@
     <div class="card" id="box-card"></div>
     <div class="list gap" id="update-card"></div>
     <div class="list gap" id="rename-card" hidden></div>
+    <div class="list gap" id="keepalive-card"></div>
     <div class="list gap" id="more-list">
       <button class="row" data-page="vault"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Vault</div><div class="sub" id="more-vault-sub">Tokens for Claude and your projects</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="creds"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Shared credentials</div><div class="sub" id="more-creds-sub">Logins agents handed to you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
@@ -188,6 +195,20 @@
     </header>
     <div id="security-body" class="list"></div>
     <p class="note gap">This app is root-level control of the box. Keep two-step codes on and sign out of devices you no longer use. Lost your authenticator? Run <span class="mono">box.ps1 reset-totp</span> from the laptop.</p>
+  </section>
+
+  <section id="tab-research" class="tab" data-tab="research" hidden>
+    <header class="topbar"><h1>Research</h1></header>
+    <div id="research-body"></div>
+  </section>
+
+  <section id="page-topic" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" id="topic-back"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Research</button>
+      <h1 id="topic-title"></h1><button class="icon-btn" id="topic-refresh" aria-label="Refresh"><svg class="i"><use href="/sprite.svg#i-refresh"/></svg></button>
+    </header>
+    <div id="topic-seg" role="tablist"></div>
+    <div id="topic-body"></div>
   </section>
 
   <section id="page-backups" class="tab page" hidden>
@@ -254,6 +275,7 @@
     <button data-go="shells" title="Shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg><span>Shells</span></button>
     <button data-go="services" title="Services"><svg class="i"><use href="/sprite.svg#i-services"/></svg><span>Services</span></button>
     <button data-go="files" title="Files"><svg class="i"><use href="/sprite.svg#i-files"/></svg><span>Files</span></button>
+    <button data-go="research" title="Research"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg><span>Research</span></button>
     <button data-go="more" title="More"><svg class="i"><use href="/sprite.svg#i-more"/></svg><span>More</span></button>
     <div class="nav-group" id="nav-pages">
       <div class="nav-label">Box</div>

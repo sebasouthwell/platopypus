@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>PlatOpypus — Research (design mockup)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  /* Mockup frame only: not part of the app. Everything inside .phone uses the real app styles. */
+  html, body { height: auto; overflow: auto; }
+  body { background: #070d19; padding: 36px 28px 60px; }
+  .deck { display: flex; gap: 34px; justify-content: center; flex-wrap: wrap; }
+  .figure { width: 390px; }
+  .figure > .cap { margin: 14px 4px 0; color: var(--mist); font-size: 13.5px; line-height: 1.45; }
+  .figure > .cap b { color: var(--foam); font-weight: 600; }
+  .phone { position: relative; width: 390px; height: 800px; border-radius: 38px; border: 1px solid var(--rail); overflow: hidden;
+           background: radial-gradient(120% 55% at 50% -12%, rgba(42,86,150,.45), rgba(10,17,32,0) 60%), var(--sea); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .scroll { position: absolute; inset: 0 0 0 0; overflow: hidden; padding: 20px 16px 90px; }
+  .pill-bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 62px; border-radius: 31px; background: rgba(20,30,48,.92); border: 1px solid var(--rail); display: flex; justify-content: space-around; align-items: center; backdrop-filter: blur(10px); }
+  .pill-bar span { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--mist); padding: 6px 12px; border-radius: 22px; }
+  .pill-bar span.on { color: var(--brass); background: rgba(240,184,64,.12); }
+  .pill-bar svg.i { width: 22px; height: 22px; }
+
+  /* ---- new pieces for Research (these would go into styles.css) ---- */
+  .r-top { display:flex; align-items:center; justify-content:space-between; padding: 6px 0 4px; }
+  .r-top h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .r-sub { color: var(--mist); font-size: 14.5px; margin: 2px 0 14px; }
+  .r-needs { display:flex; align-items:center; gap:12px; padding: 12px 14px; border-radius: 16px; background: rgba(240,184,64,.10); border: 1px solid rgba(240,184,64,.35); margin-bottom: 14px; }
+  .r-needs b { color: var(--brass); }
+  .r-card { display:grid; grid-template-columns: 74px 1fr; gap: 14px; padding: 14px; background: var(--hull); border: 1px solid var(--rail); border-radius: var(--radius); margin-bottom: 12px; }
+  .r-cover { width: 74px; height: 98px; border-radius: 6px; background: #f4f1ea; position: relative; overflow: hidden; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
+  .r-cover i { display:block; height: 3px; margin: 0 8px; background: #b9b4a6; border-radius: 2px; }
+  .r-cover .t { margin: 10px 8px 7px; height: 6px; width: 70%; background: #2a2a2a; border-radius: 2px; }
+  .r-cover .c { position:absolute; right: 0; bottom: 0; width: 22px; height: 22px; background: linear-gradient(135deg, transparent 50%, #d9d4c5 50%); }
+  .r-card h3 { margin: 0; font-size: 17.5px; font-weight: 600; line-height: 1.25; }
+  .r-meta { display:flex; flex-wrap:wrap; gap: 6px; margin-top: 8px; }
+  .r-line { color: var(--mist); font-size: 13.5px; margin-top: 8px; display:flex; align-items:center; gap:7px; }
+  .dotlive { width: 8px; height: 8px; border-radius: 50%; background: var(--kelp); box-shadow: 0 0 0 4px rgba(63,211,154,.18); }
+  .r-new { display:flex; gap:12px; align-items:center; padding: 14px; border: 1px dashed var(--rail); border-radius: var(--radius); color: var(--brass); font-weight: 600; }
+
+  .r-seg { display:flex; gap:4px; padding: 4px; background: var(--hull); border:1px solid var(--rail); border-radius: 14px; margin: 10px 0 14px; }
+  .r-seg span { flex:1; text-align:center; padding: 9px 0; border-radius: 10px; color: var(--mist); font-size: 14.5px; font-weight: 500; }
+  .r-seg span.on { background: var(--foam); color: #0B1424; font-weight: 600; }
+  .r-seg em { font-style: normal; font-size: 11px; background: rgba(240,184,64,.22); color: var(--brass); border-radius: 8px; padding: 1px 6px; margin-left: 4px; }
+
+  /* the paper: a rendered page, serif, with citations you can tap */
+  .paper { background: #f6f3ec; color: #1c1c1c; border-radius: 6px; padding: 26px 26px 30px; box-shadow: 0 14px 36px rgba(0,0,0,.5); font-family: "Source Serif 4", Georgia, "Times New Roman", serif; position: relative; }
+  .paper h4 { margin: 0 0 3px; font-size: 21px; line-height: 1.2; text-align: center; font-weight: 700; }
+  .paper .au { text-align:center; font-size: 12.5px; color: #555; margin-bottom: 14px; }
+  .paper h5 { margin: 12px 0 4px; font-size: 14.5px; }
+  .paper p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; text-align: justify; hyphens: auto; }
+  .cite { font-family: var(--font); font-size: 10.5px; font-weight: 600; color: #7a4d00; background: rgba(240,184,64,.35); border-radius: 5px; padding: 0 4px; margin: 0 1px; white-space: nowrap; }
+  .cite.fromvideo { background: rgba(111,177,240,.35); color: #0d3a63; }
+  .eq { text-align:center; font-style: italic; font-size: 14px; margin: 8px 0; }
+  .paper .pg { position:absolute; bottom: 8px; left: 0; right: 0; text-align:center; font-size: 10.5px; color: #888; font-family: var(--font); }
+  .r-actions { display:flex; gap:8px; margin: 12px 0 0; }
+  .btn { display:inline-flex; align-items:center; gap:8px; padding: 11px 14px; border-radius: 14px; background: var(--hull-2); border:1px solid var(--rail); font-weight:600; font-size: 14.5px; }
+  .btn.pri { background: var(--brass); color: var(--brass-ink); border-color: var(--brass); }
+  .r-build { display:flex; align-items:center; gap:8px; color: var(--mist); font-size: 13px; margin-top: 10px; }
+
+  /* source reader */
+  .vid { position: relative; border-radius: 14px; overflow: hidden; background: #0c1626; border: 1px solid var(--rail); height: 150px; display:flex; align-items:flex-end; }
+  .vid::before { content:""; position:absolute; inset:0; background: linear-gradient(135deg, #1d3b63, #0d1a2e 60%), radial-gradient(circle at 70% 30%, #3b6fb0, transparent 50%); }
+  .vid .play { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .vid .play span { width: 46px; height: 46px; border-radius: 50%; background: rgba(242,245,249,.9); display:flex; align-items:center; justify-content:center; color:#0B1424; }
+  .vid .bar { position: relative; width: 100%; padding: 8px 12px; display:flex; justify-content: space-between; font-size: 12px; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  .strip { display:flex; gap:8px; overflow: hidden; margin: 10px 0 4px; }
+  .frame { flex: none; width: 112px; }
+  .frame .im { height: 64px; border-radius: 8px; border: 1px solid var(--rail); background: linear-gradient(160deg, #20416b, #101c30); position: relative; overflow:hidden; }
+  .frame .im::after { content:""; position:absolute; left:8px; right:26px; top:12px; height:5px; border-radius:3px; background: rgba(242,245,249,.55); box-shadow: 0 10px 0 rgba(242,245,249,.35), 0 20px 0 rgba(242,245,249,.25), 0 30px 0 rgba(242,245,249,.2); }
+  .frame .ts { font-size: 11px; color: var(--mist); margin-top: 4px; display:flex; justify-content:space-between; }
+  .frame .ocr { font-family: var(--mono); font-size: 10.5px; color: var(--kelp); }
+  .tr { display:grid; grid-template-columns: 52px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--rail); font-size: 14.5px; line-height: 1.4; }
+  .tr time { font-family: var(--mono); font-size: 12px; color: var(--dock); padding-top: 2px; }
+  .tr.hl { background: rgba(240,184,64,.09); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 10px; border-bottom-color: transparent; }
+  .tr.hl q { color: var(--foam); quotes: none; }
+  .tokens { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0; }
+  .tokens div { background: var(--hull); border: 1px solid var(--rail); border-radius: 14px; padding: 10px; }
+  .tokens b { display:block; font-size: 20px; letter-spacing: -.01em; }
+  .tokens span { font-size: 11.5px; color: var(--mist); }
+  .tokens .free b { color: var(--kelp); }
+
+  /* needs-you cards */
+  .ask { background: var(--hull); border: 1px solid var(--rail); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+  .ask .top { display:flex; gap:12px; align-items:flex-start; }
+  .ask h3 { margin:0; font-size: 16.5px; font-weight: 600; line-height:1.3; }
+  .ask p { color: var(--mist); font-size: 14px; margin: 6px 0 0; line-height: 1.45; }
+  .ask .facts { display:grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0; font-size: 13.5px; }
+  .ask .facts span { color: var(--dim); }
+  .ask .go { display:flex; gap:8px; margin-top: 12px; }
+  .ask .go .btn { flex:1; justify-content:center; }
+  .free-tag { color: var(--kelp); font-weight:600; }
+</style></head>
+<body>
+<div class="deck">
+
+  <!-- 1. Research list -->
+  <div class="figure">
+    <div class="phone"><div class="scroll">
+      <div class="r-top"><h1>Research</h1><button class="icon-btn accent" style="width:44px;height:44px;border-radius:50%;background:var(--brass);color:var(--brass-ink);display:flex;align-items:center;justify-content:center"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></button></div>
+      <p class="r-sub">4 topics · papers built from sources your agents read</p>
+      <div class="r-needs"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-bell"/></svg></span><div><b>2 things need you</b><div class="muted" style="font-size:13.5px">A video to download and frames to read</div></div><svg class="i chev" style="margin-left:auto;color:var(--mist)"><use href="/sprite.svg#i-chevron"/></svg></div>
+      <div class="r-card"><div class="r-cover"><div class="t"></div><i></i><i style="margin-top:5px"></i><i style="margin-top:5px;width:60%"></i><i style="margin-top:12px"></i><i style="margin-top:5px"></i><i style="margin-top:5px;width:70%"></i><div class="c"></div></div>
+        <div><h3>Tidal energy storage in coastal grids</h3><div class="r-meta"><span class="tag brass">writing</span><span class="tag dim">14 sources</span><span class="tag dim">12 pages</span></div><div class="r-line"><span class="dotlive"></span>Agent working · section 4</div></div></div>
+      <div class="r-card"><div class="r-cover"><div class="t"></div><i></i><i style="margin-top:5px"></i><i style="margin-top:5px;width:60%"></i><i style="margin-top:12px"></i><i style="margin-top:5px;width:80%"></i><div class="c"></div></div>
+        <div><h3>Whisper vs. wav2vec on noisy speech</h3><div class="r-meta"><span class="tag">built</span><span class="tag dim">9 sources</span><span class="tag dim">6 pages</span></div><div class="r-line">Waiting for you · yesterday</div></div></div>
+      <div class="r-card"><div class="r-cover"><div class="t"></div><i></i><i style="margin-top:5px"></i><i style="margin-top:5px;width:50%"></i><div class="c"></div></div>
+        <div><h3>How tmux handles OSC passthrough</h3><div class="r-meta"><span class="tag dim">gathering</span><span class="tag dim">3 sources</span></div><div class="r-line">Idle · 3 days ago</div></div></div>
+      <div class="r-new"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-plus"/></svg></span>New research topic</div>
+    </div>
+    <div class="pill-bar"><span><svg class="i"><use href="/sprite.svg#i-home"/></svg>Home</span><span><svg class="i"><use href="/sprite.svg#i-shells"/></svg>Shells</span><span class="on"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg>Research</span><span><svg class="i"><use href="/sprite.svg#i-services"/></svg>Services</span><span><svg class="i"><use href="/sprite.svg#i-more"/></svg>More</span></div></div>
+    <div class="cap"><b>The list.</b> One card per topic in <span class="mono">/Research</span>, each with the real first page as its cover. The amber strip is the inbox: anything an agent needs from you (permission to download, frames to read) surfaces here and as a Telegram alert.</div>
+  </div>
+
+  <!-- 2. Topic: Paper tab -->
+  <div class="figure">
+    <div class="phone"><div class="scroll">
+      <header class="topbar compact" style="padding-top:0"><button class="text-btn back" style="color:var(--brass);display:flex;align-items:center"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Research</button><h1 style="font-size:16px;font-weight:600;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px">Tidal energy storage…</h1><span style="width:64px;text-align:right;color:var(--mist)"><svg class="i"><use href="/sprite.svg#i-more_h"/></svg></span></header>
+      <div class="r-seg"><span class="on">Paper</span><span>Sources<em>14</em></span><span>Notes</span><span>Agent<em>●</em></span></div>
+      <div class="paper">
+        <h4>Tidal Energy Storage in Coastal Grids</h4><div class="au">Draft 3 · built 2 minutes ago</div>
+        <h5>1  Introduction</h5>
+        <p>Coastal grids face the same problem at every scale: supply that follows the moon and demand that follows people <span class="cite">[2]</span>. Pumped storage has carried most of this load for decades <span class="cite">[5]</span>, but the best sites are taken <span class="cite">[7, 9]</span>.</p>
+        <h5>2  Round-trip efficiency</h5>
+        <p>As the speaker puts it, the dominant loss is not the turbine but the conversion step <span class="cite fromvideo">[11 · 14:32]</span>, which gives</p>
+        <div class="eq">η = E<sub>out</sub> / E<sub>in</sub> ≈ 0.78</div>
+        <p>consistent with the field data in <span class="cite">[4, Table 2]</span>.</p>
+        <div class="pg">1 of 12</div>
+      </div>
+      <div class="r-actions"><button class="btn pri"><svg class="i"><use href="/sprite.svg#i-restart"/></svg>Build</button><button class="btn"><svg class="i"><use href="/sprite.svg#i-download"/></svg>Export</button><button class="btn"><svg class="i"><use href="/sprite.svg#i-file-code"/></svg>.tex</button></div>
+      <div class="r-build"><span class="dotlive"></span>Built from 14 sources · 0 warnings · 12 pages</div>
+    </div></div>
+    <div class="cap"><b>The paper, as a page.</b> The real PDF, shown as pages you swipe through. Citations are tappable: amber for papers and articles, blue for a moment in a video, which opens straight at that timestamp. Export gives the PDF, the LaTeX source, the BibTeX file or a zip.</div>
+  </div>
+
+  <!-- 3. Source reader (video) -->
+  <div class="figure">
+    <div class="phone"><div class="scroll">
+      <header class="topbar compact" style="padding-top:0"><button class="text-btn back" style="color:var(--brass);display:flex;align-items:center"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Sources</button><h1 style="font-size:16px;font-weight:600;flex:1;text-align:center">[11] Video</h1><span style="width:64px"></span></header>
+      <h3 style="margin:6px 0 2px;font-size:18px;line-height:1.25">Why the conversion step costs you 22%</h3>
+      <div class="muted" style="font-size:13.5px;margin-bottom:10px">Grid Futures Lab · 48:10 · cited in section 2</div>
+      <div class="vid"><div class="play"><span><svg class="i" style="fill:#0B1424"><use href="/sprite.svg#i-play"/></svg></span></div><div class="bar"><span class="mono">14:32</span><span class="mono">48:10</span></div></div>
+      <div class="strip">
+        <div class="frame"><div class="im"></div><div class="ts"><span>14:30</span><span class="ocr">OCR ✓</span></div></div>
+        <div class="frame"><div class="im"></div><div class="ts"><span>15:00</span><span class="ocr">OCR ✓</span></div></div>
+        <div class="frame"><div class="im"></div><div class="ts"><span>15:30</span><span class="ocr">OCR ✓</span></div></div>
+        <div class="frame"><div class="im"></div><div class="ts"><span>16:00</span><span class="ocr">OCR ✓</span></div></div>
+      </div>
+      <div class="tokens"><div class="free"><b>0</b><span>tokens to get the text</span></div><div><b>3</b><span>excerpts the agent read</span></div><div><b>1.2k</b><span>tokens spent</span></div></div>
+      <div class="r-seg" style="margin:4px 0 6px"><span class="on">Transcript <em style="background:rgba(63,211,154,.2);color:var(--kelp)">captions</em></span><span>Frames</span><span>Notes</span></div>
+      <div class="tr"><time>14:18</time><span>So we ran it for a full season on the pilot site.</span></div>
+      <div class="tr hl"><time>14:32</time><q>The dominant loss is not the turbine, it is the conversion step. That alone is about twenty two percent.</q></div>
+      <div class="tr"><time>14:51</time><span>Which is why the slide you are looking at now matters.</span></div>
+      <div class="tr"><time>15:04</time><span>Efficiency by stage: pump, tunnel, turbine, inverter.</span></div>
+    </div></div>
+    <div class="cap"><b>Reading a video without spending tokens.</b> The transcript came free from the captions. Frames are taken every 30 s and run through OCR on the box first, so slide text is searchable before any model sees it. The counters show what the agent actually read: it asks for excerpts, not the whole thing. Tap a line to cite that moment.</div>
+  </div>
+
+  <!-- 4. Needs you -->
+  <div class="figure">
+    <div class="phone"><div class="scroll">
+      <header class="topbar compact" style="padding-top:0"><button class="text-btn back" style="color:var(--brass);display:flex;align-items:center"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Research</button><h1 style="font-size:16px;font-weight:600;flex:1;text-align:center">Needs you</h1><span style="width:64px"></span></header>
+      <p class="r-sub" style="margin:4px 0 10px">Your agents stop and ask before doing these.</p>
+
+      <div class="ask">
+        <div class="top"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-download"/></svg></span><div><h3>Download a video to transcribe it?</h3><p>No captions exist for this one, so the only way in is the audio.</p></div></div>
+        <div class="facts"><span>Video</span><b style="font-weight:500">Pump-hydro site tour, 31:20</b><span>From</span><b style="font-weight:500">youtube.com</b><span>Size</span><b style="font-weight:500">≈ 24 MB audio only</b><span>Then</span><b style="font-weight:500">Whisper (small) on this box, ≈ 7 min, <span class="free-tag" style="color:var(--kelp)">no model tokens</span></b></div>
+                <div class="go"><button class="btn pri"><svg class="i"><use href="/sprite.svg#i-check"/></svg>Allow</button><button class="btn"><svg class="i"><use href="/sprite.svg#i-x"/></svg>Skip</button></div>
+      </div>
+
+      <div class="ask">
+        <div class="top"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-image"/></svg></span><div><h3>Take frames from the video and read them?</h3><p>Slides and charts hold things the audio doesn't say.</p></div></div>
+        <div class="facts"><span>Frames</span><b style="font-weight:500">1 every 30 s ≈ 62 images</b><span>First</span><b style="font-weight:500">OCR on the box, <span class="free-tag" style="color:var(--kelp)">free</span></b><span>Then</span><b style="font-weight:500">only frames with a chart or little text go to the agent (≈ 9)</b></div>
+        <div class="go"><button class="btn pri"><svg class="i"><use href="/sprite.svg#i-check"/></svg>Allow</button><button class="btn">Customize…</button><button class="btn" style="flex:0"><svg class="i"><use href="/sprite.svg#i-x"/></svg></button></div>
+      </div>
+
+      <div class="r-needs" style="margin-top:10px"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div style="font-size:13.5px;line-height:1.4"><b style="color:var(--foam)">Nothing is downloaded or sent anywhere until you tap Allow.</b><div class="muted">Allowing is logged in the audit log with the address.</div></div></div>
+    </div></div>
+    <div class="cap"><b>Permission, not surprise.</b> Same pattern as root requests: the agent asks, you see exactly what would happen and what it costs, and it waits. The "free" tags are the point: the box does the heavy work first (captions, Whisper, OCR) and the agent gets small, searchable text.</div>
+  </div>
+
+</div>
+</body></html>

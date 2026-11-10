@@ -493,6 +493,42 @@ phone's Update button. Mechanism:
 - **2.0.2** — Alias names with no certificate yet answer only the certificate check on port 80 (404 for anything else),
   instead of the app over plain http, which also made the check fail (the app answered 404 for the challenge file);
   two certificate attempts per update instead of six, to stay inside Let's Encrypt's 5-failures-per-hour limit.
+- **2.1.0** — **Keep-alive and the 2-day auto-stop.** More shows *Keep the box on*: until a date you choose the
+  schedule leaves the box alone (for a live service that has to stay up). `GET/PUT/DELETE /api/keepalive`, state
+  `keepalive.json` (`{ until, reason, set }`, max 60 days, ignored once past). `GET /api/activity` says which agent
+  shells are WORKING (terminal changing in the last 90 s, session transcript written in the last 2 min, or CPU under
+  them), never counting waiting-for-input prompts, live services, plain shells or servers. `POST /api/autostop/check`
+  (`{ dry }`) returns what the schedule would do (`stop`, `why`: idle | working | keep-alive) and, unless dry, writes
+  the audit entry (`autostop` / `autostop-skipped`) and sends the Telegram alert (new kind `autostop`, awaited so it
+  goes out before a stop). `plato autostop-check [--dry]` and `plato activity` on the box. Terraform: a control-Lambda
+  schedule every 2 days (`autostop.tf`) asks the box through one fixed SSM document and stops the instance only when
+  the box says so; an agent working, a keep-alive, a box that does not answer, or one started under 12 h ago all skip
+  the round (next try in 2 days, nothing is ever forced).
+- **2.1.1** — `plato reset-auth` ended early (a `tr | head` pipe under `pipefail`) after writing the new setup token but
+  before restarting the server, so the running server still held the old token and rejected the new one. The token is now
+  made with node, in the server's own format, and the restart runs.
+- **2.2.0** — **Research**: a tab of its own. A topic is a folder `/Research/<Topic>` (`paper/`, `sources/<id>/`, `notes/`,
+  `.platopypus/`); nothing existing moves, so there is no migration. New on disk, all inside a topic: `research.json`
+  (title, brief, `lang`), `asks/`, `questions/`, `seen.json`, `words.txt`, `cost.json`, `notes/decisions.md`, and two git
+  repositories (the topic, and `paper/` on its own). `install.sh` links `bin/research` to `/usr/local/bin/research` and
+  creates `/Research`. The heavy tools (LaTeX, ffmpeg, tesseract, poppler, yt-dlp, faster-whisper, aspell) are **not**
+  installed by an update: `research setup` installs them when wanted, and every feature says what is missing.
+  New session type `research` (`PLATO_SESSION=research`, brief at `<topic>/.platopypus/research.md`); a one-shot run with
+  that session works in the topic instead of a throwaway folder and is refused as root. Phone routes under
+  `/api/research` (topics, build, pages, sources, exports, asks, questions, notes, files, upload, commit, history,
+  links, language, spell); agent routes `POST /api/agent/research/ask`, `GET /api/agent/research/ask/:id`.
+  `/editor.html?topic=<slug>` edits the paper (same sign-in, same CSP).
+  **Publishing rule**: anything under `/Research` can never be flagged private or public, except `<topic>/paper`, which
+  may be flagged private only (`projects.setRepoFlag`, checked again in `projects.allowPush`).
+  **Power status**: `GET /api/power` (read-only: `canPowerOff`, `why`, `message`) and `plato power` (exit 0 = may be
+  powered off, 3 = no) for any scheduler; `POST /api/power/check` is the recorded form. `/api/autostop/check` and
+  `plato autostop-check` keep working, so the control Lambda needs no change. Alert kinds `research` added; `autostop`
+  retitled "Automatic power-off". The web manifest is renamed (re-add the Home Screen icon to see the new name).
+  A topic may hold `template/` (an uploaded LaTeX zip or example PDF, with `structure.md` for the agent) and
+  `.platopypus/template.json`. Files gains Home / Projects / Research shortcuts. On screens 720px and wider every
+  direct child of a tab or page is held in the content column (`.tab > *` margins are now `!important`).
+  `plato reset-auth`: the 2.1.1 fix had a line break inside the token command and crashed after clearing the logins;
+  fixed here (2.1.1 was never released).
 
 ## Release checklist
 

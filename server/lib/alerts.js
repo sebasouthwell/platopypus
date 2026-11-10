@@ -18,6 +18,8 @@ export const KINDS = [
     { key: 'root', title: 'Root requests waiting for you', sub: 'An agent asked to run something as root.', def: true },
     { key: 'signin', title: 'Sign-ins and lockouts', sub: 'Someone signed in to PlatOpypus, or an address was locked out after failed attempts.', def: true },
     { key: 'link', title: 'Agents opening public links', sub: 'A quick link or a hostname on your domain, started by an agent.', def: true },
+    { key: 'research', title: 'Research needs you', sub: 'A research agent wants to download a video, take frames, or ask you something.', def: true },
+    { key: 'autostop', title: 'Automatic power-off', sub: 'The box is about to power off automatically, or that was skipped because an agent is working or the box is kept on.', def: true },
     { key: 'limit', title: 'Limit reached', sub: 'The box was overloaded and PlatOpypus closed public links and stopped servers and containers that are not live services.', def: true },
     { key: 'backup', title: 'A backup fails', sub: 'A project backup to S3 did not complete.', def: true },
     { key: 'crash', title: 'A server stops by itself', sub: 'A registered server or live service was running and is not any more, without anyone stopping it.', def: true },
@@ -25,7 +27,7 @@ export const KINDS = [
     { key: 'credential', title: 'Agents using Vault values', sub: 'Every vault run and vault get by an agent. Can be busy.', def: false },
     { key: 'commit', title: 'Agent commits', sub: 'A commit by an agent in a project under /Projects.', def: false },
 ];
-const ICON = { root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', backup: '💾', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
+const ICON = { root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', autostop: '🌙', research: '📚', backup: '💾', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
 
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 function load() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } }
@@ -161,6 +163,16 @@ export function notify(kind, text, { key = null, quietMs = 10 * 60_000 } = {}) {
         if (key) { const k = `${kind}:${key}`; const t = recent.get(k); if (t && Date.now() - t < quietMs) return false; recent.set(k, Date.now()); if (recent.size > 500) recent.delete(recent.keys().next().value); }
         queue.push({ kind, text: String(text) });
         pump();
+        return true;
+    } catch { return false; }
+}
+
+// Send now and wait for it (the box may be stopped a moment later), instead of queueing.
+export async function notifyNow(kind, text) {
+    try {
+        const s = settings();
+        if (!s.ready || !s.on[kind] || s.pausedUntil) return false;
+        await Promise.race([deliver(format(kind, text)), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 8000))]);
         return true;
     } catch { return false; }
 }

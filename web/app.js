@@ -305,6 +305,7 @@ async function refresh() {
         else if (state.tab === 'shells') await loadShells();
         else if (state.tab === 'services') await loadServices();
         else if (state.tab === 'files') await loadFiles(state.filesPath ?? null);
+        else if (state.tab === 'research') await loadResearch();
         else if (state.tab === 'more') await loadMore();
     } catch (ex) { if (ex.status !== 401) toast(ex.message, true); }
 }
@@ -366,6 +367,7 @@ $('#home-new').addEventListener('click', () => newShellDialog(state.filesPath ||
 $$('#tab-home .tile').forEach(t => t.addEventListener('click', async () => {
     const act = t.dataset.act;
     if (act === 'agent') return newShellDialog(state.filesPath || projectsRel(), 'agent');
+    if (act === 'research') return go('research');
     if (act === 'shell') return newShellDialog(state.filesPath || homeRel, 'shell');
     if (act === 'upload') { go('files'); return setTimeout(() => $('#files-input').click(), 150); }
     if (act === 'stirling') return launchApp('stirling-pdf', 'Stirling PDF');
@@ -584,6 +586,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
 // Before an agent starts: control session or project session; a new project also gets its security level (once).
 function sessionTypeDialog(folder) {
     return new Promise(resolve => {
+        if (/^\/?Research\/[^/]+/.test(folder || '')) return resolve('research');   // inside a research topic: that is what it is
         const last = localStorage.getItem('porthole.sessionType') || 'project';
         const { panel, close } = openDialog(`<h2>${icon('claude')}What is this session?</h2>
             <div class="menu">
@@ -2118,6 +2121,8 @@ function runImageDialog(prefill = '') {
 
 let showHidden = localStorage.getItem('porthole.hidden') === '1';
 let fsRoot = '/', homeRel = '';
+// Shortcuts above the list: the home folder, and the two folders agents work in.
+$$('#files-places [data-place]').forEach(b => b.addEventListener('click', () => loadFiles(b.dataset.place === 'home' ? homeRel : b.dataset.place).catch(ex => toast(ex.status === 404 ? `There is no ${b.dataset.place} folder yet.` : ex.message, true))));
 const join = (a, b) => (a ? `${a}/${b}` : b);
 const parentOf = p => p.split('/').slice(0, -1).join('/');
 const rootLabel = () => (fsRoot === '/' ? '/' : '~');
@@ -2136,6 +2141,7 @@ async function loadFiles(path = null) {
     fsRoot = data.root || '/'; homeRel = data.home || '';
     state.filesPath = data.path; localStorage.setItem('porthole.path', data.path);
     renderCrumbs(data.path);
+    $$('#files-places [data-place]').forEach(b => { const p = b.dataset.place === 'home' ? homeRel : b.dataset.place; b.classList.toggle('on', data.path === p || (b.dataset.place !== 'home' && data.path.startsWith(p + '/'))); });
     const items = data.items.filter(i => !i.hidden || showHidden || i.name === '.platorun' || i.name === '.portholerun');
     const runFile = data.items.find(i => (i.name === '.platorun' || i.name === '.portholerun') && i.type === 'file');
     $('#files-empty').hidden = items.length > 0;
@@ -2601,6 +2607,58 @@ function closeEditor() { editorSheet.hidden = true; editing = null; loadFiles(st
 
 // ---------- more ----------
 
+// ---------- keep the box on ----------
+// Power status: the box says whether it may be powered off (no agent working, not kept on). Whatever powers it off
+// automatically asks that first. Keeping it on until a date makes the answer "no" until then.
+async function loadKeepAlive() {
+    const { keepAlive: k } = await api('/api/keepalive');
+    const card = $('#keepalive-card'); if (!card) return;
+    const when = k ? new Date(k.until).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    card.innerHTML = `<button class="row" data-keep><span class="ico ${k ? 'kelp' : ''}">${icon('anchor')}</span><div class="main"><div class="title">${k ? `Kept on until ${esc(when)}` : 'Keep the box on'}</div><div class="sub" style="white-space:normal">${k ? esc(k.reason || 'Automatic power-off is paused') : 'It may be powered off automatically when no agent is working. Tap to keep it on until a date.'}</div></div>${icon('chevron', 'i chev')}</button>`;
+    $('[data-keep]', card).onclick = () => keepAliveDialog(k);
+}
+function keepAliveDialog(k) {
+    const DAY = 86400_000, MAXD = 60;
+    const midnight = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const today = midnight(Date.now());
+    const pad = n => String(n).padStart(2, '0');
+    const start = k ? new Date(k.until) : new Date(Date.now() + 3 * DAY);
+    const sel = { day: midnight(start.getTime()), time: k ? `${pad(start.getHours())}:${pad(start.getMinutes())}` : '23:59' };
+    const TIMES = [['09:00', 'Morning'], ['13:00', 'Midday'], ['18:00', 'Evening'], ['23:59', 'End of day']];
+    const ymd = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+    const { panel, close } = openDialog(`<h2>${icon('anchor')}Keep the box on</h2>
+        <p class="muted">Until the time you pick, the box reports that it must not be powered off, whatever the agents are doing.</p>
+        <div class="ka-label">How long</div>
+        <div class="ka-chips">${[['Tonight', 0], ['Tomorrow', 1], ['3 days', 3], ['A week', 7], ['2 weeks', 14]].map(([l, d]) => `<button type="button" data-days="${d}">${l}</button>`).join('')}</div>
+        <div class="ka-label">Or pick the day</div>
+        <div class="ka-days" id="ka-days">${Array.from({ length: 14 }, (_, i) => { const d = new Date(today + i * DAY); return `<button type="button" data-day="${today + i * DAY}"><span>${i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString(undefined, { month: 'short' })}</span></button>`; }).join('')}<label class="ka-later"><span>Later</span><b>${icon('chevron')}</b><span>up to ${MAXD} days</span><input type="date" id="ka-date" min="${ymd(today)}" max="${ymd(today + MAXD * DAY)}" aria-label="A later date"></label></div>
+        <div class="ka-label">Until what time</div>
+        <div class="ka-chips" id="ka-times">${TIMES.map(([t, l]) => `<button type="button" data-time="${t}">${l}<small>${t}</small></button>`).join('')}<label class="ka-timebox">Other<input type="time" id="ka-time" aria-label="Another time"></label></div>
+        <div class="ka-sum" id="ka-sum" aria-live="polite"></div>
+        <div class="field"><label>What for (optional)</label><input id="ka-reason" type="text" maxlength="120" placeholder="Why it needs to stay on" value="${esc(k?.reason || '')}"></div>
+        <div class="buttons">${k ? '<button data-clear>Stop keeping it on</button>' : ''}<button data-close>Cancel</button><button class="primary" data-ok>Keep it on</button></div>`);
+    const until = () => { const [h, m] = sel.time.split(':').map(Number); const d = new Date(sel.day); d.setHours(h, m, 0, 0); return d.getTime(); };
+    const paint = () => {
+        $$('[data-day]', panel).forEach(b => b.classList.toggle('on', Number(b.dataset.day) === sel.day));
+        $('.ka-later', panel).classList.toggle('on', sel.day >= today + 14 * DAY);
+        $$('[data-time]', panel).forEach(b => b.classList.toggle('on', b.dataset.time === sel.time));
+        $('.ka-timebox', panel).classList.toggle('on', !TIMES.some(([t]) => t === sel.time)); $('#ka-time', panel).value = sel.time; $('#ka-date', panel).value = ymd(sel.day);
+        const u = until(), left = u - Date.now(), sum = $('#ka-sum', panel), ok = $('[data-ok]', panel);
+        const bad = left < 5 * 60_000 ? 'That time has passed. Pick a later one.' : left > MAXD * DAY ? `The longest is ${MAXD} days.` : '';
+        const days = Math.floor(left / DAY), hours = Math.round((left % DAY) / 3600_000);
+        sum.textContent = bad || `Kept on until ${new Date(u).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} · ${days ? `${days} day${days === 1 ? '' : 's'}${hours ? ` ${hours} h` : ''}` : `${Math.max(1, hours)} h`} from now`;
+        sum.classList.toggle('bad', !!bad); ok.disabled = !!bad;
+    };
+    $$('[data-days]', panel).forEach(b => b.onclick = () => { sel.day = today + Number(b.dataset.days) * DAY; sel.time = '23:59'; paint(); $(`[data-day="${sel.day}"]`, panel)?.scrollIntoView({ inline: 'center', block: 'nearest' }); });
+    $$('[data-day]', panel).forEach(b => b.onclick = () => { sel.day = Number(b.dataset.day); paint(); });
+    $$('[data-time]', panel).forEach(b => b.onclick = () => { sel.time = b.dataset.time; paint(); });
+    $('#ka-time', panel).onchange = e => { if (e.target.value) { sel.time = e.target.value; paint(); } };
+    $('#ka-date', panel).onchange = e => { if (e.target.value) { const [y, m, d] = e.target.value.split('-').map(Number); sel.day = new Date(y, m - 1, d).getTime(); paint(); } };
+    paint(); $(`[data-day="${sel.day}"]`, panel)?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    $('[data-ok]', panel).onclick = async () => { try { await api('/api/keepalive', { method: 'PUT', body: { until: until(), reason: $('#ka-reason', panel).value.trim() } }); close(); toast('The box stays on'); loadKeepAlive().catch(() => {}); } catch (ex) { toast(ex.message, true); } };
+    const c = $('[data-clear]', panel); if (c) c.onclick = async () => { try { await api('/api/keepalive', { method: 'DELETE' }); close(); toast('Automatic power-off is back on'); loadKeepAlive().catch(() => {}); } catch (ex) { toast(ex.message, true); } };
+}
+
 async function loadMore() {
     const s = await api('/api/status');
     $('#more-sub').textContent = location.host;
@@ -2617,6 +2675,7 @@ async function loadMore() {
     $('#box-refresh').onclick = () => loadMore().catch(e => toast(e.message, true));
     loadUpdate().catch(() => {});
     api('/api/alerts').then(a => { const el = $('#more-alerts-sub'); if (el) el.textContent = alertsSub(a); }).catch(() => {});
+    loadKeepAlive().catch(() => {});
     api('/api/rename').then(r => {
         const card = $('#rename-card'); if (!card) return;
         card.hidden = !r.pending;
@@ -3097,6 +3156,178 @@ async function credentialFormFromLegacy(preset) {
 
 // ---------- security ----------
 
+// ---------- research ----------
+// Topics under /Research: a paper an agent writes from sources it reads with the `research` tools. The app shows the
+// built paper as pages, the sources with their free transcripts and OCR'd frames, the notes, and the things the agent is
+// waiting on you for (downloads, frames, images). See docs/RESEARCH.md.
+const researchState = { slug: null, tab: 'paper', data: null };
+const fmtClock = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+const kindIcon = k => ({ video: 'play', pdf: 'file-pdf', web: 'globe', file: 'file-text' }[k] || 'file-text');
+const kindTone = k => ({ video: 'dock', pdf: 'flare', web: 'kelp', file: '' }[k] || '');
+const askFacts = a => {
+    const d = a.detail || {}; const rows = [];
+    if (d.video) rows.push(['Video', d.video + (d.duration ? ` · ${fmtClock(d.duration)}` : '')]);
+    if (d.url) { try { rows.push(['From', new URL(d.url).hostname]); } catch { /* not a url */ } }
+    if (a.type === 'download-audio') { rows.push(['Then', `Whisper (${d.model || 'small'}${d.engine === 'openai' ? ', your OpenAI key' : ', on this box'}); no model tokens`]); rows.push(['Audio', 'deleted after transcribing']); }
+    if (a.type === 'frames') { rows.push(['Frames', `1 every ${d.every || 30} s, a low-resolution copy of the video`]); rows.push(['First', 'OCR on the box (free); the video is deleted after']); }
+    if (a.type === 'send-frames') rows.push(['Images', `${d.count || '?'} frame${d.count === 1 ? '' : 's'} shown to the agent (uses model tokens)`]);
+    return rows;
+};
+function askCard(a) {
+    const icoName = a.type === 'download-audio' ? 'download' : a.type === 'question' ? 'info' : 'image';
+    const facts = askFacts(a);
+    return `<div class="ask" data-ask="${esc(a.id)}" data-topic="${esc(a.topic)}"><div class="top"><span class="ico ${a.type === 'download-audio' ? 'dock' : 'brass'}">${icon(icoName)}</span><div><h3>${esc(a.title)}</h3><p class="sub">${esc(a.topicTitle || a.topic)}</p></div></div>
+        ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<span>${esc(k)}</span><b>${esc(v)}</b>`).join('')}</div>` : ''}
+        ${a.type === 'question' ? `${a.detail?.why ? `<p class="why">${esc(a.detail.why)}</p>` : ''}${a.detail?.options?.length ? `<div class="opts" data-multi="${a.detail.multi ? 1 : 0}">${a.detail.options.map(o => `<button type="button" data-opt="${esc(o)}" aria-pressed="false">${esc(o)}</button>`).join('')}</div>${a.detail.multi ? '<p class="why">Pick any that apply.</p>' : ''}` : ''}<div class="field"><textarea data-answer rows="2" placeholder="${a.detail?.options?.length ? 'Or in your own words' : 'Your answer'}"></textarea></div>` : ''}
+        <div class="go"><button class="btn pri" data-allow>${icon('check')}${a.type === 'question' ? 'Answer' : 'Allow'}</button><button class="btn" data-deny>${icon('x')}${a.type === 'question' ? 'You decide' : 'Skip'}</button></div></div>`;
+}
+function bindAsks(root, then) {
+    $$('[data-ask]', root).forEach(card => {
+        const decide = async verb => {
+            const body = {}; const ans = $('[data-answer]', card); const isQ = !!ans;
+            if (isQ) { body.answer = [...$$('[data-opt].on', card).map(b => b.dataset.opt), ans.value.trim()].filter(Boolean).join('; '); if (verb === 'allow' && !body.answer) return toast('Pick an option or write an answer', true); }
+            $$('button', card).forEach(b => { b.disabled = true; });
+            try { await api(`/api/research/${encodeURIComponent(card.dataset.topic)}/asks/${card.dataset.ask}/${verb}`, { method: 'POST', body }); toast(isQ ? (verb === 'allow' ? 'Answer sent to the agent' : 'The agent will decide') : verb === 'allow' ? 'Allowed' : 'Skipped'); } catch (ex) { toast(ex.message, true); }
+            then();
+        };
+        const opts = $('.opts', card);
+        if (opts) $$('[data-opt]', opts).forEach(b => b.onclick = () => { if (opts.dataset.multi !== '1') $$('[data-opt]', opts).forEach(x => { if (x !== b) { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); } }); const on = b.classList.toggle('on'); b.setAttribute('aria-pressed', String(on)); });
+        $('[data-allow]', card).onclick = () => decide('allow'); $('[data-deny]', card).onclick = () => decide('deny');
+    });
+}
+
+async function loadResearch() {
+    const r = await api('/api/research');
+    const sub = $('#more-research-sub'); if (sub) sub.textContent = r.asks.length ? `${r.asks.length} need${r.asks.length === 1 ? 's' : ''} you` : r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'}` : 'Papers your agents write from sources';
+    const body = $('#research-body');
+    let html = `<p class="r-sub">${r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'} · papers built from sources your agents read` : 'A paper, written by an agent from real sources you can check.'}</p>`;
+    if (r.asks.length) html += `<h2 class="section">Needs you</h2>${r.asks.map(askCard).join('')}`;
+    html += r.topics.map(t => `<button class="r-card" data-topic="${esc(t.slug)}"><div class="r-cover" ${t.pages ? `style="background-image:url('/api/research/${encodeURIComponent(t.slug)}/page/1');background-size:cover;background-position:top"` : ''}>${t.pages ? '' : '<div class="t"></div><i></i><i></i><i style="width:60%"></i><i></i><i style="width:70%"></i>'}<div class="c"></div></div>
+        <div><h3>${esc(t.title)}</h3><div class="r-meta"><span class="tag ${t.status === 'writing' ? 'brass' : ''}">${esc(t.status)}</span><span class="tag dim">${t.sources} source${t.sources === 1 ? '' : 's'}</span>${t.pages ? `<span class="tag dim">${t.pages} page${t.pages === 1 ? "" : "s"}</span>` : ''}${t.pending ? `<span class="tag brass">${t.pending} for you</span>` : ''}</div><div class="r-line">${t.builtAt ? `Built ${esc(new Date(t.builtAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}` : 'Not built yet'}</div></div></button>`).join('');
+    html += `<button class="r-new" data-new-topic><span class="ico brass">${icon('plus')}</span>New research topic</button>`;
+    body.innerHTML = html;
+    $$('[data-topic].r-card', body).forEach(b => b.onclick = () => openTopic(b.dataset.topic));
+    $('[data-new-topic]', body).onclick = newTopicDialog;
+    bindAsks(body, () => loadResearch().catch(() => {}));
+}
+function newTopicDialog() {
+    const { panel, close } = openDialog(`<h2>${icon('file-text')}New research topic</h2>
+        <div class="field"><label for="rt-title">Topic</label><input id="rt-title" type="text" maxlength="120" placeholder="Tidal energy storage in coastal grids" autocapitalize="sentences"></div>
+        <div class="field"><label for="rt-brief">What should it find out? (optional)</label><textarea id="rt-brief" rows="4" placeholder="Scope, questions, what kind of sources, how long"></textarea></div>
+        <p class="muted">A folder is made at <span class="mono">/Research/&lt;topic&gt;</span> with a LaTeX paper, a place for sources and notes.</p>
+        <div class="buttons"><button data-close>Cancel</button><button data-ok>Create</button><button class="primary" data-go>Create and start an agent</button></div>`);
+    const make = async start => {
+        const title = $('#rt-title', panel).value.trim(), brief = $('#rt-brief', panel).value.trim();
+        if (title.length < 3) return toast('Give the topic a title', true);
+        try {
+            const t = await api('/api/research', { method: 'POST', body: { title, brief } }); close();
+            await openTopic(t.slug);
+            if (start) newShellDialog(`Research/${t.slug}`, 'agent', null, { firstPrompt: `Research: ${title}.${brief ? '\n\n' + brief : ''}\n\nRead notes/outline.md and .platopypus/research.md first, then gather sources with the research tools and write the paper.` });
+        } catch (ex) { toast(ex.message, true); }
+    };
+    $('[data-ok]', panel).onclick = () => make(false); $('[data-go]', panel).onclick = () => make(true);
+}
+
+async function openTopic(slug, tab) {
+    researchState.slug = slug; if (tab) researchState.tab = tab;
+    push('topic'); await loadTopic();
+}
+async function loadTopic() {
+    const slug = researchState.slug; if (!slug) return;
+    const t = researchState.data = await api(`/api/research/${encodeURIComponent(slug)}`);
+    $('#topic-title').textContent = t.title;
+    const pendingN = t.asks.filter(a => a.status === 'pending').length;
+    $('#topic-seg').innerHTML = [['paper', 'Paper'], ['sources', `Sources${t.sources.length ? `<em>${t.sources.length}</em>` : ''}`], ['notes', 'Notes'], ['ask', 'Ask'], ['agent', `Agent${pendingN ? `<em>${pendingN}</em>` : ''}`]].map(([k, l]) => `<button data-tt="${k}" class="${researchState.tab === k ? 'on' : ''}">${l}</button>`).join('');
+    $$('#topic-seg [data-tt]').forEach(b => b.onclick = () => { researchState.tab = b.dataset.tt; loadTopic().catch(e => toast(e.message, true)); });
+    const body = $('#topic-body'); const tab = researchState.tab;
+    const enc = encodeURIComponent(slug);
+    if (tab === 'paper') {
+        const b = t.build;
+        let html = '';
+        if (t.pagesAvailable) html += `<div class="r-pages">${Array.from({ length: t.pagesAvailable }, (_, i) => `<img class="r-page" loading="lazy" alt="Page ${i + 1} of ${t.pagesAvailable}" src="/api/research/${enc}/page/${i + 1}?v=${b?.at || 0}">`).join('')}</div>`;
+        else html += `<div class="card"><p style="margin:0">${b && !b.ok ? 'The last build failed.' : 'The paper has not been built yet.'} ${t.sources.length ? '' : 'It builds once the agent has written something; you can build at any time.'}</p></div>`;
+        html += `<div class="r-actions"><button class="btn pri" data-build>${icon('restart')}Build</button><a class="btn" href="/editor.html?topic=${enc}" target="_blank" rel="noopener">${icon('file-text')}Edit</a><button class="btn" data-export>${icon('download')}Export</button></div>`;
+        if (b) html += `<div class="r-build ${b.ok ? '' : 'bad'}"><span class="dotlive ${b.ok ? '' : 'flare'}"></span>${b.ok ? `Built ${esc(new Date(b.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }))} · ${b.pages} page${b.pages === 1 ? "" : "s"} · ${b.warnings} warning${b.warnings === 1 ? '' : 's'} · ${(b.ms / 1000).toFixed(1)} s` : `Build failed: ${esc((b.errors || []).join(' · ') || 'see paper/build/main.log')}`}</div>${b.undefinedCites?.length ? `<div class="r-build bad"><span class="dotlive flare"></span>Undefined citations: ${esc(b.undefinedCites.join(', '))}</div>` : ''}`;
+        body.innerHTML = html;
+        $('[data-build]', body).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Building…'; try { const r = await api(`/api/research/${enc}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+        $('[data-export]', body).onclick = () => exportDialog(t);
+    } else if (tab === 'ask') {
+        const { questions } = await api(`/api/research/${enc}/questions`);
+        const cite = s => esc(s).replace(/\[(s\d{2,4})([^\]]{0,24})\]/g, (m, id, w) => `<button class="r-cite" data-src="${id}">${id}${w}</button>`);
+        body.innerHTML = `<p class="r-sub">Ask anything about this topic. The answer comes from its sources and stays here as a note unless you add it to the paper.</p>
+            <div class="r-thread">${questions.length ? questions.map(q => `<div class="r-q" data-q="${esc(q.id)}"><p class="you">${esc(q.text)}</p>${q.status === 'waiting' ? `<p class="wait"><span class="dotlive"></span>${q.problem ? esc(q.problem) : 'Looking through the sources…'}</p>` : `<div class="ans">${cite(q.answer || '')}</div><div class="r-actions">${q.toPaper === 'done' ? `<span class="tag" style="color:var(--kelp)">In the paper · ${esc(q.section || '')}</span>` : q.toPaper === 'requested' ? `<span class="tag dim">${q.problem ? esc(q.problem) : 'Being added to the paper…'}</span>` : `<button class="btn" data-add>${icon('plus')}Add to paper</button>`}<button class="btn" data-drop>${icon('x')}Remove</button></div>`}</div>`).join('') : '<p class="empty">No questions yet.</p>'}</div>
+            <div class="r-askbox"><textarea id="r-ask" rows="2" placeholder="What do you want to know?"></textarea><button class="btn pri" data-send>${icon('send')}Ask</button></div>`;
+        const agent = localStorage.getItem('porthole.agent') || 'claude';
+        $('[data-send]', body).onclick = async e => { const v = $('#r-ask', body).value.trim(); if (!v) return toast('Write the question first', true); e.currentTarget.disabled = true; try { await api(`/api/research/${enc}/questions`, { method: 'POST', body: { text: v, agent } }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+        $$('.r-q', body).forEach(card => { const id = card.dataset.q;
+            const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/research/${enc}/questions/${id}/add`, { method: 'POST', body: { agent } }); toast('An agent is working it into the paper'); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+            const drop = $('[data-drop]', card); if (drop) drop.onclick = async () => { try { await api(`/api/research/${enc}/questions/${id}/remove`, { method: 'POST', body: {} }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+        });
+        $$('.r-cite', body).forEach(b => b.onclick = () => sourceDialog(slug, b.dataset.src));
+        // While something is being answered, look again every few seconds (only while this tab is still showing).
+        clearTimeout(researchState.poll);
+        if (questions.some(q => q.status === 'waiting' || q.toPaper === 'requested')) researchState.poll = setTimeout(() => { if (researchState.tab === 'ask' && !$('#page-topic').hidden && !$('#r-ask')?.value) loadTopic().catch(() => {}); }, 6000);
+    } else if (tab === 'sources') {
+        const c = t.cost;
+        let html = `<div class="tokens"><div class="free"><b>${(c.ingestedChars / 1000).toFixed(0)}k</b><span>characters read for you by the tools</span></div><div><b>${c.excerpts + c.searches}</b><span>excerpts and searches by the agent</span></div><div><b>${(c.readChars / 1000).toFixed(1)}k</b><span>characters it actually read</span></div></div>`;
+        html += t.sources.length ? `<div class="list">${t.sources.map(s => `<button class="row" data-src="${esc(s.id)}"><span class="ico ${kindTone(s.kind)}">${icon(kindIcon(s.kind))}</span><div class="main"><div class="title">${esc(s.title)}</div><div class="sub"><span class="mono">${esc(s.id)}</span> · ${esc(s.kind)}${s.author ? ' · ' + esc(s.author) : ''}${s.year ? ' · ' + esc(s.year) : ''}${s.state?.transcript ? ` · transcript (${esc(s.state.transcript.replace('whisper-', 'Whisper '))})` : s.kind === 'video' ? ' · no transcript yet' : ''}${s.state?.frames ? ` · ${s.state.frames.count} frames` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No sources yet. The agent adds them with <span class="mono">research add</span>.</p>';
+        body.innerHTML = html;
+        $$('[data-src]', body).forEach(b => b.onclick = () => sourceDialog(slug, b.dataset.src));
+    } else if (tab === 'notes') {
+        body.innerHTML = `<h2 class="section">Outline</h2><pre class="r-notes">${esc(t.notes.outline || '(empty)')}</pre><h2 class="section">Claims and their evidence</h2><pre class="r-notes">${esc(t.notes.claims || '(none yet)')}</pre>
+            <div class="r-actions"><button class="btn" data-edit="outline">${icon('pencil')}Edit outline</button><button class="btn" data-edit="claims">${icon('pencil')}Edit claims</button></div>
+            <h2 class="section">Template or example</h2><div id="r-tpl"></div>`;
+        $$('[data-edit]', body).forEach(b => b.onclick = () => openEditor(`Research/${slug}/notes/${b.dataset.edit}.md`, `${b.dataset.edit}.md`));
+        const tplBox = $('#r-tpl', body);
+        const drawTpl = ({ template: tp, structure }) => {
+            tplBox.innerHTML = `${tp ? `<div class="card"><p style="margin:0 0 6px"><b>${esc(tp.name)}</b> <span class="tag dim">${tp.kind === 'latex' ? `LaTeX · ${tp.files} files` : `PDF · ${tp.pages} page${tp.pages === 1 ? '' : 's'}`}</span>${tp.adopted ? ' <span class="tag" style="color:var(--kelp)">used as the paper</span>' : ''}</p><pre class="r-notes" style="max-height:220px">${esc(structure || '')}</pre></div>` : '<p class="note">Optional. Give the agent a LaTeX template (a zip, such as Overleaf: Menu, Download, Source) or a PDF of a paper whose structure you want to follow. It follows the layout; it never cites or copies it.</p>'}
+                <label class="chk-row"><input type="checkbox" id="r-tpl-adopt"> For a LaTeX zip: use it as the paper's starting point (the current paper is saved as a version first)</label>
+                <div class="r-actions"><button class="btn" data-tpl-up>${icon('upload')}${tp ? 'Replace' : 'Upload a zip or PDF'}</button>${tp ? `<button class="btn" data-tpl-rm>${icon('x')}Remove</button>` : ''}<input type="file" id="r-tpl-file" accept=".zip,.pdf,application/zip,application/pdf" hidden></div>`;
+            $('[data-tpl-up]', tplBox).onclick = () => $('#r-tpl-file', tplBox).click();
+            $('#r-tpl-file', tplBox).onchange = async e => { const f = e.target.files[0]; if (!f) return; const adopt = $('#r-tpl-adopt', tplBox).checked; toast(`Uploading ${f.name}…`);
+                try { const res = await fetch(`/api/research/${enc}/template?name=${encodeURIComponent(f.name)}${adopt ? '&adopt=1' : ''}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' }); const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText); toast(r.template.adopted ? 'Template is now the paper' : 'Saved: the agent will follow it'); drawTpl(r); } catch (ex) { toast(ex.message, true); } };
+            const rm = $('[data-tpl-rm]', tplBox); if (rm) rm.onclick = async () => { try { await api(`/api/research/${enc}/template/remove`, { method: 'POST', body: {} }); drawTpl({ template: null, structure: '' }); } catch (ex) { toast(ex.message, true); } };
+        };
+        api(`/api/research/${enc}/template`).then(drawTpl).catch(() => {});
+    } else {
+        const mine = (state.shells || []).filter(s => String(s.cwd || '').replace(/\/+$/, '').endsWith(`/Research/${slug}`) || String(s.cwd || '').includes(`/Research/${slug}/`));
+        const pend = t.asks.filter(a => a.status === 'pending').map(a => ({ ...a, topicTitle: t.title }));
+        body.innerHTML = `${pend.length ? `<h2 class="section">Needs you</h2>${pend.map(askCard).join('')}` : ''}
+            <h2 class="section">Tell the agent something</h2>
+            <div class="field"><textarea id="r-note" rows="2" placeholder="A change of direction, something to include, something to leave out"></textarea></div>
+            <div class="r-actions"><button class="btn" data-note>${icon('send')}Send note</button></div>
+            ${(() => { const done = t.asks.filter(a => (a.type === 'question' || a.type === 'note') && a.status !== 'pending').slice(0, 20); return done.length ? `<h2 class="section">Asked and answered</h2><div class="qa">${done.map(a => `<div><p class="q">${esc(a.type === 'note' ? 'Your note' : a.title)}</p><p class="a">${esc(a.status === 'denied' ? 'Left to the agent' : a.answer || '')}</p></div>`).join('')}</div>` : ''; })()}
+            <h2 class="section">Agents in this topic</h2>${mine.length ? `<div class="list">${mine.map(s => `<button class="row" data-sh="${esc(s.name)}"><span class="dot ${s.attached ? 'live' : ''}" style="margin:0 10px"></span><div class="main"><div class="title mono">${esc(s.name)}</div><div class="sub">${esc(agentTitle(s.agent))}${useBubble(usageSeen.shells[s.name]) ? '' : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No agent is working on this topic.</p>'}
+            <div class="r-actions"><button class="btn pri" data-start>${icon('claude')}Start an agent here</button></div>
+            <p class="muted" style="margin-top:12px">The agent uses the <span class="mono">research</span> tools: it adds sources, searches them, reads small excerpts and cites as it writes. Downloads, frames and images wait for your Allow.</p>`;
+        $$('[data-sh]', body).forEach(b => b.onclick = () => openTerminal(b.dataset.sh, 'Research'));
+        $('[data-note]', body).onclick = async () => { const v = $('#r-note', body).value.trim(); if (!v) return toast('Write the note first', true); try { await api(`/api/research/${enc}/note`, { method: 'POST', body: { text: v } }); toast('The agent will see it at its next step'); loadTopic().catch(() => {}); } catch (ex) { toast(ex.message, true); } };
+        $('[data-start]', body).onclick = () => newShellDialog(`Research/${slug}`, 'agent', null, { firstPrompt: `Continue the research on: ${t.title}. Read notes/outline.md and .platopypus/research.md first, then \`research status\`.` });
+        bindAsks(body, () => loadTopic().catch(() => {}));
+    }
+}
+function exportDialog(t) {
+    const enc = encodeURIComponent(t.slug);
+    const items = [['pdf', 'PDF', 'file-pdf', t.pagesAvailable ? 'The built paper' : 'Build it first'], ['tex', 'LaTeX source', 'file-code', 'main.tex, sections, references (zip)'], ['bib', 'BibTeX', 'file-text', 'The references file'], ['zip', 'Everything', 'file-archive', 'Paper, sources, notes (zip, no raw media)']];
+    openDialog(`<h2>${icon('download')}Export</h2><div class="list">${items.map(([k, l, ic, sub]) => `<a class="row" href="/api/research/${enc}/export/${k}" download style="text-decoration:none;color:inherit"><span class="ico">${icon(ic)}</span><div class="main"><div class="title">${l}</div><div class="sub">${esc(sub)}</div></div>${icon('download', 'i chev')}</a>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);
+}
+async function sourceDialog(slug, id) {
+    let v; try { v = await api(`/api/research/${encodeURIComponent(slug)}/source/${id}`); } catch (ex) { return toast(ex.message, true); }
+    const m = v.meta; const enc = encodeURIComponent(slug);
+    const frames = (v.frames || []);
+    const { panel } = openDialog(`<h2>${icon(kindIcon(m.kind))}${esc(m.id)} · ${esc(m.kind)}</h2>
+        <h3 style="margin:2px 0 4px;font-size:18px;line-height:1.25">${esc(m.title)}</h3>
+        <p class="muted" style="margin:0 0 10px">${esc([m.author, m.year, m.site].filter(Boolean).join(' · '))}${m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener">open ↗</a>` : ''}</p>
+        <div class="chips" style="flex-wrap:wrap;margin-bottom:8px"><span class="tag dim">cite as <span class="mono">${esc(m.key)}</span></span>${m.state?.transcript ? `<span class="tag" style="color:var(--kelp)">transcript · ${esc(m.state.transcript.replace('whisper-', 'Whisper '))}</span>` : ''}<span class="tag dim">${(v.chars / 1000).toFixed(0)}k chars</span>${m.kind === 'pdf' ? `<a class="tag" href="/api/research/${enc}/source/${esc(m.id)}/original">original PDF</a>` : ''}</div>
+        ${frames.length ? `<div class="strip">${frames.slice(0, 40).map(f => `<div class="frame"><img class="im" loading="lazy" alt="" src="/api/research/${enc}/source/${esc(m.id)}/frame/${esc(f.frame)}"><div class="ts"><span>${fmtClock(f.t)}</span><span class="ocr">${f.visual ? 'image' : 'OCR ✓'}</span></div></div>`).join('')}</div>` : ''}
+        <div style="max-height:46vh;overflow:auto;margin-top:6px">${v.transcript ? v.transcript.map(l => `<div class="tr"><time>${fmtClock(l.t)}</time><span>${esc(l.text)}</span></div>`).join('') : `<pre class="r-notes" style="max-height:none">${esc(v.text)}${v.chars > v.text.length ? '\n\n[…]' : ''}</pre>`}</div>
+        <div class="buttons"><button data-close>Close</button></div>`);
+    void panel;
+}
+
+$('#topic-back').addEventListener('click', () => go('research'));
+$('#topic-refresh').addEventListener('click', () => loadTopic().catch(e => toast(e.message, true)));
+
 // ---------- backups ----------
 let afterStorageSave = null;
 async function addBackupStorage() {
@@ -3243,7 +3474,7 @@ const AUDIT_TITLES = {
         'service-start': e => `Service started · ${e.what}`, 'service-stop': e => `Service stopped · ${e.what}`, 'service-restart': e => `Service restarted · ${e.what}`,
         'service-hostname': e => `Service put on its hostname · ${e.what}`, 'service-action': e => `Ran ${e.what}`, portholerun: e => `.platorun · ${e.what}`,
         'git-commit': e => `Committed from the phone: ${e.what}`, 'git-push': () => 'Pushed', 'git-pull': () => 'Pulled', 'git-publish': () => 'Published to GitHub',
-        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, 'rename-finished': e => `Rename finished · ${e.what}`, backup: e => `Backed up · ${e.what}`, 'hostname-moved': e => `Hostname moved here · ${e.what}`, 'backup-failed': e => `Backup failed · ${e.what}`, restore: e => `Restored · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
+        'git-init': () => 'Started a git repo', 'git-clone': e => `Cloned ${e.what}`, commit: e => e.what, 'alerts-changed': e => e.what, 'image-pull': e => `Image checked · ${e.what}`, 'rename-finished': e => `Rename finished · ${e.what}`, autostop: e => `Auto-stop · ${e.what}`, 'autostop-skipped': e => `Auto-stop skipped · ${e.what}`, 'keepalive-set': e => e.what, 'keepalive-cleared': e => e.what, backup: e => `Backed up · ${e.what}`, 'hostname-moved': e => `Hostname moved here · ${e.what}`, 'backup-failed': e => `Backup failed · ${e.what}`, restore: e => `Restored · ${e.what}`, 'limit-reached': e => `Limit reached · ${e.what}`, 'limit-changed': e => e.what,
     },
 };
 const auditNames = e => { const n = e.names || []; return n.length ? n.slice(0, 3).join(', ') + (n.length > 3 ? ` +${n.length - 3}` : '') : 'nothing'; };
@@ -3254,6 +3485,7 @@ function auditIcon(e) {
     if (e.type === 'network') return ['egress', 'dock'];
     if (e.action === 'alerts-changed') return ['bell', 'brass'];
     if (e.action.startsWith('limit-')) return ['stop', 'flare'];
+    if (/^(autostop|keepalive)/.test(e.action)) return ['anchor', e.action === 'autostop' ? 'flare' : 'kelp'];
     if (/^(backup|restore)/.test(e.action)) return ['cloud-up', e.action === 'backup-failed' ? 'flare' : 'kelp'];
     if (e.action === 'commit' || e.action.startsWith('git-')) return ['commit', e.agent ? 'brass' : 'dim'];
     if (/tunnel|hostname/.test(e.action)) return ['link', 'kelp'];

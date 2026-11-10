@@ -12,6 +12,7 @@ import { envFor } from './vault.js';
 import * as agents from './agents.js';
 import crypto from 'node:crypto';
 import * as agentUser from './agentuser.js';
+import * as research from './research.js';
 import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
@@ -65,13 +66,15 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     if (oneshot) {
         if (kind !== 'agent' || !['claude', 'codex'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code or Codex.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
-        scratch = true;
+        // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
+        if (session !== 'research') scratch = true;
     }
     // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
     if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
-    if (session !== null && !['control', 'project'].includes(session)) throw httpError(400, 'session: control or project.');
+    if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
+    if (session !== null && !['control', 'project', 'research'].includes(session)) throw httpError(400, 'session: control, project or research.');
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
     if (RESERVED_PREFIXES.some(p => name.startsWith(p))) throw httpError(400, `Names starting with ${RESERVED_PREFIXES.map(p => `"${p}"`).join(', ')} are reserved.`);
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
@@ -118,7 +121,11 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     // Session type and security brief (agents read $PORTHOLE_SECURITY_FILE first; see deploy/AGENT.global.md).
     let sessionEnv = {}, security = null;
     if (kind === 'agent' && session) {
-        if (session === 'control') { security = 'control'; sessionEnv = { PORTHOLE_SESSION: 'control', PORTHOLE_SECURITY_LEVEL: 'control', PORTHOLE_SECURITY_FILE: secProfile.controlDoc() }; }
+        if (session === 'research') {
+            const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
+            const tdir = path.join(research.ROOT, slug);
+            security = 'research'; sessionEnv = { PORTHOLE_SESSION: 'research', PORTHOLE_SECURITY_LEVEL: 'research', PORTHOLE_SECURITY_FILE: path.join(tdir, '.platopypus', 'research.md'), PORTHOLE_PROJECT_ROOT: tdir };
+        } else if (session === 'control') { security = 'control'; sessionEnv = { PORTHOLE_SESSION: 'control', PORTHOLE_SECURITY_LEVEL: 'control', PORTHOLE_SECURITY_FILE: secProfile.controlDoc() }; }
         else {
             const g = secProfile.get(dir);
             if (g.root && g.profile) ensureIgnored(g.root);

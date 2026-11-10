@@ -1205,6 +1205,28 @@ EOF`);
     sh('rm -rf /Projects/smoke-limit');
 }
 
+// 8c5. Keep-alive and the 2-day auto-stop decision.
+{
+    const { execFileSync } = await import('node:child_process');
+    const sh = c => execFileSync('bash', ['-lc', c], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    r = await call('/api/keepalive'); check('nothing is kept on by default', r.status === 200 && r.body.keepAlive === null, JSON.stringify(r.body));
+    r = await call('/api/keepalive', { method: 'PUT', body: { hours: 0 } }); check('a keep-alive needs a future time', r.status === 400);
+    r = await call('/api/keepalive', { method: 'PUT', body: { hours: 24 * 90 } }); check('a keep-alive is capped at 60 days', r.status === 400);
+    r = await call('/api/activity'); check('the activity endpoint lists agents and who is working', r.status === 200 && Array.isArray(r.body.agents) && Array.isArray(r.body.working), JSON.stringify(r.body).slice(0, 160));
+    r = await call('/api/autostop/check', { method: 'POST', body: { dry: true } });
+    check('with nothing working and no keep-alive the schedule would stop the box', r.status === 200 && r.body.stop === true && r.body.why === 'idle' && r.body.dry === true, JSON.stringify(r.body).slice(0, 200));
+    r = await call('/api/keepalive', { method: 'PUT', body: { hours: 6, reason: 'smoke event' } });
+    check('keeping the box on until a time is accepted', r.status === 200 && r.body.keepAlive?.reason === 'smoke event' && r.body.keepAlive.until > Date.now(), JSON.stringify(r.body));
+    r = await call('/api/autostop/check', { method: 'POST', body: { dry: true } });
+    check('while it is kept on the schedule leaves the box alone and says why', r.body.stop === false && r.body.why === 'keep-alive' && /smoke event/.test(r.body.message), JSON.stringify(r.body).slice(0, 200));
+    const au = (await call('/api/audit?type=activity')).body.events.find(e => e.action === 'keepalive-set');
+    check('setting a keep-alive is in the audit log', !!au && /smoke event/.test(au.what), JSON.stringify(au));
+    r = await call('/api/keepalive', { method: 'DELETE' }); check('a keep-alive can be cleared', r.status === 200 && r.body.keepAlive === null);
+    const d = JSON.parse(sh(`cd / && node --input-type=module -e "const a = await import('/opt/platopypus/server/lib/activity.js'); console.log(JSON.stringify([a.decide({ keepAlive: null, working: [] }), a.decide({ keepAlive: null, working: ['x'] }), a.decide({ keepAlive: { until: Date.now() + 1000, reason: '' }, working: ['x'] })]));"`));
+    check('the decision: idle stops; working skips; kept-on beats working', d[0].stop === true && d[1].stop === false && d[1].why === 'working' && d[2].stop === false && d[2].why === 'keep-alive', JSON.stringify(d));
+    check('plato autostop-check --dry answers with JSON from the box', JSON.parse(sh('plato autostop-check --dry | tail -1')).dry === true);
+}
+
 // 8c4. The 2.0 rename: new paths with the old ones as links; the plato command; the run file under its new name.
 {
     const { execFileSync } = await import('node:child_process');
