@@ -483,6 +483,13 @@ phone's Update button. Mechanism:
   `.platorun` (`.portholerun` read); agent-file markers `platopypus:begin/end`. Migration `2.0.0-rename` (idempotent:
   links, env file, old chain). No route changed or removed. Also fixes 1.28.x: `install.sh` no longer regenerates the
   old icons over the mascot.
+- **2.0.1** — **Other names for the app.** `PLATO_ALIAS_DOMAINS` (comma separated, in `/etc/platopypus.env`) makes
+  `install.sh` serve the app on more names, each with its own Let's Encrypt certificate and an nginx file
+  `platopypus-alias-<name>`; `PLATO_REDIRECT_DOMAINS` makes the listed names answer with a 301 to `PLATO_DOMAIN`
+  (`platopypus-redirect-<name>`). Files for names removed from the lists are removed. This is how to move to a new
+  address: add it as an alias, check it, make it `PLATO_DOMAIN`, list the old one as a redirect. A passkey belongs to
+  one address (its WebAuthn relying party is the host name), so the new address needs its own; see
+  `docs/MIGRATION-2.0.md`, phase 3.
 
 ## Release checklist
 

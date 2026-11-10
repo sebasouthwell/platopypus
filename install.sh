@@ -24,6 +24,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:
 for envf in /etc/porthole.env /etc/platopypus.env; do [ -f "$envf" ] && { set -a; . "$envf"; set +a; chmod 600 "$envf"; }; done   # root only: app accounts must not read box settings
 if [ -f /etc/porthole.env ] && [ ! -f /etc/platopypus.env ]; then sed -e 's/^PORTHOLE_/PLATO_/' /etc/porthole.env > /etc/platopypus.env; chmod 600 /etc/platopypus.env; fi
 # Either spelling of a setting wins the same way everywhere: PLATO_* first, then PORTHOLE_*.
+export PLATO_ALIAS_DOMAINS PLATO_REDIRECT_DOMAINS 2>/dev/null || true
 PORTHOLE_USER="${PLATO_USER:-${PORTHOLE_USER:-}}"; PORTHOLE_SRC="${PLATO_SRC:-${PORTHOLE_SRC:-}}"; PORTHOLE_DOMAIN="${PLATO_DOMAIN:-${PORTHOLE_DOMAIN:-}}"; PORTHOLE_AGENT_USER="${PLATO_AGENT_USER:-${PORTHOLE_AGENT_USER:-}}"
 
 # Default: a box when systemd runs this machine, otherwise a container (the self-updater re-runs this script without MODE).
@@ -372,6 +373,43 @@ EOF
             [ -s /etc/letsencrypt/ssl-dhparams.pem ] || cp /usr/lib/python3/dist-packages/certbot/ssl-dhparams.pem /etc/letsencrypt/ssl-dhparams.pem 2>/dev/null || true
             [ -s "$CERT" ] && render_site nginx-platopypus-ssl.conf
         fi
+        # Other names for the same app (2.0.1). PLATO_ALIAS_DOMAINS: served there too, with their own certificates.
+        # PLATO_REDIRECT_DOMAINS: sent to the primary name with a 301 (the name you moved away from). Comma separated.
+        # Moving to a new address: add it as an alias, check it, then make it PLATO_DOMAIN and the old one a redirect.
+        ALIASES="$(printf '%s' "${PLATO_ALIAS_DOMAINS:-}" | tr ',' ' ')"; REDIRECTS="$(printf '%s' "${PLATO_REDIRECT_DOMAINS:-}" | tr ',' ' ')"
+        cert_for() {   # domain: try to get a certificate (HTTP-01 through the shared webroot); 0 when one exists afterwards
+            local d="$1" c="/etc/letsencrypt/live/$1/fullchain.pem" i
+            [ -s "$c" ] && return 0
+            for i in 1 2 3 4 5 6; do
+                certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --no-eff-email -m "$LE_EMAIL" -d "$d" --deploy-hook "systemctl reload nginx" >/dev/null 2>&1 && break
+                sleep 10
+            done
+            [ -s "$c" ]
+        }
+        for f in /etc/nginx/sites-available/platopypus-alias-* /etc/nginx/sites-available/platopypus-redirect-*; do   # names no longer listed go
+            [ -e "$f" ] || continue; n="${f##*/platopypus-}"; d="${n#alias-}"; d="${d#redirect-}"
+            case " $ALIASES $REDIRECTS " in *" $d "*) ;; *) rm -f "$f" "/etc/nginx/sites-enabled/${f##*/}" ;; esac
+        done
+        for d in $ALIASES; do
+            [ "$d" = "$PORTHOLE_DOMAIN" ] && continue
+            say "alias $d"
+            if cert_for "$d"; then tpl=nginx-platopypus-ssl.conf; else tpl=nginx-platopypus.conf; echo "no certificate for $d yet (does its DNS record point at this box?); serving it over http until the next update"; fi
+            sed -e "s/__DOMAIN__/$d/g" "$APP_DIR/deploy/$tpl" > "/etc/nginx/sites-available/platopypus-alias-$d"
+            ln -sf "/etc/nginx/sites-available/platopypus-alias-$d" "/etc/nginx/sites-enabled/platopypus-alias-$d"
+        done
+        for d in $REDIRECTS; do
+            [ "$d" = "$PORTHOLE_DOMAIN" ] && continue
+            say "redirect $d -> $PORTHOLE_DOMAIN"
+            {
+                printf 'server {\n    listen 80;\n    listen [::]:80;\n    server_name %s;\n    location ^~ /.well-known/acme-challenge/ { root /var/www/html; }\n    location / { return 301 https://%s$request_uri; }\n}\n' "$d" "$PORTHOLE_DOMAIN"
+                if [ -s "/etc/letsencrypt/live/$d/fullchain.pem" ]; then
+                    printf 'server {\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n    server_name %s;\n    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n    include /etc/letsencrypt/options-ssl-nginx.conf;\n    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;\n    return 301 https://%s$request_uri;\n}\n' "$d" "$d" "$d" "$PORTHOLE_DOMAIN"
+                fi
+            } > "/etc/nginx/sites-available/platopypus-redirect-$d"
+            ln -sf "/etc/nginx/sites-available/platopypus-redirect-$d" "/etc/nginx/sites-enabled/platopypus-redirect-$d"
+        done
+        # A bad alias/redirect file must never take the main site down: drop them and keep going.
+        if nginx -t >/dev/null 2>&1; then systemctl reload nginx; else echo "nginx rejected the alias/redirect files; removing them"; rm -f /etc/nginx/sites-*/platopypus-alias-* /etc/nginx/sites-*/platopypus-redirect-*; nginx -t && systemctl reload nginx; fi
         systemctl enable --now certbot.timer >/dev/null 2>&1 || true
     fi
 

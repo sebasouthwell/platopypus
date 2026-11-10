@@ -58,15 +58,20 @@ Rollback: the updater's health check fails → previous release's code is put ba
 
 `porthole-dev` → `plato-dev`, `porthole-svcs` → `plato-svcs`, `porthole-svc` → `plato-svc`. `groupmod -n` / `usermod -l` keep GIDs and UIDs, so nothing on disk changes meaning. Ships with a `down()` the updater runs if it has to roll back 2.1.0.
 
-## Phase 3: the hostname (manual, optional)
+## Phase 3: the hostname (2.0.1, step by step)
 
-`porthole.example.com` → `plato.example.com` (or whatever you pick):
+A passkey is tied to the address it was made on, so the new address needs its own. Everything else is automatic.
 
-1. Add the new name through Porthole's own hostname machinery (DNS record, nginx block, certificate), serving the app.
-2. Sign in on the new address with the password, enrol a new passkey there.
-3. Keep the old name answering with a redirect for a month, then remove it.
-
-Nothing automatic; each step is a tap or a command, and the old address keeps working until the last one.
+1. **DNS:** an A record for the new name (for example `plato.example.com`) with the same address and proxy setting as
+   the current one.
+2. **Alias:** add `PLATO_ALIAS_DOMAINS=plato.example.com` to `/etc/platopypus.env` and update. The app now answers on
+   both names; the old address and its passkey keep working.
+3. **Passkey on the new address:** run `plato reset-auth` on the box (it prints a setup token), open the new address,
+   enter the token and create a passkey there. (A password set on the old address first lets you skip the reset:
+   sign in on the new address with it and add the passkey from More → Security.)
+4. **Switch:** set `PLATO_DOMAIN=plato.example.com` and `PLATO_REDIRECT_DOMAINS=porthole.example.com`, update. The
+   old address now redirects to the new one.
+5. A month later, drop the redirect.
 
 ## Order and timing
 
