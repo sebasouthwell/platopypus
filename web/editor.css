@@ -231,3 +231,97 @@ a.pill { color: var(--foam); text-decoration: none; }
 .cc-row .pill.edit-it { border-color: var(--brass); color: var(--brass); }
 .cc-row .pill.edit-it + .pill { margin-left: 0; }
 .cc-row .pill.edit-it { margin-left: auto; }
+
+/* =====================================================================================================
+   Colour roles (this block wins over the rules above). Each colour means one thing:
+     brass   the main action and where you are (Build, the open file, the open tab)
+     status  only for verdicts: green supported, amber partly / needs a citation, red not supported, grey unclear
+     syntax  its own muted set, so code colour never reads as a verdict; citation keys are rose everywhere
+   ===================================================================================================== */
+:root { --k-cmd: #7EA3D6; --k-env: #A99AD8; --k-key: #E0A3C2; --k-math: #86BFB8; --k-com: #56667D; --k-br: #6F8098;
+  --s-ok: #3FD39A; --s-part: #E8B54A; --s-bad: #F07A6E; --s-unk: #8C9AB0; }
+
+/* syntax */
+#hl .t-cmd { color: var(--k-cmd); } #hl .t-env { color: var(--k-env); } #hl .t-cite { color: var(--k-key); }
+#hl .t-math { color: var(--k-math); } #hl .t-com { color: var(--k-com); font-style: italic; } #hl .t-br { color: var(--k-br); }
+#hl .t-head { color: var(--foam); font-weight: 700; }
+
+/* marks: a quiet tint behind the words (no underline competing with the text), a dotted line for "needs a citation" */
+#marks mark { box-shadow: none !important; padding: 1px 0; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+#marks .m-partly { background: rgba(232,181,74,.13); }
+#marks .m-unsupported { background: rgba(240,122,110,.17); }
+#marks .m-unclear { background: rgba(140,154,176,.13); }
+#marks .m-uncited { background: none; text-decoration: underline dotted rgba(232,181,74,.8); text-decoration-thickness: 2px; text-underline-offset: 5px; }
+
+/* the strip under the text */
+.mk-info { font-size: 12.5px; padding: 7px 10px; background: var(--sea); border: 1px solid var(--rail); border-left-width: 3px; }
+.mk-info.m-partly, .mk-info.m-uncited { border-left-color: var(--s-part); } .mk-info.m-unsupported { border-left-color: var(--s-bad); } .mk-info.m-unclear { border-left-color: var(--s-unk); }
+.mk-info b { color: var(--foam); } .mk-info .fixlbl, .cc-fix span { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--mist); margin-right: 6px; }
+.chip { border-color: var(--rail); } .chip b { color: var(--k-key); }
+.mk-toggle { font-size: 12px; padding: 3px 10px; }
+
+/* tabs: one row, the zoom at its end */
+#tabs { flex-wrap: nowrap; overflow-x: auto; gap: 2px; padding: 8px 10px; scrollbar-width: none; }
+#tabs button { padding: 6px 11px; font-size: 14px; white-space: nowrap; flex: none; }
+#tabs .zoom.right { flex: none; margin-left: auto; }
+#tabs .zoom button { padding: 5px 8px; min-width: 28px; }
+
+/* the files and references panel: quieter actions, keys in the key colour */
+#refs .k { color: var(--k-key); }
+#refs .pill { background: none; border-color: transparent; color: var(--mist); padding: 2px 6px; font-size: 12px; }
+#refs .pill:hover { color: var(--foam); border-color: var(--rail); }
+.mini { color: var(--mist); } .mini:hover { color: var(--foam); }
+#files li button.on { box-shadow: inset 3px 0 var(--brass); }
+
+/* header: secondary controls step back */
+.chk, #state { color: var(--dim); } #lang { font-size: 13px; padding: 5px 8px; }
+#version, #save { font-weight: 500; }
+
+/* verdict chips */
+.v { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; letter-spacing: .01em; }
+.v.supported { background: rgba(63,211,154,.14); color: var(--s-ok); } .v.partly { background: rgba(232,181,74,.15); color: var(--s-part); }
+.v.unsupported { background: rgba(240,122,110,.16); color: var(--s-bad); } .v.unclear { background: rgba(140,154,176,.14); color: var(--s-unk); }
+.v.uncited { background: none; color: var(--s-part); box-shadow: inset 0 0 0 1px rgba(232,181,74,.45); }
+
+/* report: state at a glance */
+.cc-top { background: none; border: 0; padding: 4px 2px 10px; border-bottom: 1px solid var(--rail); border-radius: 0; }
+.cc-state { padding: 12px 2px 4px; }
+.cc-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--hull); }
+.cc-bar i { display: block; min-width: 6px; } .cc-bar .supported { background: var(--s-ok); } .cc-bar .partly { background: var(--s-part); } .cc-bar .unsupported { background: var(--s-bad); } .cc-bar .unclear { background: var(--s-unk); }
+.cc-legend { margin: 10px 0 0; font-size: 14px; display: flex; align-items: center; flex-wrap: wrap; row-gap: 4px; }
+.cc-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 7px; }
+.cc-legend .dot.supported { background: var(--s-ok); } .cc-legend .dot.partly { background: var(--s-part); } .cc-legend .dot.unsupported { background: var(--s-bad); } .cc-legend .dot.unclear { background: var(--s-unk); }
+.cc-legend .sep { width: 18px; }
+.cc-extra { margin: 6px 0 0; font-size: 13.5px; color: var(--s-part); } .cc-when { margin: 4px 0 0; font-size: 12.5px; color: var(--dim); }
+.cc-h { color: var(--mist); font-size: 12px; margin: 18px 2px 8px; }
+
+/* report rows */
+.cc-cite { background: var(--hull); border: 1px solid transparent; border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+.cc-cite:hover { border-color: var(--rail); }
+.cc-row { gap: 10px; flex-wrap: nowrap; } .cc-row > * { flex: none; }
+.cc-row .ckey { font: 500 12.5px var(--mono); color: var(--k-key); } .cwhere { font: 12px var(--mono); color: var(--mist); }
+.cc-row .loc { background: none; border: 0; padding: 0; font: 12px var(--mono); color: var(--dim); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-row .loc:hover { color: var(--foam); text-decoration: underline; }
+.cc-acts { margin-left: auto; display: inline-flex; gap: 6px; }
+.cc-acts button { font-size: 12.5px; padding: 4px 10px; border-radius: 8px; background: none; border: 1px solid var(--rail); color: var(--mist); }
+.cc-acts button:hover { color: var(--foam); border-color: var(--mist); }
+.cc-acts .edit-it { border-color: rgba(240,184,64,.55); color: var(--brass); } .cc-acts .edit-it:hover { background: rgba(240,184,64,.10); color: var(--brass); }
+.cc-note { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--foam); }
+.cc-fix { margin: 6px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--mist); }
+.cc-prob { color: var(--s-bad); font-size: 13px; }
+.cc-fold > summary { font-size: 12px; }
+.s-note { font-size: 13.5px; }
+#rail .h { flex-wrap: wrap; row-gap: 2px; }
+#rail .h .mini { padding: 2px 4px; font-size: 12px; letter-spacing: 0; text-transform: none; }
+#rail .h { flex-wrap: nowrap; }
+.pg a.l { background: rgba(224,163,194,.18); border-bottom-color: var(--k-key); }
+.pg a.l:hover { background: rgba(224,163,194,.38); }
+/* phone: touch sizes win over the desktop rules above */
+@media (max-width: 900px) {
+  #rail .h .mini, .mini { padding: 12px 8px; font-size: 14px; }
+  .fold { min-height: 44px; }
+  #refs .pill { padding: 10px 12px; font-size: 14px; }
+  .mk-toggle { padding: 10px 14px; font-size: 13px; }
+  #tabs .zoom button { min-width: 44px; }
+  .cc-acts button { padding: 10px 14px; }
+}

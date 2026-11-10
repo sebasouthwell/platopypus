@@ -553,6 +553,10 @@ phone's Update button. Mechanism:
   check, and statements that need a citation), found by searching the text so they follow edits; the strip under the
   editor explains the mark at the cursor and switches the marks off (`editor.marks` in the browser). Each problem in
   the report has "Edit this sentence", which opens the file with those words selected. No server or state change.
+- **2.2.6** — editor look: one meaning per colour (brass for the main action and where you are; green, amber,
+  red and grey only for verdicts; a separate muted set for LaTeX, with citation keys in rose throughout), quieter
+  citation marks, the citation report as a status bar plus a list with Source / Edit on each row, tabs on one row
+  ("Source + preview" is now "Split"). No server or state change.
 
 ## Release checklist
 

@@ -30,7 +30,7 @@
   <aside id="rail">
     <div class="h"><button class="fold" data-fold="files" aria-expanded="true">Files</button> <button id="newsec" class="mini" title="New section">+ section</button></div>
     <ul id="files"></ul>
-    <div class="h"><button class="fold" data-fold="refs" aria-expanded="true">References</button> <button id="addsrc" class="mini" title="Add a web page, PDF link or video as a source">+ source</button><button id="addpdf" class="mini" title="Upload a PDF from this device">+ PDF</button><input id="pdffile" type="file" accept="application/pdf,.pdf" multiple hidden></div>
+    <div class="h"><button class="fold" data-fold="refs" aria-expanded="true">References</button> <button id="addsrc" class="mini" title="Add a web page, PDF link or video as a source">+ Link</button><button id="addpdf" class="mini" title="Upload a PDF from this device">+ PDF</button><input id="pdffile" type="file" accept="application/pdf,.pdf" multiple hidden></div>
     <div id="refs-wrap"><input id="refq" type="search" placeholder="Search references" autocomplete="off">
     <ul id="refs"></ul></div>
   </aside>
@@ -40,7 +40,7 @@
     <div id="problems"></div>
   </section>
   <section id="side">
-    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Source + preview</button><button data-pane="spelling">Spelling</button><button data-pane="cites">Citations</button><button data-pane="changes">Changes</button><button data-pane="agent">Agent</button><span class="zoom right" title="Size of the preview and the source"><button id="vz-out" aria-label="Zoom out">&minus;</button><button id="vz-val" title="Back to 100%">100%</button><button id="vz-in" aria-label="Zoom in">+</button></span></div>
+    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Split</button><button data-pane="spelling">Spelling</button><button data-pane="cites">Citations</button><button data-pane="changes">Changes</button><button data-pane="agent">Agent</button><span class="zoom right" title="Size of the preview and the source"><button id="vz-out" aria-label="Zoom out">&minus;</button><button id="vz-val" title="Back to 100%">100%</button><button id="vz-in" aria-label="Zoom in">+</button></span></div>
     <div id="preview"></div>
     <div id="source" hidden></div>
     <div id="spelling" hidden></div>
