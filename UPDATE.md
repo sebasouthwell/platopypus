@@ -490,6 +490,9 @@ phone's Update button. Mechanism:
   address: add it as an alias, check it, make it `PLATO_DOMAIN`, list the old one as a redirect. A passkey belongs to
   one address (its WebAuthn relying party is the host name), so the new address needs its own; see
   `docs/MIGRATION-2.0.md`, phase 3.
+- **2.0.2** — Alias names with no certificate yet answer only the certificate check on port 80 (404 for anything else),
+  instead of the app over plain http, which also made the check fail (the app answered 404 for the challenge file);
+  two certificate attempts per update instead of six, to stay inside Let's Encrypt's 5-failures-per-hour limit.
 
 ## Release checklist
 

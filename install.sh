@@ -380,9 +380,10 @@ EOF
         cert_for() {   # domain: try to get a certificate (HTTP-01 through the shared webroot); 0 when one exists afterwards
             local d="$1" c="/etc/letsencrypt/live/$1/fullchain.pem" i
             [ -s "$c" ] && return 0
-            for i in 1 2 3 4 5 6; do
+            # Two tries only: every failed attempt counts against Let's Encrypt's limit of 5 failures per name per hour.
+            for i in 1 2; do
                 certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --no-eff-email -m "$LE_EMAIL" -d "$d" --deploy-hook "systemctl reload nginx" >/dev/null 2>&1 && break
-                sleep 10
+                sleep 20
             done
             [ -s "$c" ]
         }
@@ -393,9 +394,26 @@ EOF
         for d in $ALIASES; do
             [ "$d" = "$PORTHOLE_DOMAIN" ] && continue
             say "alias $d"
-            if cert_for "$d"; then tpl=nginx-platopypus-ssl.conf; else tpl=nginx-platopypus.conf; echo "no certificate for $d yet (does its DNS record point at this box?); serving it over http until the next update"; fi
-            sed -e "s/__DOMAIN__/$d/g" "$APP_DIR/deploy/$tpl" > "/etc/nginx/sites-available/platopypus-alias-$d"
-            ln -sf "/etc/nginx/sites-available/platopypus-alias-$d" "/etc/nginx/sites-enabled/platopypus-alias-$d"
+            AF="/etc/nginx/sites-available/platopypus-alias-$d"
+            if [ ! -s "/etc/letsencrypt/live/$d/fullchain.pem" ]; then
+                # No certificate yet: answer only the certificate check on port 80 (the app is never served over plain http).
+                printf 'server {
+    listen 80;
+    listen [::]:80;
+    server_name %s;
+    location ^~ /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 404; }
+}
+' "$d" > "$AF"
+                ln -sf "$AF" "/etc/nginx/sites-enabled/platopypus-alias-$d"
+                nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+            fi
+            if cert_for "$d"; then
+                sed -e "s/__DOMAIN__/$d/g" "$APP_DIR/deploy/nginx-platopypus-ssl.conf" > "$AF"
+                ln -sf "$AF" "/etc/nginx/sites-enabled/platopypus-alias-$d"
+            else
+                echo "no certificate for $d yet (is its DNS record in place and pointing at this box?); it will be tried again at the next update"
+            fi
         done
         for d in $REDIRECTS; do
             [ "$d" = "$PORTHOLE_DOMAIN" ] && continue
