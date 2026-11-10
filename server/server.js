@@ -698,6 +698,9 @@ const server = http.createServer(async (req, res) => {
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/record$/)) && method === 'POST') { const b = await readJson(req, 16 * 1024); return send(res, 200, editor.setRecord(slug, r2[1], b.fields || {})); }
             if (rest === 'links' && method === 'GET') return send(res, 200, await editor.links(slug));
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/page\/(\d{1,4})$/)) && method === 'GET') return sendFile(await editor.sourcePage(slug, r2[1], r2[2]), 'image/png', `${r2[1]}-${r2[2]}.png`, { inline: true });
+            if (rest === 'delete' && method === 'POST') return send(res, 200, await research.removeTopic(slug, (await readJson(req, 4096)).confirm));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/uses$/)) && method === 'GET') return send(res, 200, research.sourceUses(slug, r2[1]));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/delete$/)) && method === 'POST') return send(res, 200, research.removeSource(slug, r2[1]));
             if (rest === 'build' && method === 'POST') { const r = await research.build(slug); if (r.ok) await repo.commit(slug, `Build: ${r.pages} page${r.pages === 1 ? '' : 's'}`).catch(() => {}); return send(res, 200, r); }
             if (rest === 'pdf' && method === 'GET') return sendFile(research.pdfFile(slug), 'application/pdf', `${slug}.pdf`, { inline: url.searchParams.get('download') !== '1' });
             if ((r2 = rest.match(/^page\/(\d{1,4})$/)) && method === 'GET') return sendFile(research.pageFile(slug, r2[1]), 'image/png', `page-${r2[1]}.png`, { inline: true });

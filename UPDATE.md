@@ -571,6 +571,11 @@ phone's Update button. Mechanism:
   (`blank` on create); template style notes (`template/style.md`, `POST …/template/notes`) and pictures from a template
   or example PDF offered for the paper (`POST …/template/use-image` → `paper/figures/`); resizable editor columns;
   thin scrollbars; the Research agent card sits first on the Research tab.
+- **2.3.1** — delete with confirmation: a topic (type its title; it moves to `state/trash` with its history,
+  `POST …/delete`), a source (says where the paper cites it; it moves to the topic's `.platopypus/trash` and leaves
+  refs.bib, `GET …/source/:id/uses`, `POST …/source/:id/delete`); removing a template or a question asks first. An example
+  PDF's structure skips its contents and list pages, reads "Chapter N" headings, and notes page size and fonts. Buttons
+  get depth, a lit edge and a press. No migration.
 
 ## Release checklist
 

@@ -3242,7 +3242,7 @@ async function templateCard(box, slug) {
         $('[data-tpl-up]', box).onclick = () => $('#tpl-file', box).click();
         $('#tpl-file', box).onchange = async e => { const f = e.target.files[0]; if (!f) return; try { draw(await uploadTemplate(slug, f, !!$('#tpl-adopt', box)?.checked)); } catch (ex) { toast(ex.message, true); } };
         $('[data-tpl-save]', box).onclick = async () => { try { draw(await api(`/api/research/${enc}/template/notes`, { method: 'POST', body: { text: $('#tpl-notes', box).value } })); toast('Style notes saved'); } catch (ex) { toast(ex.message, true); } };
-        const rm = $('[data-tpl-rm]', box); if (rm) rm.onclick = async () => { try { await api(`/api/research/${enc}/template/remove`, { method: 'POST', body: {} }); draw({ template: null, structure: '', notes: '', images: [] }); } catch (ex) { toast(ex.message, true); } };
+        const rm = $('[data-tpl-rm]', box); if (rm) rm.onclick = async () => { if (!(await confirmDialog({ title: 'Remove the template?', text: 'The template or example, its style notes and its pictures are removed from this topic. Pictures you already copied into the paper stay.', action: 'Remove template' }))) return; try { await api(`/api/research/${enc}/template/remove`, { method: 'POST', body: {} }); draw({ template: null, structure: '', notes: '', images: [] }); } catch (ex) { toast(ex.message, true); } };
         $$('[data-img]', box).forEach(b => b.onclick = async () => { try { const r = await api(`/api/research/${enc}/template/use-image`, { method: 'POST', body: { name: b.dataset.img } }); try { await navigator.clipboard.writeText(r.latex); } catch { /* no clipboard */ } toast(`Copied to ${r.file}. The line to show it is on your clipboard: ${r.latex}`); } catch (ex) { toast(ex.message, true); } });
     };
     draw(await api(`/api/research/${enc}/template`));
@@ -3252,6 +3252,24 @@ async function uploadTemplate(slug, file, adopt) {
     const res = await fetch(`/api/research/${encodeURIComponent(slug)}/template?name=${encodeURIComponent(file.name)}${adopt ? '&adopt=1' : ''}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: file, credentials: 'same-origin' });
     const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText);
     toast(r.template.adopted ? 'The template is now the paper' : 'Template saved: the agent will keep to it'); return r;
+}
+// Delete a topic: it goes to the box's trash with its history. Typing the title makes it deliberate.
+function deleteTopicDialog(t) {
+    const { panel, close } = openDialog(`<h2>${icon('trash')}Delete this topic?</h2>
+        <p class="muted">“${esc(t.title)}” moves to the box's trash with its paper, ${t.sources.length} source${t.sources.length === 1 ? '' : 's'}, notes and history. It is not lost until the trash is emptied, but it disappears from Research.</p>
+        <div class="field"><label for="del-name">Type the title to confirm</label><input id="del-name" type="text" autocomplete="off" spellcheck="false" placeholder="${esc(t.title)}"></div>
+        <div class="buttons"><button data-close>Cancel</button><button class="danger" data-ok disabled>Delete topic</button></div>`, { size: 'small' });
+    const inp = $('#del-name', panel), ok = $('[data-ok]', panel);
+    inp.oninput = () => { ok.disabled = inp.value.trim() !== t.title; };
+    ok.onclick = async () => { ok.disabled = true; try { await api(`/api/research/${encodeURIComponent(t.slug)}/delete`, { method: 'POST', body: { confirm: inp.value } }); close(); toast(`“${t.title}” moved to the trash`); go('research'); } catch (ex) { toast(ex.message, true); ok.disabled = false; } };
+    setTimeout(() => inp.focus(), 50);
+}
+// Delete a source: say plainly what it would break before doing it.
+async function deleteSourceDialog(slug, id, after) {
+    const u = await api(`/api/research/${encodeURIComponent(slug)}/source/${id}/uses`);
+    const warn = u.uses.length ? `The paper cites it ${u.uses.length} time${u.uses.length === 1 ? '' : 's'} as ${u.key} (${u.uses.slice(0, 4).map(x => `${x.file.replace(/^sections\//, '')} line ${x.line}`).join(', ')}${u.uses.length > 4 ? ', …' : ''}). Those citations will show as missing until you change them.` : u.inBib ? 'It is in refs.bib but not cited anywhere in the paper.' : 'The paper does not cite it.';
+    const yes = await confirmDialog({ title: `Delete ${u.id}?`, text: `“${u.title}” and its file, text and record move to this topic's trash, and its entry leaves refs.bib. ${warn}`, action: 'Delete source' });
+    if (!yes) return; try { await api(`/api/research/${encodeURIComponent(slug)}/source/${id}/delete`, { method: 'POST', body: {} }); toast(`${u.id} deleted`); after?.(); } catch (ex) { toast(ex.message, true); }
 }
 function newTopicDialog() {
     const { panel, close } = openDialog(`<h2>${icon('file-text')}New research topic</h2>
@@ -3301,6 +3319,7 @@ async function loadTopic() {
         $('[data-build]', body).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Building…'; try { const r = await api(`/api/research/${enc}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         $('[data-export]', body).onclick = () => exportDialog(t);
         const tb = document.createElement('div'); tb.className = 'tpl-wrap'; body.appendChild(tb); templateCard(tb, slug).catch(() => {});
+        const dz = document.createElement('div'); dz.className = 'r-danger'; dz.innerHTML = `<div><b>Delete this topic</b><span>Moves it to the box's trash, with its history.</span></div><button class="btn danger-btn" data-del-topic>${icon('trash')}Delete…</button>`; body.appendChild(dz); $('[data-del-topic]', dz).onclick = () => deleteTopicDialog(t);
     } else if (tab === 'ask') {
         const questions = (await api(`/api/research/${enc}/questions`)).questions.filter(q => !q.kind);   // edit requests live in the editor
         const cite = s => esc(s).replace(/\[(s\d{2,4})([^\]]{0,24})\]/g, (m, id, w) => `<button class="r-cite" data-src="${id}">${id}${w}</button>`);
@@ -3310,7 +3329,7 @@ async function loadTopic() {
         $('[data-send]', body).onclick = async e => { const v = $('#r-ask', body).value.trim(); if (!v) return toast('Write the question first', true); e.currentTarget.disabled = true; try { await api(`/api/research/${enc}/questions`, { method: 'POST', body: { text: v } }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         $$('.r-q', body).forEach(card => { const id = card.dataset.q;
             const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/research/${enc}/questions/${id}/add`, { method: 'POST', body: {} }); toast('An agent is working it into the paper'); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
-            const drop = $('[data-drop]', card); if (drop) drop.onclick = async () => { try { await api(`/api/research/${enc}/questions/${id}/remove`, { method: 'POST', body: {} }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+            const drop = $('[data-drop]', card); if (drop) drop.onclick = async () => { if (!(await confirmDialog({ title: 'Remove this question?', text: 'The question and its answer are removed from this topic. Anything already added to the paper stays.', action: 'Remove' }))) return; try { await api(`/api/research/${enc}/questions/${id}/remove`, { method: 'POST', body: {} }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         });
         $$('.r-cite', body).forEach(b => b.onclick = () => sourceDialog(slug, b.dataset.src));
         // While something is being answered, look again every few seconds (only while this tab is still showing).
@@ -3366,14 +3385,14 @@ async function sourceDialog(slug, id) {
     let v; try { v = await api(`/api/research/${encodeURIComponent(slug)}/source/${id}`); } catch (ex) { return toast(ex.message, true); }
     const m = v.meta; const enc = encodeURIComponent(slug);
     const frames = (v.frames || []);
-    const { panel } = openDialog(`<h2>${icon(kindIcon(m.kind))}${esc(m.id)} · ${esc(m.kind)}</h2>
+    const { panel, close } = openDialog(`<h2>${icon(kindIcon(m.kind))}${esc(m.id)} · ${esc(m.kind)}</h2>
         <h3 style="margin:2px 0 4px;font-size:18px;line-height:1.25">${esc(m.title)}</h3>
         <p class="muted" style="margin:0 0 10px">${esc([m.author, m.year, m.site].filter(Boolean).join(' · '))}${m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener">open ↗</a>` : ''}</p>
         <div class="chips" style="flex-wrap:wrap;margin-bottom:8px"><span class="tag dim">cite as <span class="mono">${esc(m.key)}</span></span>${m.state?.transcript ? `<span class="tag" style="color:var(--kelp)">transcript · ${esc(m.state.transcript.replace('whisper-', 'Whisper '))}</span>` : ''}<span class="tag dim">${(v.chars / 1000).toFixed(0)}k chars</span>${m.kind === 'pdf' ? `<a class="tag" href="/api/research/${enc}/source/${esc(m.id)}/original">original PDF</a>` : ''}</div>
         ${frames.length ? `<div class="strip">${frames.slice(0, 40).map(f => `<div class="frame"><img class="im" loading="lazy" alt="" src="/api/research/${enc}/source/${esc(m.id)}/frame/${esc(f.frame)}"><div class="ts"><span>${fmtClock(f.t)}</span><span class="ocr">${f.visual ? 'image' : 'OCR ✓'}</span></div></div>`).join('')}</div>` : ''}
         <div style="max-height:46vh;overflow:auto;margin-top:6px">${v.transcript ? v.transcript.map(l => `<div class="tr"><time>${fmtClock(l.t)}</time><span>${esc(l.text)}</span></div>`).join('') : `<pre class="r-notes" style="max-height:none">${esc(v.text)}${v.chars > v.text.length ? '\n\n[…]' : ''}</pre>`}</div>
-        <div class="buttons"><button data-close>Close</button></div>`);
-    void panel;
+        <div class="buttons"><button class="danger" data-del-src>Delete source</button><button data-close>Close</button></div>`);
+    $('[data-del-src]', panel).onclick = () => { close(); deleteSourceDialog(slug, m.id, () => loadTopic().catch(() => {})); };
 }
 
 $('#topic-back').addEventListener('click', () => go('research'));

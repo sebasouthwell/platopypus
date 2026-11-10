@@ -241,3 +241,32 @@ export function setSettings(body = {}) {
 }
 // What an unattended run uses: the chosen agent if it can run once, otherwise Claude Code.
 export function runner() { const s = settings(); const agent = ['claude', 'codex'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }
+
+// ---------- deleting ----------
+// A topic goes to the box's trash (state/trash), whole, with its history: nothing is lost until the trash is emptied.
+export async function removeTopic(slug, confirm) {
+    const dir = topicPath(slug); const meta = T.readJson(path.join(dir, '.platopypus', 'research.json'), {});
+    if (String(confirm || '').trim() !== (meta.title || slug)) throw httpError(400, 'Type the topic\'s title exactly to delete it.');
+    const dest = path.join(config.state, 'trash', `${new Date().toISOString().replace(/[:.]/g, '-')}__Research-${slug}`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    try { fs.renameSync(dir, dest); } catch (e) { if (e.code !== 'EXDEV') throw e; fs.cpSync(dir, dest, { recursive: true }); fs.rmSync(dir, { recursive: true, force: true }); }
+    record('activity', 'research-delete', { actor: 'phone', what: `${meta.title || slug} → trash (${dest})`, cwd: dest });
+    return { ok: true, trashed: dest };
+}
+// What deleting a source would break: where the paper cites it.
+export function sourceUses(slug, id) {
+    const dir = topicPath(slug); if (!T.validId(id)) throw httpError(400, 'Bad source id.');
+    const m = T.sourceMeta(dir, id); const key = T.bibKey(m); const uses = [];
+    const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'build') walk(p); } else if (e.name.endsWith('.tex')) fs.readFileSync(p, 'utf8').split('\n').forEach((l, i) => { for (const c of l.matchAll(/\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^}]*)\}/g)) if (c[1].split(',').map(x => x.trim()).includes(key)) uses.push({ file: path.relative(path.join(dir, 'paper'), p), line: i + 1 }); }); } };
+    try { walk(path.join(dir, 'paper')); } catch { /* no paper */ }
+    return { id, key, title: m.title, inBib: !!m.inBib, uses };
+}
+// A source goes to the topic's own trash (.platopypus/trash), and its entry leaves refs.bib.
+export function removeSource(slug, id) {
+    const dir = topicPath(slug); const u = sourceUses(slug, id);
+    const from = path.join(dir, 'sources', id); const to = path.join(dir, '.platopypus', 'trash', `${id}-${Date.now()}`);
+    fs.mkdirSync(path.dirname(to), { recursive: true }); fs.renameSync(from, to);
+    T.syncBib(dir);
+    record('activity', 'research-delete-source', { actor: 'phone', what: `${slug}/${id} ${u.title}${u.uses.length ? ` (was cited ${u.uses.length} time${u.uses.length === 1 ? '' : 's'})` : ''}`, cwd: dir });
+    return { ok: true, ...u };
+}

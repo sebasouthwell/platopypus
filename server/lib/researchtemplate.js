@@ -83,17 +83,46 @@ function latexStructure(root) {
     lines.push('', '## Files', ...files.slice(0, 80).map(f => `- ${path.relative(root, f)}`));
     return { text: lines.join('\n') + '\n', main };
 }
-function pdfStructure(text, pages) {
-    const KNOWN = /^(abstract|introduction|background|related work|literature review|method(s|ology)?|materials and methods|approach|experiments?|results?|evaluation|analysis|discussion|limitations|conclusions?|future work|acknowledge?ments?|references|bibliography|appendix.*)$/i;
-    const heads = []; const seen = new Set();
-    for (const raw of text.split('\n')) {
-        const l = raw.trim(); if (l.length < 3 || l.length > 90) continue;
-        const num = l.match(/^(\d{1,2}(?:\.\d{1,2}){0,2})\.?\s+([A-Z][^.]{2,80})$/);
-        const h = num ? `${num[1]} ${num[2]}` : KNOWN.test(l) ? l : null;
-        if (h && !seen.has(h.toLowerCase())) { seen.add(h.toLowerCase()); heads.push({ h, depth: num ? num[1].split('.').length : 1 }); }
-    }
+// What an example PDF shows about its shape: front matter in order, the real headings (not the entries of its lists of
+// contents, figures or tables), its length, page size and fonts.
+function pdfStructure(text, pages, extra = {}) {
+    const KNOWN = /^(abstract|acknowledge?ments?|declaration|introduction|background|related work|literature review|method(s|ology)?|materials and methods|approach|design|implementation|experiments?|testing|results?|evaluation|analysis|discussion|limitations|conclusions?( and future work)?|future work|references|bibliography|appendix.*|appendices|glossary|abbreviations)$/i;
+    const LISTPAGE = /^\s*(table of contents|contents|list of figures|list of tables|list of abbreviations)\s*$/im;
+    const leader = l => /\.{4,}|(\s\.){4,}|\s{2,}\d{1,3}$/.test(l) || /\s\d{1,3}$/.test(l) && /^\d+(\.\d+)*\s/.test(l);   // contents lines end in a page number
+    const caption = l => /^(figure|fig\.|table|listing|algorithm|equation)\s*\d/i.test(l);
+    const pageTexts = text.split('\f'); const front = []; const heads = []; const seen = new Set();
+    pageTexts.forEach((pg, pi) => {
+        const lm = pg.match(LISTPAGE); if (lm) { const t = lm[1].toLowerCase().replace(/^\w/, c => c.toUpperCase()); if (!front.includes(t)) front.push(t); return; }   // a list page: note it, take no headings from it
+        const lines = pg.split('\n').map(x => x.trim()).filter(Boolean);
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i]; if (l.length < 3 || l.length > 90 || leader(l) || caption(l)) continue;
+            let h = null, depth = 1;
+            const ch = l.match(/^chapter\s+(\d{1,2}|[ivx]{1,4})\b[:.]?\s*(.*)$/i);
+            if (ch) { const title = (ch[2] || lines[i + 1] || '').replace(/\s{2,}.*$/, ''); h = `Chapter ${ch[1]}${title ? `: ${title}` : ''}`; if (title) seen.add(title.toLowerCase()); if (!ch[2]) i++; }
+            else { const num = l.match(/^(\d{1,2}(?:\.\d{1,2}){0,2})\.?\s+([A-Z][^.]{2,80})$/); if (num && !/\s{3,}/.test(num[2])) { h = `${num[1]} ${num[2]}`; depth = num[1].split('.').length; } else if (KNOWN.test(l)) h = l.replace(/\b\w/g, c => c.toUpperCase()); }
+            if (!h) continue; const k = h.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
+            if (!heads.length && depth === 1 && /^(abstract|acknowledge|declaration)/i.test(h)) { front.push(h); continue; }
+            heads.push({ h, depth, page: pi + 1 });
+        }
+    });
     const words = text.split(/\s+/).filter(Boolean).length;
-    return ['# Example structure', '', 'The user gave this paper as an example of the structure and length to aim for. Follow its shape; do not cite it', 'and do not copy its wording.', '', `Length: ${pages} page${pages === 1 ? '' : 's'}, about ${words < 200 ? words : Math.round(words / 100) * 100} words.`, '', '## Headings found, in order', ...(heads.length ? heads.slice(0, 80).map(x => `${'  '.repeat(x.depth - 1)}- ${x.h}`) : ['(none recognised: read template/example.txt for the layout)']), ''].join('\n');
+    const out = ['# Example structure', '', 'The user gave this document as an example of the structure, length and look to aim for. Follow its shape;', 'do not cite it and do not copy its wording.', '',
+        `Length: ${pages} page${pages === 1 ? '' : 's'}, about ${words < 200 ? words : Math.round(words / 100) * 100} words.`];
+    if (extra.size) out.push(`Page size: ${extra.size}.`);
+    if (extra.fonts?.length) out.push(`Fonts used most: ${extra.fonts.join(', ')}.`);
+    if (front.length) out.push('', '## Front matter, in order', ...front.map(f => `- ${f}`));
+    out.push('', '## Headings found, in order (with the page they start on)', ...(heads.length ? heads.slice(0, 90).map(x => `${'  '.repeat(Math.min(2, x.depth - 1))}- ${x.h}  (p. ${x.page})`) : ['(none recognised: read template/example.txt for the layout)']), '');
+    return out.join('\n');
+}
+async function pdfExtras(pdf) {
+    const extra = {};
+    try { const { stdout } = await run('pdfinfo', [pdf]); const m = stdout.match(/^Page size:\s+([\d.]+) x ([\d.]+) pts(?: \(([^)]+)\))?/m); if (m) extra.size = m[3] || `${Math.round(+m[1] / 72 * 25.4)} x ${Math.round(+m[2] / 72 * 25.4)} mm`; } catch { /* no pdfinfo */ }
+    try {
+        const { stdout } = await run('pdffonts', ['-l', '12', pdf]); const count = new Map();
+        for (const l of stdout.split('\n').slice(2)) { const name = (l.split(/\s+/)[0] || '').replace(/^[A-Z]{6}\+/, '').replace(/[-,](Bold|Italic|Regular|Roman|Medium|Light|Oblique|BoldItalic).*$/i, '').replace(/(MT|PS)$/, ''); if (name) count.set(name, (count.get(name) || 0) + 1); }
+        extra.fonts = [...count].sort((x, y) => y[1] - x[1]).slice(0, 4).map(x => x[0]);
+    } catch { /* no pdffonts */ }
+    return extra;
 }
 
 // adopt: for a LaTeX zip, also make it the paper's starting point (the current paper is saved as a version first).
@@ -109,7 +138,7 @@ export async function upload(slug, req, name, { adopt = false } = {}) {
             fs.copyFileSync(tmp, path.join(tdir, 'example.pdf'));
             const { stdout } = await run('pdftotext', ['-layout', path.join(tdir, 'example.pdf'), '-'], { maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
             const pages = stdout.split('\f').filter(p => p.trim()).length;
-            fs.writeFileSync(path.join(tdir, 'example.txt'), stdout); fs.writeFileSync(path.join(tdir, 'structure.md'), pdfStructure(stdout, pages));
+            fs.writeFileSync(path.join(tdir, 'example.txt'), stdout); fs.writeFileSync(path.join(tdir, 'structure.md'), pdfStructure(stdout, pages, await pdfExtras(path.join(tdir, 'example.pdf'))));
             if (await T.which('pdfimages')) { const idir = path.join(tdir, 'images'); fs.mkdirSync(idir, { recursive: true }); await run('pdfimages', ['-png', '-f', '1', '-l', '1', path.join(tdir, 'example.pdf'), path.join(idir, 'page1')], { timeout: 60_000 }).catch(() => {}); for (const f of fs.readdirSync(idir)) if (fs.statSync(path.join(idir, f)).size < 120) fs.rmSync(path.join(idir, f)); }
             info = { kind: 'pdf', name: clean || 'example.pdf', at: Date.now(), pages, adopted: false };
         } else if (head.startsWith('PK')) {
