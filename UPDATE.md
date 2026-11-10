@@ -576,6 +576,11 @@ phone's Update button. Mechanism:
   refs.bib, `GET …/source/:id/uses`, `POST …/source/:id/delete`); removing a template or a question asks first. An example
   PDF's structure skips its contents and list pages, reads "Chapter N" headings, and notes page size and fonts. Buttons
   get depth, a lit edge and a press. No migration.
+- **2.3.2** — an offline page for when the box is off: a small service worker (`/sw.js`) keeps `/offline.html`
+  on the device and shows it when the box does not answer (or Cloudflare reports the origin down); it reads the
+  control Lambda's URL and key from that device's storage (set in More → "Start the box when it is off") and offers
+  Start, then reloads into the app once it answers. Nothing else is cached. CSP `connect-src` allows the Function URL
+  host in the box's region. The control Lambda needs its CORS setting (infra) for the browser to call it.
 
 ## Release checklist
 

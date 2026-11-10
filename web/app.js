@@ -2616,6 +2616,34 @@ async function loadKeepAlive() {
     const when = k ? new Date(k.until).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
     card.innerHTML = `<button class="row" data-keep><span class="ico ${k ? 'kelp' : ''}">${icon('anchor')}</span><div class="main"><div class="title">${k ? `Kept on until ${esc(when)}` : 'Keep the box on'}</div><div class="sub" style="white-space:normal">${k ? esc(k.reason || 'Automatic power-off is paused') : 'It may be powered off automatically when no agent is working. Tap to keep it on until a date.'}</div></div>${icon('chevron', 'i chev')}</button>`;
     $('[data-keep]', card).onclick = () => keepAliveDialog(k);
+    offlineCard();
+}
+// The Start button for when the box is off: the control URL and key, kept on this device only (the offline page reads them).
+function offlineCard() {
+    const host = $('#keepalive-card'); if (!host) return;
+    let box = $('#offline-card'); if (!box) { box = document.createElement('div'); box.id = 'offline-card'; host.after(box); }
+    let c = null; try { c = JSON.parse(localStorage.getItem('plato.control') || 'null'); } catch { /* none */ }
+    const sw = 'serviceWorker' in navigator;
+    box.className = 'list gap';
+    box.innerHTML = `<button class="row" data-offline><span class="ico ${c ? 'kelp' : ''}">${icon('play')}</span><div class="main"><div class="title">${c ? 'Start button ready on this device' : 'Start the box when it is off'}</div><div class="sub" style="white-space:normal">${!sw ? 'This browser cannot keep the offline page.' : c ? 'If the box is off when you open PlatOpypus here, you get a page with a Start button.' : 'Paste the control URL and key once, and this device can start the box when it is off.'}</div></div>${icon('chevron', 'i chev')}</button>`;
+    $('[data-offline]', box).onclick = () => {
+        const { panel, close } = openDialog(`<h2>${icon('play')}Start the box when it is off</h2>
+            <p class="muted">When the box is off, this device shows a page with a Start button instead of an error. It uses the control Lambda, so paste its URL and key (the Telegram message has Copy URL and Copy key). They stay on this device only.</p>
+            <div class="field"><label for="oc-url">Control URL</label><input id="oc-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" value="${esc(c?.url || '')}" placeholder="https://….lambda-url.eu-west-2.on.aws/"></div>
+            <div class="field"><label for="oc-key">Key</label><input id="oc-key" type="password" autocomplete="off" spellcheck="false" placeholder="${c ? 'saved (enter a new one to change it)' : '40 characters'}"></div>
+            <p class="note" id="oc-result"></p>
+            <div class="buttons">${c ? '<button data-forget>Forget on this device</button>' : ''}<button data-test>Test</button><button class="primary" data-ok>Save</button></div>`);
+        const read = () => ({ url: $('#oc-url', panel).value.trim(), key: $('#oc-key', panel).value.trim() || c?.key || '' });
+        const valid = v => /^https:\/\/[a-z0-9]+\.lambda-url\.[a-z0-9-]+\.on\.aws\/?$/.test(v.url) && v.key.length >= 20;
+        $('[data-test]', panel).onclick = async () => {
+            const v = read(); const out = $('#oc-result', panel); if (!valid(v)) { out.textContent = 'Paste the control URL (….lambda-url….on.aws) and the key first.'; return; }
+            out.textContent = 'Asking the control…';
+            try { const r = await fetch(v.url.replace(/\/?$/, '/') + '?action=status', { headers: { 'X-Porthole-Key': v.key }, cache: 'no-store' }); const d = await r.json().catch(() => ({})); out.textContent = r.ok ? `It works: the box is ${d.state}.` : r.status === 401 ? 'The key was not accepted.' : `The control answered ${r.status}.`; }
+            catch { out.textContent = 'The control cannot be reached from this page yet (it needs the CORS setting applied to the Lambda).'; }
+        };
+        $('[data-ok]', panel).onclick = () => { const v = read(); if (!valid(v)) return toast('Paste the control URL and the key', true); localStorage.setItem('plato.control', JSON.stringify(v)); close(); toast('Start button ready on this device'); offlineCard(); };
+        const f = $('[data-forget]', panel); if (f) f.onclick = () => { localStorage.removeItem('plato.control'); close(); toast('Forgotten on this device'); offlineCard(); };
+    };
 }
 function keepAliveDialog(k) {
     const DAY = 86400_000, MAXD = 60;
@@ -3781,3 +3809,6 @@ function qrEncode(text) {
 (async () => {
     try { await api('/api/me'); await showApp(); } catch { showLogin(); }
 })();
+
+// The offline page: kept on this device by a small service worker, shown when the box does not answer.
+if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* not allowed here */ }); });

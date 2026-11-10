@@ -140,7 +140,7 @@ function securityHeaders() {
         'X-Frame-Options': 'SAMEORIGIN',
         'Referrer-Policy': 'no-referrer',
         'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-        'Content-Security-Policy': "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+        'Content-Security-Policy': `default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss: https://*.lambda-url.${process.env.AWS_REGION || 'eu-west-2'}.on.aws; frame-ancestors 'self'; base-uri 'none'; form-action 'self'`,
     };
 }
 

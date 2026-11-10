@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PlatOpypus · the box is off</title>
+<meta name="theme-color" content="#0A1120">
+<link rel="icon" type="image/svg+xml" href="/mascot.svg">
+<link rel="stylesheet" href="/offline.css">
+</head>
+<body>
+<main>
+  <img class="mascot" src="/mascot.svg" alt="" width="88" height="88">
+  <h1 id="head">The box is not answering</h1>
+  <p id="sub" class="sub">Checking whether it is switched off…</p>
+
+  <section id="state" hidden>
+    <dl>
+      <div><dt>State</dt><dd id="st-state">–</dd></div>
+      <div><dt>Since</dt><dd id="st-since">–</dd></div>
+    </dl>
+  </section>
+
+  <div class="actions">
+    <button id="start" class="btn pri" hidden>Start the box</button>
+    <button id="retry" class="btn">Try again</button>
+  </div>
+  <p id="progress" class="progress" hidden><span class="dot"></span><span id="progress-text">Starting…</span></p>
+
+  <details id="setup">
+    <summary id="setup-sum">Set up the Start button on this device</summary>
+    <p class="note">Paste the control URL and key from the Telegram message (Copy URL, Copy key). They are kept on this device only.</p>
+    <label>Control URL<input id="f-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://….lambda-url.eu-west-2.on.aws/"></label>
+    <label>Key<input id="f-key" type="password" autocomplete="off" spellcheck="false" placeholder="40 characters"></label>
+    <div class="actions"><button id="save" class="btn">Save</button><button id="forget" class="btn ghost" hidden>Forget on this device</button></div>
+  </details>
+</main>
+<script src="/offline.js"></script>
+</body>
+</html>
