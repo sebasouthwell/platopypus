@@ -40,6 +40,7 @@ import * as limit from './lib/limit.js';
 import * as activity from './lib/activity.js';
 import * as research from './lib/research.js';
 import * as addons from './lib/addons.js';
+import * as lab from './lib/lab.js';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
 import * as qa from './lib/researchqa.js';
@@ -85,6 +86,7 @@ const AGENT_ROUTES = [
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
+    ['GET', /^\/api\/agent\/lab\/status$/], ['POST', /^\/api\/agent\/lab\/run$/], ['GET', /^\/api\/agent\/lab\/run\/r\d{3,5}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
     ['GET', /^\/api\/live$/], ['GET', /^\/api\/live\/check$/],
@@ -349,6 +351,13 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, elevate.request(session.agent, { cmd: b.cmd, cwd: pr.cwd, reason: b.reason }));
             }
             if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
+            // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
+            if (p.startsWith('/api/agent/lab/')) {
+                const slug = lab.engagementOf(sh.cwd); if (!slug) return send(res, 403, { error: 'This shell is not in a Security Lab engagement.' });
+                if (p === '/api/agent/lab/status' && method === 'GET') { const d = lab.detail(slug); return send(res, 200, { title: d.title, scope: d.scope, runs: d.runs, tools: Object.fromEntries(Object.entries(lab.TOOLS).map(([k, t]) => [k, { title: t.title, presets: Object.keys(t.presets), local: !!t.local }])) }); }
+                if (p === '/api/agent/lab/run' && method === 'POST') { const b = await readJson(req, 16 * 1024); await caller(b.pid); return send(res, 201, await lab.run(slug, { tool: String(b.tool || ''), preset: b.preset || null, target: b.target || null, args: Array.isArray(b.args) ? b.args : null, by: `agent shell "${session.agent}"` })); }
+                if ((am = p.match(/^\/api\/agent\/lab\/run\/(r\d{3,5})$/)) && method === 'GET') return send(res, 200, lab.getRun(slug, am[1]));
+            }
             if (p === '/api/agent/research/ask' && method === 'POST') { const b = await readJson(req, 16 * 1024); const pr = await caller(b.pid); return send(res, 201, research.createAsk(pr.cwd, b)); }
             if ((am = p.match(/^\/api\/agent\/research\/ask\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, research.getAsk(sh.cwd, am[1]));
             if (p === '/api/servers/run' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await services.runServer({ ...b, env: {}, owner: session.agent })); }
@@ -657,6 +666,24 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/addons' && method === 'GET') return send(res, 200, { apps: await addons.list() });
         if ((m = p.match(/^\/api\/addons\/([a-z-]{1,30})\/(add|remove)$/)) && method === 'POST') return send(res, 200, await (m[2] === 'add' ? addons.add(m[1]) : addons.remove(m[1])));
         if ((m = p.match(/^\/api\/addons\/([a-z-]{1,30})\/log$/)) && method === 'GET') return send(res, 200, { log: addons.logTail(m[1]) });
+        // Security Lab: engagements, scope (with DNS verification), runs and findings. Needs the add-on.
+        if (p === '/api/lab' || p.startsWith('/api/lab/')) {
+            if (!(await addons.isAdded('lab'))) return send(res, 409, { error: 'Add Security Lab first (Apps tab).', needApp: 'lab' });
+            if (p === '/api/lab' && method === 'GET') return send(res, 200, { engagements: lab.list(), tools: Object.fromEntries(Object.entries(lab.TOOLS).map(([k, t]) => [k, { title: t.title, presets: Object.keys(t.presets), local: !!t.local }])) });
+            if (p === '/api/lab' && method === 'POST') return send(res, 201, lab.create(await readJson(req, 4096)));
+            const lm = p.match(/^\/api\/lab\/([\w.-]{1,60})(?:\/(.*))?$/);
+            if (lm) {
+                const [ls, lr = ''] = [lm[1], lm[2] || '']; let x;
+                if (lr === '' && method === 'GET') return send(res, 200, lab.detail(ls));
+                if (lr === 'scope' && method === 'POST') return send(res, 201, lab.addTarget(ls, await readJson(req, 4096)));
+                if (lr === 'scope/remove' && method === 'POST') return send(res, 200, lab.removeTarget(ls, (await readJson(req, 4096)).value));
+                if (lr === 'scope/verify' && method === 'POST') return send(res, 200, await lab.verify(ls, (await readJson(req, 4096)).value));
+                if (lr === 'run' && method === 'POST') { const b = await readJson(req, 16 * 1024); return send(res, 201, await lab.run(ls, { tool: String(b.tool || ''), preset: b.preset || null, target: b.target || null, args: Array.isArray(b.args) ? b.args : null, by: 'phone' })); }
+                if ((x = lr.match(/^run\/(r\d{3,5})$/)) && method === 'GET') return send(res, 200, lab.getRun(ls, x[1]));
+                if (lr === 'findings' && method === 'POST') return send(res, 200, lab.setFindings(ls, (await readJson(req, 256 * 1024)).text));
+                if (lr === 'delete' && method === 'POST') return send(res, 200, lab.remove(ls, (await readJson(req, 4096)).confirm));
+            }
+        }
         // Research screens need the Research app.
         if ((p === '/api/research' || p.startsWith('/api/research/')) && !(await addons.isAdded('research'))) return send(res, 409, { error: 'Add the Research app first (Apps tab).', needApp: 'research' });
         if (p === '/api/research' && method === 'GET') return send(res, 200, { topics: research.list(), asks: research.pendingAsks() });
@@ -795,7 +822,7 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
         const status = err.status || 500;
         if (status >= 500) console.error(err);
-        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.', ...(err.needProfile ? { needProfile: true } : {}), ...(err.existing ? { existing: err.existing } : {}) });
+        if (!res.headersSent) send(res, status, { error: err.message || 'Something went wrong.', ...(err.needProfile ? { needProfile: true } : {}), ...(err.needAck ? { needAck: err.needAck } : {}), ...(err.existing ? { existing: err.existing } : {}) });
         else res.end();
     }
 });

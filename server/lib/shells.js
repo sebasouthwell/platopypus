@@ -13,6 +13,7 @@ import * as agents from './agents.js';
 import crypto from 'node:crypto';
 import * as agentUser from './agentuser.js';
 import * as research from './research.js';
+import * as labLib from './lab.js';
 import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
@@ -62,7 +63,7 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false, model = '' }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false, model = '', ackClaude = false }) {
     if (oneshot) {
         if (kind !== 'agent' || !['claude', 'codex'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code or Codex.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
@@ -74,7 +75,9 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
-    if (session !== null && !['control', 'project', 'research'].includes(session)) throw httpError(400, 'session: control, project or research.');
+    if (session !== null && !['control', 'project', 'research', 'lab'].includes(session)) throw httpError(400, 'session: control, project, research or lab.');
+    // Autonomous testing with Claude: allowed, after the user has read the warning (the app asks; this enforces it).
+    if (session === 'lab' && kind === 'agent' && (agent || 'claude') === 'claude' && !ackClaude) { const e = httpError(428, 'Using Claude as a Security Lab agent needs your confirmation first.'); e.needAck = 'claude-lab'; throw e; }
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
     if (RESERVED_PREFIXES.some(p => name.startsWith(p))) throw httpError(400, `Names starting with ${RESERVED_PREFIXES.map(p => `"${p}"`).join(', ')} are reserved.`);
     if (await hasSession(name)) throw httpError(409, 'A shell with that name already exists.');
@@ -122,7 +125,11 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     // Session type and security brief (agents read $PORTHOLE_SECURITY_FILE first; see deploy/AGENT.global.md).
     let sessionEnv = {}, security = null;
     if (kind === 'agent' && session) {
-        if (session === 'research') {
+        if (session === 'lab') {
+            const lslug = labLib.engagementOf(dir); if (!lslug) throw httpError(400, 'A Security Lab session starts inside an engagement: open one under Apps, Security Lab.');
+            const ldir = path.join(labLib.ROOT, lslug);
+            security = 'lab'; sessionEnv = { PORTHOLE_SESSION: 'lab', PORTHOLE_SECURITY_LEVEL: 'lab', PORTHOLE_SECURITY_FILE: path.join(ldir, '.platopypus', 'lab.md'), PORTHOLE_PROJECT_ROOT: ldir };
+        } else if (session === 'research') {
             const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
             const tdir = path.join(research.ROOT, slug);
             security = 'research'; sessionEnv = { PORTHOLE_SESSION: 'research', PORTHOLE_SECURITY_LEVEL: 'research', PORTHOLE_SECURITY_FILE: path.join(tdir, '.platopypus', 'research.md'), PORTHOLE_PROJECT_ROOT: tdir };

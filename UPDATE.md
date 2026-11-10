@@ -588,6 +588,14 @@ phone's Update button. Mechanism:
   until it is added. A box that already has the research tools or a topic counts as added (recorded on first look), so
   nothing changes for it. `install.sh` no longer creates `/Research`. The Docker app catalog (`/api/docker/apps`) is
   unchanged.
+- **2.5.0** — Security Lab, the second app (Apps tab; installed only when added: `bin/lab setup`, about 600 MB of
+  Ubuntu packages plus sqlite-web; the scanners are then root-only, so agents reach them through `lab run`).
+  Engagements in `/Lab/<name>/` (scope, runs with command, full output and summary, findings, evidence). Scope: a
+  domain verified by a DNS TXT record (`platopypus-verify=…`) or declared authorised, covering its subdomains and the
+  addresses it resolves to; IPs and ranges (no wider than /16) declared. Every run, from the app or an agent, is checked:
+  known tool, every host argument in scope, no file paths, in its own folder, time-limited, three at a time, audited.
+  New routes `/api/lab…` (needs the app), agent routes `/api/agent/lab/status|run|run/:id`, session type `lab`;
+  Claude as a lab agent needs the user's confirmation (`ackClaude`, 428 otherwise). No migration.
 
 ## Release checklist
 

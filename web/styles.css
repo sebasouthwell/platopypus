@@ -805,3 +805,25 @@ a.btn { text-decoration: none; color: inherit; }
 .link { background: none; border: 0; padding: 4px 0; color: var(--mist); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .link:hover { color: var(--foam); }
 .app-more { text-align: center; }
+/* ---------- Security Lab ---------- */
+#eng-seg { display: flex; gap: 4px; padding: 4px; background: var(--hull); border: 1px solid var(--rail); border-radius: 14px; margin: 10px auto 14px; }
+#eng-seg button { flex: 1; padding: 9px 0; border-radius: 10px; color: var(--mist); font-size: 14.5px; font-weight: 500; }
+#eng-seg button.on { background: var(--foam); color: #0B1424; font-weight: 600; }
+#eng-seg em { font-style: normal; font-size: 11px; background: rgba(240,184,64,.22); color: var(--brass); border-radius: 8px; padding: 1px 6px; margin-left: 4px; }
+.lab-row { margin-bottom: 8px; }
+.sc-row { background: var(--hull); border: 1px solid var(--rail); border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; }
+.sc-main { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; } .sc-main b { font: 600 15px var(--mono); }
+.sc-kind { font-size: 12px; color: var(--dim); } .sc-st { margin-left: auto; font-size: 12.5px; font-weight: 600; }
+.sc-st.verified { color: var(--kelp); } .sc-st.declared { color: var(--brass); } .sc-st.unverified { color: var(--mist); }
+.sc-verify p { font-size: 13.5px; color: var(--mist); margin: 10px 0 6px; }
+.sc-rec { display: flex; gap: 8px; align-items: center; } .sc-rec code { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 12.5px var(--mono); background: var(--sea); border: 1px solid var(--rail); border-radius: 10px; padding: 9px 10px; }
+.sc-acts { display: flex; justify-content: flex-end; margin-top: 6px; }
+.sc-add { margin-top: 14px; }
+.run-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
+.run-row { margin-top: 8px; } .run-st { width: 10px; height: 10px; border-radius: 50%; flex: none; margin: 0 6px 0 4px; background: var(--dim); }
+.run-st.running { background: var(--brass); animation: pulse 1.4s ease-in-out infinite; } .run-st.done { background: var(--kelp); } .run-st.failed { background: var(--flare); }
+.run-cmd { font-size: 12px; overflow-wrap: anywhere; } .run-sum { font-size: 14px; line-height: 1.5; } .run-sum h4 { display: none; } .run-sum ul { padding-left: 18px; margin: 6px 0; }
+.run-out > summary { cursor: pointer; font-size: 13px; color: var(--mist); margin: 10px 0 6px; } .run-out pre { max-height: 50vh; overflow: auto; font: 11.5px/1.5 var(--mono); white-space: pre-wrap; background: var(--sea); border: 1px solid var(--rail); border-radius: 10px; padding: 10px; }
+.fd-text { width: 100%; font: 13.5px/1.5 var(--mono); resize: vertical; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .run-st.running { animation: none; } }

@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+// lab: the Security Lab tools, inside an engagement (/Lab/<name>). Runs go through PlatOpypus, which checks every target
+// against the engagement's scope and keeps the command, full output and a short summary in runs/<id>/.
+//
+//   lab status                          the engagement: scope and recent runs
+//   lab tools                           the tools you can run, and their presets
+//   lab run <tool> <target>             run a tool's preset against a target in scope (waits; prints the summary)
+//   lab run <tool> -- <args…>           run a tool with your own arguments (no file paths; hosts must be in scope)
+//   lab show <run-id>                   a run's summary (the full output is in runs/<id>/out.txt)
+//   lab setup                           install the tools (root; done by adding Security Lab in the Apps tab)
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const argv = process.argv.slice(2); const cmd = argv[0];
+const die = (m, c = 1) => { console.error(m); process.exit(c); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function engagement() {
+    let d = process.cwd();
+    for (;;) { if (fs.existsSync(path.join(d, '.platopypus', 'lab.json'))) return d; const up = path.dirname(d); if (up === d) break; d = up; }
+    die('Not inside a Security Lab engagement. cd to /Lab/<engagement> first.');
+}
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+async function call(p, method = 'GET', body) {
+    const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) die('This shell has no PlatOpypus token (start it from the app as an agent shell).');
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) die('PlatOpypus did not accept this shell\'s token.');
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: body && JSON.stringify({ ...body, pid: process.pid }) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) die(d.error || `HTTP ${r.status}`, r.status === 403 ? 3 : 1); return d;
+}
+
+const TOOLS = ['nmap', 'nikto', 'testssl.sh', 'testssl', 'sslscan', 'whatweb', 'dnsrecon', 'dnstwist', 'arp-scan', 'netdiscover', 'tshark', 'tcpdump'];
+try {
+    switch (cmd) {
+        case 'status': { engagement(); const s = await call('/api/agent/lab/status'); console.log(`${s.title}\nScope (${s.scope.length}):`); for (const t of s.scope) console.log(`  ${t.value.padEnd(32)} ${t.kind.padEnd(7)} ${t.status}`); console.log(`Recent runs:`); for (const r of s.runs.slice(0, 15)) console.log(`  ${r.id}  ${r.status.padEnd(8)} ${r.cmd.slice(0, 80)}${r.headline ? `\n          ${r.headline}` : ''}`); break; }
+        case 'tools': { engagement(); const s = await call('/api/agent/lab/status'); for (const [k, t] of Object.entries(s.tools)) console.log(`${k.padEnd(11)} ${t.title}${t.presets.length > 1 ? `  (presets: ${t.presets.join(', ')})` : ''}${t.local ? '  [this box]' : ''}`); break; }
+        case 'run': {
+            engagement(); const tool = argv[1]; if (!tool) die('usage: lab run <tool> <target> [--preset name]   or   lab run <tool> -- <args…>');
+            const dd = argv.indexOf('--'); const pi = argv.indexOf('--preset');
+            const body = dd > 0 ? { tool, args: argv.slice(dd + 1) } : { tool, target: argv[2] && !argv[2].startsWith('--') ? argv[2] : null, preset: pi > 0 ? argv[pi + 1] : null };
+            const r = await call('/api/agent/lab/run', 'POST', body); process.stderr.write(`${r.id}: ${r.cmd}\n`);
+            let s = r; for (let i = 0; i < 400 && s.status === 'running'; i++) { await sleep(3000); s = await call(`/api/agent/lab/run/${r.id}`); }
+            console.log(s.summary || s.headline || '(no summary)'); console.log(`\nFull output: runs/${r.id}/out.txt${s.files?.length ? `  files: ${s.files.map(f => `runs/${r.id}/${f}`).join(' ')}` : ''}`);
+            process.exit(s.status === 'done' ? 0 : 4);
+        }
+        case 'show': { engagement(); if (!argv[1]) die('usage: lab show <run-id>'); const s = await call(`/api/agent/lab/run/${argv[1]}`); console.log(`${s.cmd}\n${s.status}\n\n${s.summary || s.output.slice(-4000)}`); break; }
+        case 'setup': {
+            if (process.getuid && process.getuid() !== 0) die('Run as root (add Security Lab from the Apps tab).');
+            const sh = c => { console.log('$ ' + c); const r = spawnSync('bash', ['-lc', c], { stdio: 'inherit' }); if (r.status !== 0) die(`failed: ${c}`); };
+            sh('DEBIAN_FRONTEND=noninteractive apt-get update -q');
+            sh('DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nmap nikto lynis dnsutils whois traceroute net-tools tcpdump tshark mtr-tiny iperf3 arp-scan netdiscover sslscan testssl.sh whatweb dnsrecon dnstwist sleuthkit autopsy binwalk foremost libimage-exiftool-perl yara rkhunter chkrootkit radare2 jq sqlite3 python3-pip');
+            sh('pip3 install --break-system-packages -q sqlite-web || true');
+            // The scanners are for `lab run` (which checks scope): only root may run them directly.
+            for (const t of TOOLS) { const r = spawnSync('bash', ['-lc', `p=$(command -v ${t}) && f=$(readlink -f "$p") && chown root:root "$f" && chmod 0750 "$f" && echo "locked: ${t}"`], { stdio: 'inherit' }); void r; }
+            console.log('Security Lab tools are installed.');
+            break;
+        }
+        default: console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n')); process.exit(cmd ? 2 : 0);
+    }
+} catch (e) { die(`lab: ${e.message}`); }

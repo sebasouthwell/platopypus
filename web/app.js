@@ -246,6 +246,7 @@ function push(page) {
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
+    if (page === 'lab') loadLab().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -579,7 +580,15 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
             body.session = session;
         }
         try { await api('/api/shells', { method: 'POST', body }); close(); openTerminal(finalName, 'Shells'); }
-        catch (ex) { toast(ex.message, true); }
+        catch (ex) {
+            // Claude as a Security Lab agent: say what to expect, then go ahead only if the user says so.
+            if (ex.status === 428 && /Security Lab/.test(ex.message)) {
+                const ok = await confirmDialog({ title: 'Use Claude for security testing?', danger: false, action: 'Use Claude anyway', text: 'Claude can run lab commands, but autonomous security testing may not suit it: it follows Anthropic\'s usage policies, so it may decline some tests, ask you to confirm you are authorised, or stop part-way through a long run. Codex or Gemini are the expected agents for autonomous testing here. Every run is still limited to this engagement\'s scope.' });
+                if (ok) { try { await api('/api/shells', { method: 'POST', body: { ...body, ackClaude: true } }); close(); openTerminal(finalName, 'Shells'); } catch (e2) { toast(e2.message, true); } }
+                return;
+            }
+            toast(ex.message, true);
+        }
     };
     $('[data-ok]', panel).onclick = go_; enterSubmits(panel, go_);
 }
@@ -587,7 +596,8 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
 // Before an agent starts: control session or project session; a new project also gets its security level (once).
 function sessionTypeDialog(folder) {
     return new Promise(resolve => {
-        if (/^\/?Research\/[^/]+/.test(folder || '')) return resolve('research');   // inside a research topic: that is what it is
+        if (/^\/?Research\/[^/]+/.test(folder || '')) return resolve('research');
+        if (/^\/?Lab\/[^/]+/.test(folder || '')) return resolve('lab');   // inside a research topic: that is what it is
         const last = localStorage.getItem('porthole.sessionType') || 'project';
         const { panel, close } = openDialog(`<h2>${icon('claude')}What is this session?</h2>
             <div class="menu">
@@ -3259,7 +3269,7 @@ async function loadApps() {
     </div>`).join('') + '<p class="note app-more">More apps are on the way.</p>';
     for (const a of apps) {
         const card = $(`[data-app="${a.id}"]`, box);
-        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : null);
+        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : a.id === 'lab' ? openLab() : null);
         const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/addons/${a.id}/add`, { method: 'POST', body: {} }); toast(`Adding ${a.title}…`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const rm = $('[data-remove]', card); if (rm) rm.onclick = async () => { if (!(await confirmDialog({ title: `Remove ${a.title}?`, text: `${a.title} disappears from PlatOpypus. Your ${a.id === 'research' ? 'topics, papers and sources stay on the box' : 'data stays on the box'}, and so do the installed packages; add it again any time.`, action: 'Remove app' }))) return; try { await api(`/api/addons/${a.id}/remove`, { method: 'POST', body: {} }); toast(`${a.title} removed`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const show = $('[data-showlog]', card); if (show) show.onclick = async () => { const pre = $('[data-log]', card); pre.hidden = false; pre.textContent = (await api(`/api/addons/${a.id}/log`)).log || '(nothing was written)'; };
@@ -3268,6 +3278,82 @@ async function loadApps() {
     clearTimeout(appsPoll);
     const was = new Set(apps.filter(a => a.installing).map(a => a.id));
     if (was.size) appsPoll = setTimeout(async () => { if (state.tab !== 'apps') return; const before = was; await loadApps().catch(() => {}); const now = (await api('/api/addons')).apps; for (const a of now) if (before.has(a.id) && !a.installing) toast(a.added ? `${a.title} is ready` : `${a.title} could not be added`, !a.added); }, 3000);
+}
+// ---------- Security Lab ----------
+// Engagements: a scope you verify, runs (command, output, summary), findings, and agents that test inside the scope.
+const labState = { slug: null, tab: 'scope', tools: {}, poll: null };
+function openLab() { go('apps'); push('lab'); }
+const mdLite = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`).replace(/^# (.*)$/gm, '<h4>$1</h4>');
+async function loadLab() {
+    const d = await api('/api/lab'); labState.tools = d.tools; const box = $('#lab-body');
+    box.innerHTML = `<p class="r-sub">Test your own domains, services and applications, wherever they are hosted. Each engagement has a scope: only targets in it can be tested, by you or an agent.</p>
+        ${d.engagements.map(e => `<button class="row lab-row" data-eng="${esc(e.slug)}"><span class="ico ${e.verified ? 'brass' : ''}">${icon('shield')}</span><div class="main"><div class="title">${esc(e.title)}</div><div class="sub">${e.targets} target${e.targets === 1 ? '' : 's'}${e.targets ? ` · ${e.verified} ready to test` : ''} · ${e.runs} run${e.runs === 1 ? '' : 's'}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}
+        <button class="r-new" data-new-eng><span class="ico brass">${icon('plus')}</span>New engagement</button>`;
+    $$('[data-eng]', box).forEach(b => b.onclick = () => openEng(b.dataset.eng));
+    $('[data-new-eng]', box).onclick = () => {
+        const { panel, close } = openDialog(`<h2>${icon('shield')}New engagement</h2><div class="field"><label for="ng-title">Name</label><input id="ng-title" type="text" maxlength="100" placeholder="My sites, November"></div><p class="muted">Then add the domains and services to test on its Scope page.</p><div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Create</button></div>`, { size: 'small' });
+        const make = async () => { try { const e = await api('/api/lab', { method: 'POST', body: { title: $('#ng-title', panel).value } }); close(); openEng(e.slug, 'scope'); } catch (ex) { toast(ex.message, true); } };
+        $('[data-ok]', panel).onclick = make; enterSubmits(panel, make);
+    };
+}
+function openEng(slug, tab) { labState.slug = slug; if (tab) labState.tab = tab; push('eng'); loadEng().catch(e => toast(e.message, true)); }
+async function loadEng() {
+    const slug = labState.slug; const enc = encodeURIComponent(slug); const e = await api(`/api/lab/${enc}`);
+    if (!Object.keys(labState.tools).length) labState.tools = (await api('/api/lab')).tools;
+    $('#eng-title').textContent = e.title;
+    const running = e.runs.some(r => r.status === 'running');
+    $('#eng-seg').innerHTML = [['scope', `Scope${e.scope.length ? `<em>${e.scope.length}</em>` : ''}`], ['runs', `Runs${e.runs.length ? `<em>${e.runs.length}</em>` : ''}`], ['findings', 'Findings'], ['agent', 'Agent']].map(([k, l]) => `<button data-et="${k}" class="${labState.tab === k ? 'on' : ''}">${l}</button>`).join('');
+    $$('#eng-seg [data-et]').forEach(b => b.onclick = () => { labState.tab = b.dataset.et; loadEng().catch(x => toast(x.message, true)); });
+    const body = $('#eng-body'); const ready = e.scope.filter(t => t.status !== 'unverified');
+    if (labState.tab === 'scope') {
+        body.innerHTML = `<p class="note">Add what you own or are allowed to test. A domain is proved with a DNS record, which also covers its subdomains and the addresses it points to. Other addresses need your confirmation.</p>
+            ${e.scope.map(t => `<div class="sc-row"><div class="sc-main"><b>${esc(t.value)}</b><span class="sc-kind">${esc(t.kind)}</span><span class="sc-st ${t.status}">${t.status === 'verified' ? 'Verified' : t.status === 'declared' ? 'Authorised by you' : 'Not verified yet'}</span></div>
+                ${t.status === 'unverified' ? `<div class="sc-verify"><p>Add this TXT record at <span class="mono">${esc(t.value)}</span> (or at <span class="mono">_platopypus.${esc(t.value)}</span>), then check:</p><div class="sc-rec"><code>${esc(t.record)}</code><button class="btn" data-copy="${esc(t.record)}">${icon('copy')}Copy</button></div><div class="r-actions"><button class="btn pri" data-verify="${esc(t.value)}">${icon('check')}Check the record</button></div></div>` : ''}
+                <div class="sc-acts"><button class="link" data-unscope="${esc(t.value)}">Remove</button></div></div>`).join('') || '<p class="empty">Nothing in scope yet.</p>'}
+            <div class="card sc-add"><div class="field"><label for="sc-val">Domain, IP address or range</label><input id="sc-val" type="text" autocomplete="off" spellcheck="false" placeholder="example.com · 203.0.113.10 · 203.0.113.0/24"></div>
+                <label class="chk-row"><input type="checkbox" id="sc-auth"> I own this or am authorised to test it (needed for an IP or range; for a domain it skips the DNS check)</label>
+                <div class="r-actions"><button class="btn pri" data-scadd>${icon('plus')}Add to scope</button></div></div>`;
+        $('[data-scadd]', body).onclick = async () => { try { await api(`/api/lab/${enc}/scope`, { method: 'POST', body: { value: $('#sc-val', body).value, authorised: $('#sc-auth', body).checked } }); loadEng(); } catch (ex) { toast(ex.message, true); } };
+        $$('[data-verify]', body).forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/lab/${enc}/scope/verify`, { method: 'POST', body: { value: b.dataset.verify } }); toast(r.verified ? `${b.dataset.verify} verified` : 'The record was not found yet. DNS can take a few minutes; try again shortly.', !r.verified); loadEng(); } catch (ex) { toast(ex.message, true); b.disabled = false; } });
+        $$('[data-copy]', body).forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Copy it by hand', true); } });
+        $$('[data-unscope]', body).forEach(b => b.onclick = async () => { if (!(await confirmDialog({ title: `Remove ${b.dataset.unscope}?`, text: 'It leaves the scope: nothing can be run against it until it is added again. Past runs are kept.', action: 'Remove' }))) return; try { await api(`/api/lab/${enc}/scope/remove`, { method: 'POST', body: { value: b.dataset.unscope } }); loadEng(); } catch (ex) { toast(ex.message, true); } });
+    } else if (labState.tab === 'runs') {
+        const tools = labState.tools;
+        body.innerHTML = `<div class="card run-new"><div class="run-grid">
+                <div class="field"><label for="rn-tool">Tool</label><select id="rn-tool">${Object.entries(tools).map(([k, t]) => `<option value="${esc(k)}">${esc(t.title)}</option>`).join('')}</select></div>
+                <div class="field" data-tfield><label for="rn-target">Target</label><select id="rn-target">${ready.length ? ready.map(t => `<option>${esc(t.value)}</option>`).join('') : '<option value="">Nothing in scope yet</option>'}</select></div>
+                <div class="field" data-pfield hidden><label for="rn-preset">Preset</label><select id="rn-preset"></select></div></div>
+            <div class="r-actions"><button class="btn pri" data-run>${icon('play')}Run</button></div></div>
+            ${e.runs.map(r => `<button class="row run-row" data-run-id="${esc(r.id)}"><span class="run-st ${r.status}"></span><div class="main"><div class="title">${esc(r.title)}${r.target ? ` · ${esc(r.target)}` : ''}</div><div class="sub">${r.status === 'running' ? 'Running…' : esc(r.headline || r.status)} · ${esc(new Date(r.started).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${r.by !== 'phone' ? ` · ${esc(r.by)}` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('') || '<p class="empty">No runs yet.</p>'}`;
+        const syncTool = () => { const t = tools[$('#rn-tool', body).value]; $('[data-tfield]', body).hidden = !!t.local; const ps = $('[data-pfield]', body); ps.hidden = t.presets.length < 2; $('#rn-preset', body).innerHTML = t.presets.map(p => `<option>${esc(p)}</option>`).join(''); };
+        $('#rn-tool', body).onchange = syncTool; syncTool();
+        $('[data-run]', body).onclick = async () => { const tool = $('#rn-tool', body).value; try { const r = await api(`/api/lab/${enc}/run`, { method: 'POST', body: { tool, preset: $('#rn-preset', body).value || null, target: tools[tool].local ? null : $('#rn-target', body).value } }); toast(`Started ${r.id}`); loadEng(); } catch (ex) { toast(ex.message, true); } };
+        $$('[data-run-id]', body).forEach(b => b.onclick = () => runDialog(slug, b.dataset.runId));
+    } else if (labState.tab === 'findings') {
+        body.innerHTML = `<p class="note">Agents add what they find here; you can edit it. Each finding should say where, how bad, which run shows it, and what to do.</p><textarea id="fd-text" rows="18" class="fd-text">${esc(e.findings)}</textarea><div class="r-actions"><button class="btn pri" data-fsave>${icon('check')}Save</button></div>`;
+        $('[data-fsave]', body).onclick = async () => { try { await api(`/api/lab/${enc}/findings`, { method: 'POST', body: { text: $('#fd-text', body).value } }); toast('Findings saved'); } catch (ex) { toast(ex.message, true); } };
+    } else {
+        const mine = (state.shells || []).filter(s => String(s.cwd || '').includes(`/Lab/${slug}`));
+        body.innerHTML = `<p class="note">An agent here tests only what is in scope: its scans go through <span class="mono">lab run</span>, which refuses anything else. Codex or Gemini are the expected agents for autonomous testing.</p>
+            ${mine.length ? `<div class="list">${mine.map(s => `<button class="row" data-sh="${esc(s.name)}"><span class="dot ${s.attached ? 'live' : ''}" style="margin:0 10px"></span><div class="main"><div class="title mono">${esc(s.name)}</div><div class="sub">${esc(agentTitle(s.agent))}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No agent is working on this engagement.</p>'}
+            <div class="r-actions"><button class="btn pri" data-start ${ready.length ? '' : 'disabled'}>${icon('claude')}Start an agent here</button></div>${ready.length ? '' : '<p class="note">Verify something in scope first.</p>'}
+            <div class="r-danger"><div><b>Delete this engagement</b><span>Moves it to the box's trash, with its runs and findings.</span></div><button class="btn danger-btn" data-del-eng>${icon('trash')}Delete…</button></div>`;
+        $$('[data-sh]', body).forEach(b => b.onclick = () => openTerminal(b.dataset.sh, 'Security Lab'));
+        const st = $('[data-start]', body); if (st) st.onclick = () => newShellDialog(`Lab/${slug}`, 'agent', null, { firstPrompt: `Security Lab engagement: ${e.title}. Read .platopypus/lab.md and findings.md, run \`lab status\`, then test what is in scope, lightest checks first, and write what you find to findings.md.` });
+        $('[data-del-eng]', body).onclick = () => {
+            const { panel, close } = openDialog(`<h2>${icon('trash')}Delete this engagement?</h2><p class="muted">“${esc(e.title)}” moves to the box's trash with its runs and findings.</p><div class="field"><label for="de-name">Type the name to confirm</label><input id="de-name" type="text" autocomplete="off" placeholder="${esc(e.title)}"></div><div class="buttons"><button data-close>Cancel</button><button class="danger" data-ok disabled>Delete</button></div>`, { size: 'small' });
+            const inp = $('#de-name', panel), ok = $('[data-ok]', panel); inp.oninput = () => { ok.disabled = inp.value.trim() !== e.title; };
+            ok.onclick = async () => { try { await api(`/api/lab/${enc}/delete`, { method: 'POST', body: { confirm: inp.value } }); close(); toast('Moved to the trash'); openLab(); } catch (ex) { toast(ex.message, true); } };
+        };
+    }
+    clearTimeout(labState.poll); if (running && labState.tab === 'runs') labState.poll = setTimeout(() => { if (!$('#page-eng').hidden && labState.tab === 'runs') loadEng().catch(() => {}); }, 4000);
+}
+async function runDialog(slug, id) {
+    const r = await api(`/api/lab/${encodeURIComponent(slug)}/run/${id}`);
+    openDialog(`<h2>${icon('terminal')}${esc(r.title)}</h2><p class="muted mono run-cmd">${esc(r.cmd)}</p>
+        <div class="run-sum">${r.status === 'running' ? '<p>Still running…</p>' : mdLite(r.summary || '')}</div>
+        <details class="run-out"><summary>Full output${r.files?.length ? ` · files: ${r.files.map(esc).join(', ')}` : ''}</summary><pre>${esc(r.output || '(none)')}</pre></details>
+        <div class="buttons"><button data-close>Close</button></div>`);
 }
 // Which agent and model do research work: Ask answers, editor changes, citation checks, and new research sessions.
 async function researchAgentCard(box) {
@@ -3454,6 +3540,9 @@ async function sourceDialog(slug, id) {
 
 $('#topic-back').addEventListener('click', () => openResearch());
 $('#research-back').addEventListener('click', () => go('apps'));
+$('#lab-back').addEventListener('click', () => go('apps'));
+$('#eng-back').addEventListener('click', () => openLab());
+$('#eng-refresh').addEventListener('click', () => loadEng().catch(e => toast(e.message, true)));
 $('#topic-refresh').addEventListener('click', () => loadTopic().catch(e => toast(e.message, true)));
 
 // ---------- backups ----------
