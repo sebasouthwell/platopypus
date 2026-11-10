@@ -90,7 +90,7 @@
     <div class="tiles">
       <button class="tile" data-act="agent"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span>AI agent</button>
       <button class="tile" data-act="upload"><span class="ico"><svg class="i"><use href="/sprite.svg#i-upload"/></svg></span>Upload</button>
-      <button class="tile" data-act="research"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg></span>Research</button>
+      <button class="tile" data-act="apps"><span class="ico dock"><svg class="i"><use href="/sprite.svg#i-package"/></svg></span>Apps</button>
       <button class="tile" data-act="scratch"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-zap"/></svg></span>Quick task</button>
       <button class="tile" data-act="shell"><span class="ico"><svg class="i"><use href="/sprite.svg#i-terminal"/></svg></span>Plain shell</button>
     </div>
@@ -197,8 +197,17 @@
     <p class="note gap">This app is root-level control of the box. Keep two-step codes on and sign out of devices you no longer use. Lost your authenticator? Run <span class="mono">box.ps1 reset-totp</span> from the laptop.</p>
   </section>
 
-  <section id="tab-research" class="tab" data-tab="research" hidden>
-    <header class="topbar"><h1>Research</h1></header>
+  <section id="tab-apps" class="tab" data-tab="apps" hidden>
+    <header class="topbar"><h1>Apps</h1></header>
+    <p class="note">Extra parts of PlatOpypus that bring their own tools. Nothing is installed until you add an app.</p>
+    <div id="apps-body"></div>
+  </section>
+
+  <section id="page-research" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" id="research-back"><svg class="i"><use href="/sprite.svg#i-back"/></svg>Apps</button>
+      <h1>Research</h1><span class="spacer"></span>
+    </header>
     <div id="research-body"></div>
   </section>
 
@@ -275,7 +284,7 @@
     <button data-go="shells" title="Shells"><svg class="i"><use href="/sprite.svg#i-shells"/></svg><span>Shells</span></button>
     <button data-go="services" title="Services"><svg class="i"><use href="/sprite.svg#i-services"/></svg><span>Services</span></button>
     <button data-go="files" title="Files"><svg class="i"><use href="/sprite.svg#i-files"/></svg><span>Files</span></button>
-    <button data-go="research" title="Research"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg><span>Research</span></button>
+    <button data-go="apps" title="Apps"><svg class="i"><use href="/sprite.svg#i-package"/></svg><span>Apps</span></button>
     <button data-go="more" title="More"><svg class="i"><use href="/sprite.svg#i-more"/></svg><span>More</span></button>
     <div class="nav-group" id="nav-pages">
       <div class="nav-label">Box</div>

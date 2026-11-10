@@ -219,7 +219,7 @@ $('#logout').addEventListener('click', async () => { await api('/api/logout', { 
 // ---------- navigation ----------
 
 const state = {
-    tab: localStorage.getItem('porthole.tab') || 'home',
+    tab: (t => (t === 'research' ? 'apps' : t))(localStorage.getItem('porthole.tab') || 'home'),
     filesPath: localStorage.getItem('porthole.path'),   // null until a folder is chosen → Files opens at home
     servicesFilter: 'projects',
     shells: [],
@@ -245,6 +245,7 @@ function push(page) {
     if (page === 'audit') loadAudit().catch(e => toast(e.message, true));
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
+    if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -305,7 +306,7 @@ async function refresh() {
         else if (state.tab === 'shells') await loadShells();
         else if (state.tab === 'services') await loadServices();
         else if (state.tab === 'files') await loadFiles(state.filesPath ?? null);
-        else if (state.tab === 'research') await loadResearch();
+        else if (state.tab === 'apps') await loadApps();
         else if (state.tab === 'more') await loadMore();
     } catch (ex) { if (ex.status !== 401) toast(ex.message, true); }
 }
@@ -367,7 +368,7 @@ $('#home-new').addEventListener('click', () => newShellDialog(state.filesPath ||
 $$('#tab-home .tile').forEach(t => t.addEventListener('click', async () => {
     const act = t.dataset.act;
     if (act === 'agent') return newShellDialog(state.filesPath || projectsRel(), 'agent');
-    if (act === 'research') return go('research');
+    if (act === 'apps') return go('apps');
     if (act === 'shell') return newShellDialog(state.filesPath || homeRel, 'shell');
     if (act === 'upload') { go('files'); return setTimeout(() => $('#files-input').click(), 150); }
     if (act === 'stirling') return launchApp('stirling-pdf', 'Stirling PDF');
@@ -3240,6 +3241,34 @@ async function loadResearch() {
     $('[data-new-topic]', body).onclick = newTopicDialog;
     bindAsks(body, () => loadResearch().catch(() => {}));
 }
+// ---------- apps ----------
+// Optional parts with their own tools. A card shows what adding it installs; Add installs it on the box (with its
+// progress), then the card opens the app.
+function openResearch() { go('apps'); push('research'); }
+let appsPoll = null;
+async function loadApps() {
+    const { apps } = await api('/api/addons'); const box = $('#apps-body'); if (!box) return;
+    box.innerHTML = apps.map(a => `<div class="app-card ${a.added ? 'on' : ''}" data-app="${esc(a.id)}">
+        <div class="app-top"><span class="ico ${a.added ? 'brass' : ''}">${icon(a.icon)}</span><div class="app-name"><b>${esc(a.title)}</b><span class="app-state ${a.installing ? 'busy' : a.added ? 'ok' : ''}">${a.installing ? 'Adding…' : a.added ? 'Added' : 'Not added'}</span></div>
+            ${a.added ? `<button class="btn pri" data-open>${icon('chevron')}Open</button>` : a.installing ? '' : `<button class="btn pri" data-add>${icon('plus')}Add app</button>`}</div>
+        <p class="app-blurb">${esc(a.blurb)}</p>
+        ${a.added ? '' : `<details class="app-what" ${a.installing ? 'open' : ''}><summary>What adding it installs · ${esc(a.size)}, ${esc(a.time)}</summary><ul>${a.installs.map(i => `<li>${esc(i)}</li>`).join('')}</ul></details>`}
+        ${a.installing ? `<div class="app-progress"><span class="dotlive"></span><span>Installing on the box. You can leave this page; it carries on.</span></div><pre class="app-log" data-log></pre>` : ''}
+        ${!a.installing && a.lastJob && a.lastJob.code !== null && a.lastJob.code !== 0 && !a.added ? `<p class="app-fail">The last attempt stopped (code ${a.lastJob.code}). <button class="link" data-showlog>Show what happened</button></p><pre class="app-log" data-log hidden></pre>` : ''}
+        ${a.added ? `<div class="app-foot"><button class="link" data-remove>Remove app</button></div>` : ''}
+    </div>`).join('') + '<p class="note app-more">More apps are on the way.</p>';
+    for (const a of apps) {
+        const card = $(`[data-app="${a.id}"]`, box);
+        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : null);
+        const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/addons/${a.id}/add`, { method: 'POST', body: {} }); toast(`Adding ${a.title}…`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
+        const rm = $('[data-remove]', card); if (rm) rm.onclick = async () => { if (!(await confirmDialog({ title: `Remove ${a.title}?`, text: `${a.title} disappears from PlatOpypus. Your ${a.id === 'research' ? 'topics, papers and sources stay on the box' : 'data stays on the box'}, and so do the installed packages; add it again any time.`, action: 'Remove app' }))) return; try { await api(`/api/addons/${a.id}/remove`, { method: 'POST', body: {} }); toast(`${a.title} removed`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
+        const show = $('[data-showlog]', card); if (show) show.onclick = async () => { const pre = $('[data-log]', card); pre.hidden = false; pre.textContent = (await api(`/api/addons/${a.id}/log`)).log || '(nothing was written)'; };
+        if (a.installing) { const pre = $('[data-log]', card); api(`/api/addons/${a.id}/log`).then(r => { pre.textContent = (r.log || '').split('\n').slice(-14).join('\n'); pre.scrollTop = pre.scrollHeight; }).catch(() => {}); }
+    }
+    clearTimeout(appsPoll);
+    const was = new Set(apps.filter(a => a.installing).map(a => a.id));
+    if (was.size) appsPoll = setTimeout(async () => { if (state.tab !== 'apps') return; const before = was; await loadApps().catch(() => {}); const now = (await api('/api/addons')).apps; for (const a of now) if (before.has(a.id) && !a.installing) toast(a.added ? `${a.title} is ready` : `${a.title} could not be added`, !a.added); }, 3000);
+}
 // Which agent and model do research work: Ask answers, editor changes, citation checks, and new research sessions.
 async function researchAgentCard(box) {
     const s = await api('/api/research-settings');
@@ -3289,7 +3318,7 @@ function deleteTopicDialog(t) {
         <div class="buttons"><button data-close>Cancel</button><button class="danger" data-ok disabled>Delete topic</button></div>`, { size: 'small' });
     const inp = $('#del-name', panel), ok = $('[data-ok]', panel);
     inp.oninput = () => { ok.disabled = inp.value.trim() !== t.title; };
-    ok.onclick = async () => { ok.disabled = true; try { await api(`/api/research/${encodeURIComponent(t.slug)}/delete`, { method: 'POST', body: { confirm: inp.value } }); close(); toast(`“${t.title}” moved to the trash`); go('research'); } catch (ex) { toast(ex.message, true); ok.disabled = false; } };
+    ok.onclick = async () => { ok.disabled = true; try { await api(`/api/research/${encodeURIComponent(t.slug)}/delete`, { method: 'POST', body: { confirm: inp.value } }); close(); toast(`“${t.title}” moved to the trash`); openResearch(); } catch (ex) { toast(ex.message, true); ok.disabled = false; } };
     setTimeout(() => inp.focus(), 50);
 }
 // Delete a source: say plainly what it would break before doing it.
@@ -3423,7 +3452,8 @@ async function sourceDialog(slug, id) {
     $('[data-del-src]', panel).onclick = () => { close(); deleteSourceDialog(slug, m.id, () => loadTopic().catch(() => {})); };
 }
 
-$('#topic-back').addEventListener('click', () => go('research'));
+$('#topic-back').addEventListener('click', () => openResearch());
+$('#research-back').addEventListener('click', () => go('apps'));
 $('#topic-refresh').addEventListener('click', () => loadTopic().catch(e => toast(e.message, true)));
 
 // ---------- backups ----------

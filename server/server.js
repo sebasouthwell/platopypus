@@ -39,6 +39,7 @@ import * as usage from './lib/usage.js';
 import * as limit from './lib/limit.js';
 import * as activity from './lib/activity.js';
 import * as research from './lib/research.js';
+import * as addons from './lib/addons.js';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
 import * as qa from './lib/researchqa.js';
@@ -652,6 +653,12 @@ const server = http.createServer(async (req, res) => {
         if ((m = p.match(/^\/api\/backups\/([^/]{1,80})$/)) && method === 'POST') return send(res, 200, await backups.backup(decodeURIComponent(m[1])));
         if ((m = p.match(/^\/api\/backups\/([^/]{1,80})\/restore$/)) && method === 'POST') { const b = await readJson(req, 4096); return send(res, 200, await backups.restore(decodeURIComponent(m[1]), String(b.name || ''))); }
         // Research: topics under /Research, the paper's pages, sources, exports, and the asks agents wait on.
+        // Apps: optional parts with their own tools, added from the Apps tab (not installed with the box).
+        if (p === '/api/addons' && method === 'GET') return send(res, 200, { apps: await addons.list() });
+        if ((m = p.match(/^\/api\/addons\/([a-z-]{1,30})\/(add|remove)$/)) && method === 'POST') return send(res, 200, await (m[2] === 'add' ? addons.add(m[1]) : addons.remove(m[1])));
+        if ((m = p.match(/^\/api\/addons\/([a-z-]{1,30})\/log$/)) && method === 'GET') return send(res, 200, { log: addons.logTail(m[1]) });
+        // Research screens need the Research app.
+        if ((p === '/api/research' || p.startsWith('/api/research/')) && !(await addons.isAdded('research'))) return send(res, 409, { error: 'Add the Research app first (Apps tab).', needApp: 'research' });
         if (p === '/api/research' && method === 'GET') return send(res, 200, { topics: research.list(), asks: research.pendingAsks() });
         if (p === '/api/research' && method === 'POST') return send(res, 201, await research.create(await readJson(req, 16 * 1024)));
         if (p === '/api/research-settings' && method === 'GET') return send(res, 200, { ...research.settings(), runner: research.runner() });

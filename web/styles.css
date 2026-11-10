@@ -788,3 +788,20 @@ a.btn { text-decoration: none; color: inherit; }
 .btn.danger-btn { color: var(--flare); border-color: rgba(244,106,92,.45); background: linear-gradient(180deg, rgba(244,106,92,.14), rgba(244,106,92,.06)); }
 .btn.danger-btn svg.i { color: var(--flare); }
 .btn.danger-btn:hover:not(:disabled) { border-color: rgba(244,106,92,.8); background: linear-gradient(180deg, rgba(244,106,92,.22), rgba(244,106,92,.1)); }
+/* ---------- apps ---------- */
+#apps-body { display: flex; flex-direction: column; gap: 12px; }
+.app-card { background: var(--hull); border: 1px solid var(--rail); border-radius: 20px; padding: 16px; }
+.app-card.on { border-color: rgba(240,184,64,.35); }
+.app-top { display: flex; align-items: center; gap: 12px; }
+.app-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; } .app-name b { font-size: 17px; letter-spacing: -.01em; }
+.app-state { font-size: 12.5px; color: var(--dim); } .app-state.ok { color: var(--kelp); } .app-state.busy { color: var(--brass); }
+.app-blurb { margin: 12px 0 0; font-size: 14.5px; color: var(--mist); line-height: 1.5; }
+.app-what { margin-top: 12px; } .app-what > summary { cursor: pointer; font-size: 13.5px; color: var(--mist); }
+.app-what ul { margin: 8px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--foam); line-height: 1.6; }
+.app-progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13.5px; color: var(--mist); }
+.app-log { margin: 10px 0 0; max-height: 220px; overflow: auto; font: 11.5px/1.5 var(--mono); background: var(--sea); border: 1px solid var(--rail); border-radius: 12px; padding: 10px 12px; white-space: pre-wrap; color: var(--mist); }
+.app-fail { margin: 12px 0 0; font-size: 13.5px; color: var(--flare); }
+.app-foot { margin-top: 12px; display: flex; justify-content: flex-end; }
+.link { background: none; border: 0; padding: 4px 0; color: var(--mist); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.link:hover { color: var(--foam); }
+.app-more { text-align: center; }

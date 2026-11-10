@@ -581,6 +581,13 @@ phone's Update button. Mechanism:
   control Lambda's URL and key from that device's storage (set in More → "Start the box when it is off") and offers
   Start, then reloads into the app once it answers. Nothing else is cached. CSP `connect-src` allows the Function URL
   host in the box's region. The control Lambda needs its CORS setting (infra) for the browser to call it.
+- **2.4.0** — an Apps tab replaces the Research tab. Apps are optional parts with their own tools, added on request:
+  `server/lib/addons.js` (catalog, `state/apps.json`, install log in `state/apps/<id>.log`), `GET /api/addons`,
+  `POST /api/addons/:id/add|remove`, `GET /api/addons/:id/log`. Research is the first: adding it runs `research setup`
+  (apt + pip) in the background; removing hides it and keeps its topics and packages. `/api/research*` answers 409
+  until it is added. A box that already has the research tools or a topic counts as added (recorded on first look), so
+  nothing changes for it. `install.sh` no longer creates `/Research`. The Docker app catalog (`/api/docker/apps`) is
+  unchanged.
 
 ## Release checklist
 
