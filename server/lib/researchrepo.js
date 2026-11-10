@@ -96,3 +96,34 @@ export async function revert(slug) {
     record('activity', 'research-revert', { actor: 'phone', what: `${slug}: back to ${st.last.id} (${st.changed.length} file${st.changed.length === 1 ? '' : 's'} dropped)`, cwd: dir });
     return { ok: true, last: st.last, dropped: st.changed };
 }
+
+// What changed in the paper: since the last version (no id), or in one saved version (its id).
+function parseDiff(text) {
+    const files = []; let f = null;
+    for (const line of text.split('\n')) {
+        if (line.startsWith('diff --git ')) { f = { path: line.replace(/^diff --git a\/.* b\//, ''), added: 0, removed: 0, lines: [], binary: false }; files.push(f); continue; }
+        if (!f) continue;
+        if (line.startsWith('Binary files')) { f.binary = true; continue; }
+        if (/^(index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity|rename )/.test(line)) { if (line.startsWith('new file')) f.isNew = true; if (line.startsWith('deleted file')) f.deleted = true; continue; }
+        if (line.startsWith('@@')) { const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)/); f.lines.push({ t: 'h', a: Number(m?.[1] || 0), b: Number(m?.[2] || 0) }); continue; }
+        if (line.startsWith('+')) { f.added++; f.lines.push({ t: '+', s: line.slice(1) }); }
+        else if (line.startsWith('-')) { f.removed++; f.lines.push({ t: '-', s: line.slice(1) }); }
+        else if (line.startsWith(' ')) f.lines.push({ t: ' ', s: line.slice(1) });
+    }
+    for (const x of files) if (x.lines.length > 1500) { x.lines = x.lines.slice(0, 1500); x.cut = true; }
+    return files.slice(0, 60);
+}
+export async function diff(slug, id = '') {
+    const dir = await ensureRepos(slug); const paper = path.join(dir, 'paper'); const base = ['-c', 'core.quotepath=off'];
+    if (id) {
+        if (!/^[a-f0-9]{4,40}$/.test(id)) throw httpError(400, 'Bad version id.');
+        const out = await git(paper, [...base, 'show', '--no-color', '-U2', '--format=%h%x09%ct%x09%s', id]).catch(() => { throw httpError(404, 'No such version.'); });
+        const nl = out.indexOf('\n'); const [h, t, ...m] = out.slice(0, nl).split('\t');
+        return { of: { id: h, at: Number(t) * 1000, message: m.join('\t') }, files: parseDiff(out.slice(nl + 1)) };
+    }
+    let hasHead = true; try { await git(paper, ['rev-parse', '--verify', '-q', 'HEAD']); } catch { hasHead = false; }
+    // New files show up too: tell git about them without staging their content.
+    await git(paper, ['add', '-N', '.']).catch(() => {});
+    const out = hasHead ? await git(paper, [...base, 'diff', '--no-color', '-U2', 'HEAD', '--', '.']) : '';
+    return { of: null, files: parseDiff(out) };
+}

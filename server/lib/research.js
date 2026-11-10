@@ -118,7 +118,22 @@ export function sourceView(slug, id, { from = 0, max = 12000 } = {}) {
     const meta = T.sourceMeta(dir, id); const sd = path.join(dir, 'sources', id);
     let text = ''; try { text = fs.readFileSync(path.join(sd, 'text.md'), 'utf8'); } catch { /* none */ }
     const tr = T.readJson(path.join(sd, 'transcript.json'), null);
-    return { meta: { ...meta, key: T.bibKey(meta) }, text: text.slice(Number(from), Number(from) + max), chars: text.length, transcript: tr ? T.windows(tr, 20) : null, frames: T.readJson(path.join(sd, 'ocr.json'), null) };
+    return { meta: { ...meta, key: T.bibKey(meta) }, text: text.slice(Number(from), Number(from) + max), chars: text.length, transcript: tr ? T.windows(tr, 20) : null, frames: T.readJson(path.join(sd, 'ocr.json'), null), claims: claimsFor(dir, id, text) };
+}
+// What this source was cited for (notes/claims.md), and where in it: the page the citation named, or, when it named
+// none, the page its quoted words are found on. This is what tells a reader where to look.
+function claimsFor(dir, id, text) {
+    let lines = []; try { lines = fs.readFileSync(path.join(dir, 'notes', 'claims.md'), 'utf8').split('\n'); } catch { return []; }
+    const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const pages = text.includes('<<page 1>>') ? text.split(/<<page \d+>>\n?/).slice(1).map(norm) : null;
+    const out = [];
+    for (const l of lines) {
+        const m = l.match(/^- (.*?) — \[(s\d{2,4})([^\]]*)\](?: "(.*)")?\s*$/); if (!m || m[2] !== id) continue;
+        const where = m[3].trim(); const quote = (m[4] || '').trim(); let page = Number(where.match(/p\.?\s*(\d+)/)?.[1] || 0) || null; let found = false;
+        if (!page && pages && quote) { const q = norm(quote).slice(0, 80); const i = q.length > 12 ? pages.findIndex(p => p.includes(q)) : -1; if (i >= 0) { page = i + 1; found = true; } }
+        out.push({ claim: m[1].slice(0, 300), where, quote: quote.slice(0, 240), page, found });
+    }
+    return out.slice(-30);
 }
 export function frameFile(slug, id, name) {
     const dir = topicPath(slug); if (!T.validId(id) || !/^f\d{4}\.jpg$/.test(String(name))) throw httpError(400, 'Bad frame.');

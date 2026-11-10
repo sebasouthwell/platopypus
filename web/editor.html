@@ -10,9 +10,11 @@
 </head>
 <body>
 <header id="bar">
+  <button id="railtoggle" class="btn ico" title="Hide or show files and references" aria-label="Hide or show files and references" aria-pressed="true">&#9776;</button>
   <a class="back" href="/" id="back"><img src="/mascot.svg" alt="" width="26" height="26">Research</a>
   <h1 id="title">Paper</h1>
   <span id="state" class="muted"></span>
+  <span class="zoom" title="Size of the text you are writing"><button id="tz-out" aria-label="Smaller text">A&minus;</button><output id="tz-val">100%</output><button id="tz-in" aria-label="Larger text">A+</button></span>
   <label class="chk">Language <select id="lang" aria-label="Language of this paper"></select></label>
   <label class="chk"><input type="checkbox" id="autobuild"> Build on save</label>
   <button id="version" class="btn" title="Keep a version in this topic's local history">Save version</button>
@@ -26,11 +28,11 @@
 </nav>
 <main id="grid" data-view="edit">
   <aside id="rail">
-    <div class="h">Files <button id="newsec" class="mini" title="New section">+ section</button></div>
+    <div class="h"><button class="fold" data-fold="files" aria-expanded="true">Files</button> <button id="newsec" class="mini" title="New section">+ section</button></div>
     <ul id="files"></ul>
-    <div class="h">References <button id="addsrc" class="mini" title="Add a web page, PDF link or video as a source">+ source</button><button id="addpdf" class="mini" title="Upload a PDF from this device">+ PDF</button><input id="pdffile" type="file" accept="application/pdf,.pdf" multiple hidden></div>
-    <input id="refq" type="search" placeholder="Search references" autocomplete="off">
-    <ul id="refs"></ul>
+    <div class="h"><button class="fold" data-fold="refs" aria-expanded="true">References</button> <button id="addsrc" class="mini" title="Add a web page, PDF link or video as a source">+ source</button><button id="addpdf" class="mini" title="Upload a PDF from this device">+ PDF</button><input id="pdffile" type="file" accept="application/pdf,.pdf" multiple hidden></div>
+    <div id="refs-wrap"><input id="refq" type="search" placeholder="Search references" autocomplete="off">
+    <ul id="refs"></ul></div>
   </aside>
   <section id="ed">
     <div id="wrap"><div id="gutter" aria-hidden="true"></div><textarea id="code" spellcheck="true" lang="en-GB" autocapitalize="off" autocomplete="off"></textarea></div>
@@ -38,10 +40,11 @@
     <div id="problems"></div>
   </section>
   <section id="side">
-    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Source + preview</button><button data-pane="spelling">Spelling</button><button data-pane="agent">Agent</button></div>
+    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Source + preview</button><button data-pane="spelling">Spelling</button><button data-pane="changes">Changes</button><button data-pane="agent">Agent</button><span class="zoom right" title="Size of the preview and the source"><button id="vz-out" aria-label="Zoom out">&minus;</button><button id="vz-val" title="Back to 100%">100%</button><button id="vz-in" aria-label="Zoom in">+</button></span></div>
     <div id="preview"></div>
     <div id="source" hidden></div>
     <div id="spelling" hidden></div>
+    <div id="changes" hidden></div>
     <div id="agent" hidden></div>
   </section>
 </main>

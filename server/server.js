@@ -676,6 +676,7 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'sources' && method === 'POST') { const b = await readJson(req, 8192); return send(res, 201, await editor.addSource(slug, b.url, b.note)); }
             if (rest === 'upload' && method === 'POST') return send(res, 201, await repo.upload(slug, req, url.searchParams.get('name') || ''));
             if (rest === 'commit' && method === 'POST') return send(res, 200, await repo.commit(slug, (await readJson(req, 4096).catch(() => ({}))).message));
+            if (rest === 'diff' && method === 'GET') return send(res, 200, await repo.diff(slug, url.searchParams.get('version') || ''));
             if (rest === 'versions' && method === 'GET') return send(res, 200, await repo.state(slug));
             if (rest === 'revert' && method === 'POST') return send(res, 200, await repo.revert(slug));
             if (rest === 'edits' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await qa.edit(slug, b.text, { agent: b.agent, file: b.file, selection: b.selection })); }

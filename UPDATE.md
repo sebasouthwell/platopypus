@@ -533,6 +533,11 @@ phone's Update button. Mechanism:
   go with it), with a saved version recommended first. New routes `GET /api/research/:slug/versions` (uncommitted
   files, last version), `POST …/revert` (paper back to the last version), `POST …/edits` (one agent run; one at a time).
   Edit requests are stored with the topic's questions (`kind: "edit"`). No state change outside a topic.
+- **2.2.2** — paper editor: a Changes pane (`GET /api/research/:slug/diff[?version=<id>]`: the paper against its last
+  version, or what one saved version changed; shown after an agent run, with the changed words marked); PDF sources
+  open as one scroll of all pages, at the cited page, and a citation without a page says what the source was cited
+  for (`claims` in the source view, from `notes/claims.md`, with the page its quote was found on); text size and
+  preview/source zoom; the files and references panel can be hidden. No state change.
 
 ## Release checklist
 
