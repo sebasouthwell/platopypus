@@ -60,7 +60,7 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
       - name: Build the box image (install.sh on Ubuntu 24.04)
-        run: docker build -t porthole:ci .
+        run: docker build --network=host -t porthole:ci .   # host network: the runner's build network has failed to resolve the package servers
       - name: Start a throwaway PlatOpypus
         run: |
           docker run -d --name porthole-ci --init --cap-add NET_ADMIN -p 127.0.0.1:7332:7331 \
@@ -115,7 +115,7 @@ jobs:
           git branch -f ci-upgrade HEAD
       - name: Build the previous stable image
         if: steps.prev.outputs.none != '1'
-        run: docker build -t porthole:prev /tmp/prev
+        run: docker build --network=host -t porthole:prev /tmp/prev
       - name: Start the previous stable release
         if: steps.prev.outputs.none != '1'
         run: |

@@ -47,7 +47,7 @@
     async function openFile(p) {
         if (S.dirty) await save();
         const r = await api(`/api/research/${enc}/file?path=${encodeURIComponent(p)}`);
-        S.cur = p; S.mtime = r.mtime; S.dirty = false; S.conflict = false; $('#code').value = r.text; gutter(); state(); renderFiles(); cites(); view('edit');
+        S.cur = p; S.mtime = r.mtime; S.dirty = false; S.conflict = false; $('#code').value = r.text; paint(); gutter(); state(); renderFiles(); cites(); view('edit');
     }
     function gutter() { const n = $('#code').value.split('\n').length; $('#gutter').textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n'); $('#gutter').scrollTop = $('#code').scrollTop; }
     function state(extra) {
@@ -92,12 +92,39 @@
     });
     addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+    // ----- colour for LaTeX and BibTeX -----
+    // The text box itself stays a plain text box (so typing, selection, spelling and undo behave as usual). Its letters
+    // are transparent, and the same text, coloured, sits exactly underneath.
+    const TEX = /(%[^\n]*)|(\\(?:begin|end)\{[^}\n]*\})|(\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]\n]*\])*\{[^}\n]*\})|(\\(?:part|chapter|section|subsection|subsubsection|paragraph|title)\*?\{[^}\n]*\})|(\\(?:[a-zA-Z@]+\*?|.))|(\$\$?[^$\n]*\$\$?)|([{}\[\]])/g;
+    const BIB = /(%[^\n]*)|(@[a-zA-Z]+)(\s*\{\s*)([^,\s}]*)|(^[ \t]*[a-zA-Z_]+)(?=\s*=)|([{}])/gm;
+    function paint() {
+        const text = code.value, bib = /\.bib$/.test(S.cur || ''); let out = '', last = 0;
+        const put = (cls, s) => { out += `<span class="${cls}">${esc(s)}</span>`; };
+        if (text.length > 400000) { $('#hl').textContent = text + '\n '; return; }      // very large file: plain, still aligned
+        for (const m of text.matchAll(bib ? BIB : TEX)) {
+            out += esc(text.slice(last, m.index)); last = m.index + m[0].length;
+            if (bib) {
+                if (m[1]) put('t-com', m[1]); else if (m[2]) { put('t-env', m[2]); put('t-br', m[3]); put('t-cite', m[4]); } else if (m[5]) put('t-cmd', m[5]); else put('t-br', m[6]);
+            } else if (m[1]) put('t-com', m[1]);
+            else if (m[2]) put('t-env', m[2]);
+            else if (m[3]) { const i = m[3].lastIndexOf('{'); put('t-cmd', m[3].slice(0, i)); put('t-br', '{'); put('t-cite', m[3].slice(i + 1, -1)); put('t-br', '}'); }
+            else if (m[4]) { const i = m[4].indexOf('{'); put('t-cmd', m[4].slice(0, i)); put('t-br', '{'); put('t-head', m[4].slice(i + 1, -1)); put('t-br', '}'); }
+            else if (m[5]) put('t-cmd', m[5]);
+            else if (m[6]) put('t-math', m[6]);
+            else put('t-br', m[7]);
+        }
+        $('#hl').innerHTML = out + esc(text.slice(last)) + '\n ';
+        $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft;
+    }
+    code.addEventListener('input', paint);
+    code.addEventListener('scroll', () => { $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft; });
+
     // ----- size and layout: text size on the left, zoom on the right, a side panel you can put away -----
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const Z = { text: Number(localStorage.getItem('editor.textZoom')) || 1, view: Number(localStorage.getItem('editor.viewZoom')) || 1 };
     function applyZoom() {
         Z.text = clamp(Math.round(Z.text * 20) / 20, 0.7, 2.2); Z.view = clamp(Math.round(Z.view * 10) / 10, 0.4, 3);
-        code.style.fontSize = `${13 * Z.text}px`; $('#tz-val').textContent = `${Math.round(Z.text * 100)}%`;
+        $('#edbox').style.setProperty('--ts', `${13 * Z.text}px`); $('#tz-val').textContent = `${Math.round(Z.text * 100)}%`;
         $('#side').style.setProperty('--z', Z.view); $('#vz-val').textContent = `${Math.round(Z.view * 100)}%`;
         localStorage.setItem('editor.textZoom', Z.text); localStorage.setItem('editor.viewZoom', Z.view);
     }
@@ -329,6 +356,19 @@
             // which page is in view decides what "Cite this page" cites
             const io = new IntersectionObserver(es => { const vis = es.filter(x => x.isIntersecting).sort((x, y) => y.intersectionRatio - x.intersectionRatio)[0]; if (vis) { cur = Number(vis.target.dataset.p); label(); } }, { root: box, threshold: [0.2, 0.5, 0.8] });
             $$('.spg', box).forEach(f => io.observe(f)); label(); setTimeout(() => go(target), 60);
+            // Real text over each page image, so you can select and copy from the PDF. Each line is stretched to sit exactly
+            // on its printed line; it is laid out again when the page changes size (zoom, window).
+            const fit = fig => { const H = fig.clientHeight; for (const d of fig.querySelectorAll('.tl > span')) { d.style.fontSize = `${Math.max(4, Number(d.dataset.h) * H * 0.82)}px`; d.style.transform = ''; const nat = d.offsetWidth; const want = Number(d.dataset.w) * fig.clientWidth; if (nat > 0) d.style.transform = `scaleX(${want / nat})`; } };
+            const ro = new ResizeObserver(es => es.forEach(e => fit(e.target)));
+            const layer = async fig => {
+                if (fig.dataset.text) return; fig.dataset.text = '1';
+                let r; try { r = await api(`/api/research/${enc}/source/${sid}/lines/${fig.dataset.p}`); } catch { return; }
+                const tl = document.createElement('div'); tl.className = 'tl';
+                tl.innerHTML = r.lines.map(l => `<span data-w="${l.w}" data-h="${l.h}" style="left:${l.x * 100}%;top:${l.y * 100}%">${esc(l.s)} </span>`).join('');
+                fig.appendChild(tl); fit(fig); ro.observe(fig);
+            };
+            const tio = new IntersectionObserver(es => es.forEach(x => { if (x.isIntersecting) { const img = x.target.querySelector('img'); if (img.complete && img.naturalWidth) layer(x.target); else img.addEventListener('load', () => layer(x.target), { once: true }); } }), { root: box, rootMargin: '300px' });
+            $$('.spg', box).forEach(f => tio.observe(f));
             $$('[data-goto]', box).forEach(x => x.onclick = () => go(Number(x.dataset.goto)));
             $('#pcite', box).onclick = () => insert(`\\cite[p.~${cur}]{${key}}`);
             $('#ptxt', box).onclick = () => { const pre = $('#ptext', box); pre.hidden = !pre.hidden; if (!pre.hidden) { pre.textContent = v.text + (v.chars > v.text.length ? '\n\n[…]' : ''); } };

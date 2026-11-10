@@ -688,6 +688,7 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'template' && method === 'POST') return send(res, 201, await template.upload(slug, req, url.searchParams.get('name') || '', { adopt: url.searchParams.get('adopt') === '1' }));
             if (rest === 'template/remove' && method === 'POST') return send(res, 200, template.remove(slug));
             if (rest === 'note' && method === 'POST') return send(res, 201, research.addNote(slug, (await readJson(req, 8192)).text));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/lines\/(\d{1,4})$/)) && method === 'GET') return send(res, 200, await editor.sourceLines(slug, r2[1], r2[2]));
             if (rest === 'links' && method === 'GET') return send(res, 200, await editor.links(slug));
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/page\/(\d{1,4})$/)) && method === 'GET') return sendFile(await editor.sourcePage(slug, r2[1], r2[2]), 'image/png', `${r2[1]}-${r2[2]}.png`, { inline: true });
             if (rest === 'build' && method === 'POST') { const r = await research.build(slug); if (r.ok) await repo.commit(slug, `Build: ${r.pages} page${r.pages === 1 ? '' : 's'}`).catch(() => {}); return send(res, 200, r); }

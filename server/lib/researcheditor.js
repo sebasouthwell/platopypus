@@ -141,3 +141,22 @@ export async function spell(slug, text) {
     for (const w of out.split('\n').map(s => s.trim()).filter(Boolean)) { if (!skip.has(w.toLowerCase())) count.set(w, (count.get(w) || 0) + 1); }
     return { lang, words: [...count].map(([word, n]) => ({ word, n })).sort((a, b) => b.n - a.n || a.word.localeCompare(b.word)).slice(0, 400) };
 }
+
+// The words on a page of a source PDF and where each line sits (as fractions of the page), so the app can lay real,
+// selectable text over the page image. Made when first asked for, then kept beside the image.
+export async function sourceLines(slug, id, n) {
+    const dir = topicPath(slug); if (!T.validId(id)) throw httpError(400, 'Bad source id.');
+    const pdf = path.join(dir, 'sources', id, 'original.pdf'); if (!T.exists(pdf)) throw httpError(404, 'No PDF for this source.');
+    const p = Number(n); if (!Number.isInteger(p) || p < 1 || p > 2000) throw httpError(400, 'Bad page.');
+    const out = path.join(dir, 'sources', id, 'pages'); fs.mkdirSync(out, { recursive: true }); const cache = path.join(out, `p${p}.lines.json`);
+    const hit = T.readJson(cache, null); if (hit) return hit;
+    let html = ''; try { html = (await run('pdftotext', ['-bbox-layout', '-f', String(p), '-l', String(p), pdf, '-'], { maxBuffer: 32 * 1024 * 1024, timeout: 60_000 })).stdout; } catch { throw httpError(501, 'pdftotext is not installed.'); }
+    const w = Number(html.match(/<page width="([\d.]+)"/)?.[1] || 0), h = Number(html.match(/<page width="[\d.]+" height="([\d.]+)"/)?.[1] || 0);
+    const un = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
+    const lines = [];
+    if (w && h) for (const m of html.matchAll(/<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([\s\S]*?)<\/line>/g)) {
+        const text = [...m[5].matchAll(/<word[^>]*>([^<]*)<\/word>/g)].map(x => un(x[1])).join(' '); if (!text.trim()) continue;
+        lines.push({ x: +m[1] / w, y: +m[2] / h, w: (+m[3] - +m[1]) / w, h: (+m[4] - +m[2]) / h, s: text });
+    }
+    const res = { page: p, lines: lines.slice(0, 4000) }; T.writeJson(cache, res); return res;
+}

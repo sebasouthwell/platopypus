@@ -538,6 +538,9 @@ phone's Update button. Mechanism:
   open as one scroll of all pages, at the cited page, and a citation without a page says what the source was cited
   for (`claims` in the source view, from `notes/claims.md`, with the page its quote was found on); text size and
   preview/source zoom; the files and references panel can be hidden. No state change.
+- **2.2.3** — paper editor: LaTeX and BibTeX colouring (coloured text under a transparent text box; no new
+  dependency); selectable text over PDF source pages (`GET /api/research/:slug/source/:id/lines/:n`, cached beside the
+  page images). CI builds its images on the host network. No state change.
 
 ## Release checklist
 
