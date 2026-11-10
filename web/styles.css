@@ -827,3 +827,4 @@ a.btn { text-decoration: none; color: inherit; }
 .fd-text { width: 100%; font: 13.5px/1.5 var(--mono); resize: vertical; }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .run-st.running { animation: none; } }
+.cline-card { margin-top: 10px; } .cl-row { display: flex; gap: 8px; } .cl-row select { flex: 1; min-width: 0; }

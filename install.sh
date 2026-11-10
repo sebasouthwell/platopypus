@@ -78,6 +78,10 @@ if ! command -v codex >/dev/null 2>&1; then
     say "codex cli"
     npm install -g @openai/codex --no-audit --no-fund --loglevel=error || echo "codex install failed (retry on next run)"
 fi
+if ! command -v cline >/dev/null 2>&1; then   # the fourth agent; it runs on an Ollama server chosen in the app
+    say "cline cli"
+    npm install -g cline --no-audit --no-fund --loglevel=error || echo "cline install failed (retry on next run)"
+fi
 if ! sudo -u "$PORTHOLE_USER" -H bash -lc 'command -v agy' >/dev/null 2>&1; then
     say "antigravity cli"
     sudo -u "$PORTHOLE_USER" -H bash -lc 'curl -fsSL https://antigravity.google/cli/install.sh | bash' || echo "antigravity install failed (retry on next run)"
@@ -266,12 +270,14 @@ install_agent_md() {
 install_agent_md "$HOME_DIR/.claude" "$HOME_DIR/.claude/CLAUDE.md"   # Claude Code
 install_agent_md "$HOME_DIR/.codex"  "$HOME_DIR/.codex/AGENTS.md"    # Codex CLI
 install_agent_md "$HOME_DIR/.gemini" "$HOME_DIR/.gemini/GEMINI.md"   # Antigravity CLI (Gemini CLI lineage)
+install_agent_md "$HOME_DIR/.agents" "$HOME_DIR/.agents/AGENTS.md"   # Cline (global instructions)
 for d in "$HOME_DIR"/.agent-profiles/claude/*/; do [ -d "$d" ] && install_agent_md "$d" "${d}CLAUDE.md"; done   # Claude profiles
 if [ -n "${AGENT_HOME:-}" ]; then   # the same instructions for agents running as the agent user
     PORTHOLE_USER_SAVED="$PORTHOLE_USER"; PORTHOLE_USER="$AGENT_USER"
     install_agent_md "$AGENT_HOME/.claude" "$AGENT_HOME/.claude/CLAUDE.md"
     install_agent_md "$AGENT_HOME/.codex"  "$AGENT_HOME/.codex/AGENTS.md"
     install_agent_md "$AGENT_HOME/.gemini" "$AGENT_HOME/.gemini/GEMINI.md"
+    install_agent_md "$AGENT_HOME/.agents" "$AGENT_HOME/.agents/AGENTS.md"
     PORTHOLE_USER="$PORTHOLE_USER_SAVED"
     # the global pre-push hook and .pasted ignore apply to the agent user too
     # (the root copies under ~/.platopypus are unreadable to this user, and git silently skips an unreadable hooks path)

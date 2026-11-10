@@ -490,7 +490,7 @@ $('#wish-now').addEventListener('click', async () => {
     const au = await api('/api/agent-user').catch(() => ({ available: false }));
     const btn = $('#wish-now'); btn.disabled = true;
     try {
-        let agentKey = localStorage.getItem('porthole.agent') || 'claude'; if (once && !['claude', 'codex'].includes(agentKey)) agentKey = 'claude';
+        let agentKey = localStorage.getItem('porthole.agent') || 'claude'; if (once && !['claude', 'codex', 'cline'].includes(agentKey)) agentKey = 'claude';
         const note = once ? 'one-shot run in a scratch folder; it is destroyed when you finish, so answer fully in your final message' : 'temporary session in a scratch folder that is deleted when this shell ends';
         await api('/api/shells', { method: 'POST', body: { name, kind: 'agent', agent: agentKey, scratch: true, oneshot: once, runAs: au.available ? 'agent' : 'root', session: 'project', firstPrompt: `${text}\n\n(From PlatOpypus: ${note}. Just do it; keep anything worth keeping out of this folder.)` } });
         $('#wish-text').value = ''; openTerminal(name, 'Home');
@@ -498,7 +498,7 @@ $('#wish-now').addEventListener('click', async () => {
     btn.disabled = false;
 });
 
-const AGENT_TITLES = { claude: 'Claude Code', codex: 'Codex CLI', antigravity: 'Antigravity CLI' };
+const AGENT_TITLES = { claude: 'Claude Code', codex: 'Codex CLI', antigravity: 'Antigravity CLI', cline: 'Cline' };
 const agentTitle = k => AGENT_TITLES[k] || k || 'agent';
 let agentsCache = null;
 async function getAgents() { if (!agentsCache) agentsCache = await api('/api/agents'); return agentsCache; }
@@ -2865,6 +2865,7 @@ async function loadAgents() {
           ${a.profiles ? a.profiles.map(p => `<div class="row"><span class="ico ${p.signedIn ? 'kelp' : ''}">${icon('user')}</span><div class="main"><div class="title">${esc(p.name)}<span class="tag dim">profile</span></div><div class="sub">${p.signedIn ? 'signed in' : 'not signed in'} · <span class="mono">${esc(shortPath(p.dir))}</span></div></div>${p.name !== 'default' ? `<button class="more" data-prof="${esc(p.name)}" aria-label="Profile actions">${icon('more_h')}</button>` : ''}</div>`).join('') + `<button class="row plain" data-new-profile><span class="ico">${icon('plus')}</span><div class="main"><div class="title" style="color:var(--brass)">New profile</div><div class="sub">Another account or organisation, or separate usage limits</div></div></button>` : ''}
         </div>`).join('');
     const body = $('#agents-body');
+    clineCard(body).catch(() => {});
     $('[data-move-logins]', body)?.addEventListener('click', async e => {
         if (!(await confirmDialog({ title: 'Move AI logins to the agent user?', text: 'Claude (with every profile), Codex and Antigravity logins move from root to the agent user, so new agent shells run without root and keep the same accounts. A backup is made first; root agent shells must be ended. Undo is on this page.', action: 'Move logins', danger: false }))) return;
         e.target.disabled = true;
@@ -2899,6 +2900,21 @@ async function loadAgents() {
     });
 }
 
+// Cline's Ollama server: the address, the model (picked from what the server has), and an optional key.
+async function clineCard(body) {
+    const sec = [...body.querySelectorAll('h2.section')].find(h => h.textContent.startsWith('Cline')); if (!sec) return;
+    const s = await api('/api/agents/cline');
+    const box = document.createElement('div'); box.className = 'card cline-card'; sec.nextElementSibling.after(box);
+    box.innerHTML = `<div class="tpl-h"><b>Ollama server</b><span>${s.ready ? `${esc(s.endpoint)} · ${esc(s.model)}` : 'not set yet'}</span></div>
+        <div class="field"><label for="cl-ep">Server address</label><input id="cl-ep" type="url" inputmode="url" spellcheck="false" autocomplete="off" placeholder="http://10.0.0.20:11434" value="${esc(s.endpoint)}"></div>
+        <div class="field"><label for="cl-model">Model</label><div class="cl-row"><select id="cl-model">${s.model ? `<option>${esc(s.model)}</option>` : '<option value="">Load the list first</option>'}</select><button class="btn" data-cl-load>${icon('refresh')}Load models</button></div></div>
+        <div class="field"><label for="cl-key">Key (optional)</label><input id="cl-key" type="password" autocomplete="off" placeholder="${s.hasKey ? 'saved (enter a new one to change it)' : 'only if your server sits behind a proxy that asks for one'}"></div>
+        <p class="note" id="cl-note">The box must be able to reach this address (for a server at home, use its Tailscale address).</p>
+        <div class="r-actions"><button class="btn pri" data-cl-save>${icon('check')}Save</button></div>`;
+    const load = async () => { const n = $('#cl-note', box); n.textContent = 'Asking the server…'; try { const r = await api(`/api/agents/cline/models?endpoint=${encodeURIComponent($('#cl-ep', box).value.trim())}`); const sel = $('#cl-model', box); const cur = sel.value || s.model; sel.innerHTML = r.models.length ? r.models.map(m => `<option ${m.name === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('') : '<option value="">The server has no models yet (ollama pull …)</option>'; n.textContent = `${r.models.length} model${r.models.length === 1 ? '' : 's'} on ${r.endpoint}.`; } catch (ex) { n.textContent = ex.message; } };
+    $('[data-cl-load]', box).onclick = load;
+    $('[data-cl-save]', box).onclick = async () => { const body2 = { endpoint: $('#cl-ep', box).value.trim(), model: $('#cl-model', box).value }; const k = $('#cl-key', box).value.trim(); if (k) body2.key = k; try { await api('/api/agents/cline', { method: 'PUT', body: body2 }); toast('Cline is set to use this server'); loadAgents(); } catch (ex) { toast(ex.message, true); } };
+}
 // ---------- claude page (legacy helpers) ----------
 
 async function loadClaude() {
@@ -3331,6 +3347,39 @@ async function loadEng() {
         $$('[data-run-id]', body).forEach(b => b.onclick = () => runDialog(slug, b.dataset.runId));
     } else if (labState.tab === 'findings') {
         body.innerHTML = `<p class="note">Agents add what they find here; you can edit it. Each finding should say where, how bad, which run shows it, and what to do.</p><textarea id="fd-text" rows="18" class="fd-text">${esc(e.findings)}</textarea><div class="r-actions"><button class="btn pri" data-fsave>${icon('check')}Save</button></div>`;
+        const review = document.createElement('details');
+        review.className = 'app-what';
+        review.innerHTML = `<summary>Review a local report</summary>
+            <p class="note">Open a UTF-8 report, log, or exported inventory up to 1 MiB. The file stays in this browser. Copy relevant excerpts into Findings to keep them.</p>
+            <label for="lab-report">Report file</label>
+            <input id="lab-report" type="file" accept=".txt,.log,.md,.csv,.tsv,.json,.jsonl,.ndjson,.xml,.html,.htm">
+            <p class="note" data-report-status role="status"></p>
+            <textarea class="fd-text" data-report-preview aria-label="Report preview" rows="14" readonly hidden></textarea>`;
+        body.append(review);
+        const input = $('#lab-report', review);
+        const status = $('[data-report-status]', review);
+        const preview = $('[data-report-preview]', review);
+        input.onchange = async () => {
+            const file = input.files[0];
+            preview.value = '';
+            preview.hidden = true;
+            status.textContent = '';
+            if (!file) return;
+            if (file.size > 1024 * 1024) {
+                status.textContent = 'Choose a report up to 1 MiB.';
+                return;
+            }
+            try {
+                const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+                if (input.files[0] !== file) return;
+                if (text.includes('\0')) throw new Error('Binary data');
+                preview.value = text;
+                preview.hidden = false;
+                status.textContent = file.name;
+            } catch {
+                if (input.files[0] === file) status.textContent = 'Could not read this file as UTF-8 text.';
+            }
+        };
         $('[data-fsave]', body).onclick = async () => { try { await api(`/api/lab/${enc}/findings`, { method: 'POST', body: { text: $('#fd-text', body).value } }); toast('Findings saved'); } catch (ex) { toast(ex.message, true); } };
     } else {
         const mine = (state.shells || []).filter(s => String(s.cwd || '').includes(`/Lab/${slug}`));
@@ -3358,7 +3407,7 @@ async function runDialog(slug, id) {
 // Which agent and model do research work: Ask answers, editor changes, citation checks, and new research sessions.
 async function researchAgentCard(box) {
     const s = await api('/api/research-settings');
-    const AG = [['claude', 'Claude Code', 'Anthropic', 'for example claude-opus-5-5, claude-sonnet-5-5'], ['codex', 'Codex CLI', 'OpenAI', 'for example gpt-5-codex'], ['antigravity', 'Antigravity', 'Google', 'set in Antigravity itself']];
+    const AG = [['claude', 'Claude Code', 'Anthropic', 'for example claude-opus-5-5, claude-sonnet-5-5'], ['codex', 'Codex CLI', 'OpenAI', 'for example gpt-5-codex'], ['antigravity', 'Antigravity', 'Google', 'set in Antigravity itself'], ['cline', 'Cline', 'Ollama', 'empty uses the model set for your Ollama server']];
     const draw = () => {
         box.innerHTML = `<div class="card r-agent"><div class="r-agent-h"><b>Research agent</b><span>${esc(AG.find(a => a[0] === s.agent)[1])}${s.agent !== 'antigravity' && s.models[s.agent] ? ` · ${esc(s.models[s.agent])}` : s.agent !== 'antigravity' ? ' · its default model' : ''}</span></div><div class="seg" role="radiogroup" aria-label="Research agent">${AG.map(([k, t, v]) => `<button role="radio" aria-checked="${s.agent === k}" data-ra="${k}" class="${s.agent === k ? 'on' : ''}"><b>${t}</b><span>${v}</span></button>`).join('')}</div>
             ${s.agent === 'antigravity' ? '<p class="note">Antigravity has no run-once mode, so questions, editor changes and citation checks use Claude Code. Sessions you start yourself use Antigravity.</p>' : `<div class="field"><label for="ra-model">Model (optional)</label><input id="ra-model" type="text" spellcheck="false" autocomplete="off" placeholder="${esc(AG.find(a => a[0] === s.agent)[3])}" value="${esc(s.models[s.agent] || '')}"><p class="note" style="margin-top:6px">Empty uses the agent's own default. The name goes to the agent's --model option as you type it.</p></div><div class="r-actions"><button class="btn" data-ra-save disabled>${icon('check')}Current model</button></div>`}

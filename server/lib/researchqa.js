@@ -17,7 +17,7 @@ import { topicPath, runner } from './research.js';
 const httpError = T.httpError;
 const qDir = dir => path.join(dir, '.platopypus', 'questions');
 const qFile = (dir, id) => path.join(qDir(dir), `${/^[a-f0-9]{10}$/.test(String(id)) ? id : 'x'}.json`);
-const AGENTS = ['claude', 'codex'];
+const AGENTS = ['claude', 'codex', 'cline'];
 
 export function list(slug) {
     const dir = topicPath(slug);

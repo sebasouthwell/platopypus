@@ -596,6 +596,13 @@ phone's Update button. Mechanism:
   known tool, every host argument in scope, no file paths, in its own folder, time-limited, three at a time, audited.
   New routes `/api/lab…` (needs the app), agent routes `/api/agent/lab/status|run|run/:id`, session type `lab`;
   Claude as a lab agent needs the user's confirmation (`ackClaude`, 428 otherwise). No migration.
+- **2.6.0** — Cline, the fourth agent (`npm install -g cline` in install.sh), running on an Ollama server you choose:
+  `server/lib/cline.js`, `state/cline.json` (address, model, optional key encrypted with the Vault key), routes
+  `GET/PUT /api/agents/cline`, `GET /api/agents/cline/models` (Ollama `/api/tags`, else `/v1/models`). Before a Cline
+  shell starts, its provider settings are written to `<home>/.cline/data/settings/providers.json` (0600, for the user who
+  runs it) as Cline's `openai-compatible` provider at `<address>/v1`. Normal sessions run `cline -i --auto-approve false`;
+  auto-approve sessions leave Cline's default; one-shot runs `cline --auto-approve true "<prompt>"`. Cline is offered
+  for research runs and in the Research agent setting; global instructions also go to `~/.agents/AGENTS.md`.
 
 ## Release checklist
 

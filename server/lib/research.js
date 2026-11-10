@@ -223,7 +223,7 @@ export function addNote(slug, text) {
 // One setting for the box: used by Ask, the editor's agent and citation check, and as the default for a research
 // session you start by hand. Unattended runs need an agent with a run-once mode (Claude Code or Codex).
 const settingsFile = () => path.join(config.state, 'research-settings.json');
-const AGENTS = ['claude', 'codex', 'antigravity'], MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
+const AGENTS = ['claude', 'codex', 'antigravity', 'cline'], MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
 export function settings() {
     const s = T.readJson(settingsFile(), {}) || {}; const models = {};
     for (const a of AGENTS) models[a] = MODEL_OK.test(String(s.models?.[a] || '')) ? s.models[a] : '';
@@ -231,7 +231,7 @@ export function settings() {
 }
 export function setSettings(body = {}) {
     const cur = settings();
-    if (body.agent !== undefined) { if (!AGENTS.includes(body.agent)) throw httpError(400, 'Agent: claude, codex or antigravity.'); cur.agent = body.agent; }
+    if (body.agent !== undefined) { if (!AGENTS.includes(body.agent)) throw httpError(400, 'Agent: claude, codex, antigravity or cline.'); cur.agent = body.agent; }
     if (body.models && typeof body.models === 'object') for (const a of AGENTS) if (body.models[a] !== undefined) {
         const m = String(body.models[a] || '').trim(); if (m && !MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes), or empty for the agent\'s own default.');
         cur.models[a] = m;
@@ -240,7 +240,7 @@ export function setSettings(body = {}) {
     return cur;
 }
 // What an unattended run uses: the chosen agent if it can run once, otherwise Claude Code.
-export function runner() { const s = settings(); const agent = ['claude', 'codex'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }
+export function runner() { const s = settings(); const agent = ['claude', 'codex', 'cline'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }
 
 // ---------- deleting ----------
 // A topic goes to the box's trash (state/trash), whole, with its history: nothing is lost until the trash is emptied.

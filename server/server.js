@@ -41,6 +41,7 @@ import * as activity from './lib/activity.js';
 import * as research from './lib/research.js';
 import * as addons from './lib/addons.js';
 import * as lab from './lib/lab.js';
+import * as clineLib from './lib/cline.js';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
 import * as qa from './lib/researchqa.js';
@@ -591,6 +592,9 @@ const server = http.createServer(async (req, res) => {
 
         // AI agents + Claude profiles
         if (p === '/api/agents' && method === 'GET') return send(res, 200, await agents.status());
+        if (p === '/api/agents/cline' && method === 'GET') return send(res, 200, clineLib.settings());
+        if (p === '/api/agents/cline' && method === 'PUT') return send(res, 200, clineLib.configure(await readJson(req, 8192)));
+        if (p === '/api/agents/cline/models' && method === 'GET') return send(res, 200, await clineLib.models(url.searchParams.get('endpoint') || ''));
         if (p === '/api/agents/claude/profiles' && method === 'GET') return send(res, 200, agents.listProfiles());
         if (p === '/api/agents/claude/profiles' && method === 'POST') return send(res, 201, agents.createProfile((await readJson(req)).name));
         if ((m = p.match(/^\/api\/agents\/claude\/profiles\/([A-Za-z0-9_-]+)$/)) && method === 'DELETE') { agents.removeProfile(m[1]); return send(res, 200, { ok: true }); }

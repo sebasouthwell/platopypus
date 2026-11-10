@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import * as agentUser from './agentuser.js';
 import * as research from './research.js';
 import * as labLib from './lab.js';
+import * as clineLib from './cline.js';
 import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
@@ -65,7 +66,7 @@ export const scratchRoot = path.join(config.home, 'scratch');
 
 export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false, model = '', ackClaude = false }) {
     if (oneshot) {
-        if (kind !== 'agent' || !['claude', 'codex'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code or Codex.');
+        if (kind !== 'agent' || !['claude', 'codex', 'cline'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code, Codex or Cline.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
         // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
         if (session !== 'research') scratch = true;
@@ -104,13 +105,13 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         agentInfo = { agent, yolo: !!yolo, resume: !!resume, profile: profile || 'default' };
         // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
         // Antigravity gets it typed in once it is up.
-        if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
+        if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex' || agent === 'cline') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
         if (oneshot) {
             // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
             const mf = agents.modelArgs(agent, model).join(' ');
-            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} "$PORTHOLE_FIRST_PROMPT"`;
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
             if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';
@@ -143,6 +144,8 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         }
     }
 
+    // Cline: write its Ollama provider settings for the user who runs it.
+    if (kind === 'agent' && agent === 'cline' && !login) { const au = runAs === 'agent' ? agentUser.info() : null; clineLib.prepare(au ? au.home : config.home, au ? { uid: au.uid, gid: au.gid } : null); }
     // Agent user: no root, its own API token, project folder made group-writable.
     let tokenHash = null, shellEnv = {};
     if (runAs === 'agent') {

@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { config } from './config.js';
 import { log } from './log.js';
 import * as agentUser from './agentuser.js';
+import * as cline from './cline.js';
 
 const run = promisify(execFile);
 
@@ -41,6 +42,14 @@ export const catalog = {
         resumeArgs: ['--continue'], loginArgs: [], profiles: false,
         quick: ['yes', 'no', 'continue', 'show the diff', 'run the tests', 'commit this', '/compress', '/clear'],
         blurb: 'Google\'s terminal agent (successor to Gemini CLI, June 2026).',
+    },
+    cline: {
+        key: 'cline', title: 'Cline', vendor: 'Ollama (your server)', bin: 'cline',
+        // Cline approves every tool by default: a normal session turns that off, an auto-approve one leaves it on.
+        baseArgs: ['-i'], safeArgs: ['--auto-approve', 'false'], yoloFlag: null, yoloEnv: {},
+        resumeArgs: [], loginArgs: [], profiles: false, noResume: true,
+        quick: ['yes', 'no', 'continue', 'show the diff', 'run the tests', 'commit this'],
+        blurb: 'Open-source coding agent, running on an Ollama server you choose.',
     },
 };
 
@@ -111,6 +120,7 @@ export async function status() {
         if (a.key === 'claude') signedIn = claudeSignedIn(path.join(home(), '.claude'));
         if (a.key === 'codex') signedIn = fs.existsSync(path.join(home(), '.codex', 'auth.json'));
         if (a.key === 'antigravity') signedIn = ['.antigravity', '.gemini'].some(d => fs.existsSync(path.join(home(), d, 'oauth_creds.json'))) || !!process.env.GEMINI_API_KEY;
+        if (a.key === 'cline') signedIn = cline.settings().ready;
         out.push({ key: a.key, title: a.title, vendor: a.vendor, blurb: a.blurb, installed: !!bin, version: ver, signedIn, profiles: a.profiles ? listProfiles() : null, yoloFlag: a.yoloFlag, quick: a.quick });
     }
     statusCache = { at: Date.now(), value: out };
@@ -124,6 +134,7 @@ function refreshSignIn(list) {
         if (a.key === 'claude') signedIn = claudeSignedIn(path.join(home(), '.claude'));
         if (a.key === 'codex') signedIn = fs.existsSync(path.join(home(), '.codex', 'auth.json'));
         if (a.key === 'antigravity') signedIn = ['.antigravity', '.gemini'].some(d => fs.existsSync(path.join(home(), d, 'oauth_creds.json'))) || !!process.env.GEMINI_API_KEY;
+        if (a.key === 'cline') signedIn = cline.settings().ready;
         return { ...a, signedIn, profiles: a.profiles ? listProfiles() : null };
     });
 }
@@ -134,6 +145,7 @@ export const MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
 export function modelArgs(agent, model) {
     const m = String(model || '').trim(); if (!m) return [];
     if (!MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes).');
+    if (agent === 'cline') return ['-m', m];
     return agent === 'claude' || agent === 'codex' ? ['--model', m] : [];     // Antigravity picks its model in its own settings
 }
 export function command({ agent = 'claude', yolo = false, resume = false, profile = 'default', login = false, model = '' }) {
@@ -143,8 +155,10 @@ export function command({ agent = 'claude', yolo = false, resume = false, profil
     if (!login) args.push(...modelArgs(agent, model));
     if (login && a.loginArgs.length) args.push(...a.loginArgs);
     else {
+        args.unshift(...(a.baseArgs || []));
         if (resume) args.push(...a.resumeArgs);
-        if (yolo) args.push(a.yoloFlag);
+        if (yolo && a.yoloFlag) args.push(a.yoloFlag);
+        if (!yolo && a.safeArgs) args.push(...a.safeArgs);
     }
     const env = {};
     if (yolo) Object.assign(env, a.yoloEnv);
