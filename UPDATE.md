@@ -557,6 +557,10 @@ phone's Update button. Mechanism:
   red and grey only for verdicts; a separate muted set for LaTeX, with citation keys in rose throughout), quieter
   citation marks, the citation report as a status bar plus a list with Source / Edit on each row, tabs on one row
   ("Source + preview" is now "Split"). No server or state change.
+- **2.2.7** — editor is calmer: the header keeps the title, save state, a "more" menu (text size, language, build
+  on save, save now, save a version) and Build; Spelling and Citations share one Checks tab; Split is an icon; references
+  are one line with actions on hover; under the text a single status line with the build result as a chip. No server
+  or state change.
 
 ## Release checklist
 

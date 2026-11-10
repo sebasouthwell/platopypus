@@ -14,11 +14,15 @@
   <a class="back" href="/" id="back"><img src="/mascot.svg" alt="" width="26" height="26">Research</a>
   <h1 id="title">Paper</h1>
   <span id="state" class="muted"></span>
-  <span class="zoom" title="Size of the text you are writing"><button id="tz-out" aria-label="Smaller text">A&minus;</button><output id="tz-val">100%</output><button id="tz-in" aria-label="Larger text">A+</button></span>
-  <label class="chk">Language <select id="lang" aria-label="Language of this paper"></select></label>
-  <label class="chk"><input type="checkbox" id="autobuild"> Build on save</label>
-  <button id="version" class="btn" title="Keep a version in this topic's local history">Save version</button>
-  <button id="save" class="btn">Save</button>
+  <div class="menuwrap"><button id="more" class="btn ico" aria-haspopup="true" aria-expanded="false" aria-label="More options" title="More options">&#8943;</button>
+    <div id="menu" role="menu" hidden>
+      <div class="mrow"><span>Text size</span><span class="zoom"><button id="tz-out" aria-label="Smaller text">A&minus;</button><output id="tz-val">100%</output><button id="tz-in" aria-label="Larger text">A+</button></span></div>
+      <div class="mrow"><span>Language</span><select id="lang" aria-label="Language of this paper"></select></div>
+      <label class="mrow"><span>Build every time it saves</span><input type="checkbox" id="autobuild"></label>
+      <hr>
+      <button id="save" class="mitem">Save now <kbd>Ctrl S</kbd></button>
+      <button id="version" class="mitem" title="Keep a version in this topic's local history">Save a version</button>
+    </div></div>
   <button id="build" class="btn pri">Build</button>
 </header>
 <nav id="views" role="tablist">
@@ -40,9 +44,10 @@
     <div id="problems"></div>
   </section>
   <section id="side">
-    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="both" id="tab-both" title="Source and preview side by side">Split</button><button data-pane="spelling">Spelling</button><button data-pane="cites">Citations</button><button data-pane="changes">Changes</button><button data-pane="agent">Agent</button><span class="zoom right" title="Size of the preview and the source"><button id="vz-out" aria-label="Zoom out">&minus;</button><button id="vz-val" title="Back to 100%">100%</button><button id="vz-in" aria-label="Zoom in">+</button></span></div>
+    <div id="tabs"><button data-pane="preview" class="on">Preview</button><button data-pane="source">Source</button><button data-pane="checks">Checks</button><button data-pane="changes">Changes</button><button data-pane="agent">Agent</button><button data-pane="both" id="tab-both" class="icon-tab" title="Source and preview side by side" aria-label="Source and preview side by side">&#9707;</button><span class="zoom right" title="Size of the preview and the source"><button id="vz-out" aria-label="Zoom out">&minus;</button><button id="vz-val" title="Back to 100%">100%</button><button id="vz-in" aria-label="Zoom in">+</button></span></div>
     <div id="preview"></div>
     <div id="source" hidden></div>
+    <div id="checkseg" hidden><button data-check="cites">Citations</button><button data-check="spelling">Spelling</button></div>
     <div id="spelling" hidden></div>
     <div id="citecheck" hidden></div>
     <div id="changes" hidden></div>

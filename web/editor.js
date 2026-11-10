@@ -24,11 +24,14 @@
     $$('#views button').forEach(b => b.onclick = () => view(b.dataset.view));
     // "both" keeps the source open beside the preview, so you can write against the original and see the result.
     function pane(p) {
+        if (p === 'checks') p = localStorage.getItem('editor.check') === 'spelling' ? 'spelling' : 'cites';
+        if (p === 'cites' || p === 'spelling') localStorage.setItem('editor.check', p);
+        $('#checkseg').hidden = !(p === 'cites' || p === 'spelling'); $$('#checkseg button').forEach(b => b.classList.toggle('on', b.dataset.check === p));
         S.pane = p; const both = p === 'both'; localStorage.setItem('editor.pane', both ? 'both' : 'preview');
         $('#preview').hidden = !(p === 'preview' || both); $('#source').hidden = !(p === 'source' || both); $('#spelling').hidden = p !== 'spelling'; $('#agent').hidden = p !== 'agent'; if (p === 'agent') drawAgent(); $('#changes').hidden = p !== 'changes'; if (p === 'changes') drawChanges(); $('#citecheck').hidden = p !== 'cites'; if (p === 'cites') drawCiteCheck();
         $('#side').classList.toggle('both', both); $('#grid').classList.toggle('wide-side', both);
         if (both && !$('#source').innerHTML.trim()) $('#source').innerHTML = '<div class="empty">Open a source from References, or click a citation, and it stays here while you write.</div>';
-        if (p === 'spelling') checkSpelling(); $$('#tabs button').forEach(b => { b.classList.toggle('on', b.dataset.pane === p); if (b.dataset.pane === p) b.classList.remove('ping'); });
+        if (p === 'spelling') checkSpelling(); const tabOf = x => (x === 'cites' || x === 'spelling' ? 'checks' : x); $$('#tabs button[data-pane]').forEach(b => { const on = b.dataset.pane === tabOf(p); b.classList.toggle('on', on); if (on) b.classList.remove('ping'); });
     }
     $$('#tabs button').forEach(b => b.onclick = () => pane(b.dataset.pane));
 
@@ -157,6 +160,14 @@
     code.addEventListener('input', paint);
     code.addEventListener('scroll', () => { $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft; $('#marks').scrollTop = code.scrollTop; });
 
+    // ----- the "more" menu: the settings you change rarely -----
+    const menu = $('#menu'), more = $('#more');
+    const setMenu = open => { menu.hidden = !open; more.setAttribute('aria-expanded', String(open)); };
+    more.onclick = e => { e.stopPropagation(); setMenu(menu.hidden); };
+    document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) setMenu(false); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); more.focus(); } });
+    $$('#checkseg button').forEach(b => b.onclick = () => pane(b.dataset.check));
+
     // ----- size and layout: text size on the left, zoom on the right, a side panel you can put away -----
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const Z = { text: Number(localStorage.getItem('editor.textZoom')) || 1, view: Number(localStorage.getItem('editor.viewZoom')) || 1 };
@@ -194,9 +205,11 @@
     function cites() {
         const list = citesAt(code.selectionStart); const box = $('#cites');
         const at = code.selectionStart; const mk = S.marksOn ? S.marks.find(m => at >= m.from && at <= m.to) : null;
-        const pos = `${mk ? `<span class="mk-info ${mk.cls}"><b>${esc(mk.label)}${mk.key ? ` · ${esc(mk.key)}` : ''}</b> ${esc(mk.note || '')}${mk.fix ? `<br><span class="fixlbl">Fix</span> ${esc(mk.fix)}` : ''}</span>` : ''}${S.cred ? `<button class="pill mk-toggle" aria-pressed="${S.marksOn}" title="Show the citation check on the text">Citation marks ${S.marksOn ? 'on' : 'off'}</button>` : ''}<span id="pos">Line ${code.value.slice(0, at).split('\n').length}</span>`;
-        const bindToggle = () => { const t = $('.mk-toggle', box); if (t) t.onclick = () => { S.marksOn = !S.marksOn; localStorage.setItem('editor.marks', S.marksOn ? '1' : '0'); paint(); cites(); }; };
-        if (!list.length) { box.innerHTML = (mk ? '' : '<span class="muted">Put the cursor in a \\cite{…} to see its source. Ctrl/Cmd-click a key to open it.</span>') + pos; bindToggle(); return; }
+        const pos = `${mk ? `<span class="mk-info ${mk.cls}"><b>${esc(mk.label)}${mk.key ? ` · ${esc(mk.key)}` : ''}</b> ${esc(mk.note || '')}${mk.fix ? `<br><span class="fixlbl">Fix</span> ${esc(mk.fix)}` : ''}</span>` : ''}<span class="stat">${S.build ? `<button class="bchip ${S.build.ok ? 'ok' : 'bad'}" title="${S.build.ok ? 'The last build worked' : 'Show what went wrong'}">${S.build.ok ? `Built · ${S.build.pages} page${S.build.pages === 1 ? '' : 's'}` : S.build.failed ? 'Build failed' : `${S.build.n} warning${S.build.n === 1 ? '' : 's'}`}</button>` : ''}${S.cred ? `<button class="mk-toggle" aria-pressed="${S.marksOn}" title="Show the citation check on the text">Marks ${S.marksOn ? 'on' : 'off'}</button>` : ''}<span id="pos">Ln ${code.value.slice(0, at).split('\n').length}</span></span>`;
+        const bindToggle = () => { const t = $('.mk-toggle', box); if (t) t.onclick = () => { S.marksOn = !S.marksOn; localStorage.setItem('editor.marks', S.marksOn ? '1' : '0'); paint(); cites(); };
+            const bc = $('.bchip', box); if (bc) bc.onclick = () => { S.showProblems = !S.showProblems; $('#problems').classList.toggle('on', S.showProblems && !!S.build?.n); };
+            const mi = $('.mk-info', box); if (mi) mi.onclick = () => mi.classList.toggle('open'); };
+        if (!list.length) { box.innerHTML = (mk ? '' : '<span class="hint">Cursor in a \\cite{…} shows its source</span>') + pos; bindToggle(); return; }
         box.innerHTML = list.map((c, i) => { const e = S.bib.get(c.key); return `<span class="chip ${e ? '' : 'bad'}"><b>${esc(c.key)}</b>${e ? `<span>${esc(e.title.slice(0, 46))}${c.where ? ` · ${esc(c.where)}` : ''}</span><button class="pill" data-open="${i}">Open source</button>` : '<span>not in refs.bib</span>'}</span>`; }).join('') + pos;
         $$('#cites [data-open]', box).forEach(b => b.onclick = () => openSource(list[+b.dataset.open].key, list[+b.dataset.open].where)); bindToggle();
     }
@@ -209,7 +222,7 @@
     function renderRefs() {
         const q = $('#refq').value.trim().toLowerCase(); const inBib = new Set(S.bib.keys());
         const rows = [...S.bib.values()].filter(e => !q || (e.key + ' ' + e.title + ' ' + e.author + ' ' + e.year).toLowerCase().includes(q));
-        let html = rows.map(e => `<li data-k="${esc(e.key)}"><span class="k">${esc(e.key)}</span><span class="kind">${e.source ? esc(e.source.kind) : 'no source file'}</span><span class="t">${esc(e.title)}</span><span class="a">${esc([e.author, e.year].filter(Boolean).join(', '))}</span><div class="acts"><button class="pill" data-cite="${esc(e.key)}">Insert cite</button><button class="pill" data-view="${esc(e.key)}">Open source</button></div></li>`).join('');
+        let html = rows.map(e => `<li data-k="${esc(e.key)}" title="${esc([e.title, [e.author, e.year].filter(Boolean).join(', ')].filter(Boolean).join(' — '))}"><div class="rl"><span class="k">${esc(e.key)}</span><span class="kind">${e.source ? esc(e.source.kind) : 'no file'}</span></div><span class="t">${esc(e.title)}</span><div class="acts"><button class="pill" data-cite="${esc(e.key)}">Cite</button><button class="pill" data-view="${esc(e.key)}">Open</button></div></li>`).join('');
         const loose = S.sources.filter(s => !inBib.has(s.key) && (!q || (s.title + s.key).toLowerCase().includes(q)));
         if (loose.length) html += `<li style="cursor:default"><span class="a">Sources not cited yet</span></li>` + loose.map(s => `<li><span class="k">${esc(s.id)}</span><span class="kind">${esc(s.kind)}</span><span class="t">${esc(s.title)}</span><div class="acts"><button class="pill" data-add="${esc(s.id)}">Cite and add to refs.bib</button></div></li>`).join('');
         $('#refs').innerHTML = html || '<li class="muted" style="cursor:default">No references yet. Add a source, or ask the agent.</li>';
@@ -278,7 +291,7 @@
     function notice(msg, paneName) {
         const t = $('#toast'); t.textContent = msg; t.className = 'on act'; clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 12000);
         t.onclick = () => { t.className = ''; pane(paneName); if (innerWidth <= 900) view('side'); };
-        const tab = $(`#tabs [data-pane="${paneName}"]`); if (tab && S.pane !== paneName) tab.classList.add('ping');
+        const tab = $(`#tabs [data-pane="${paneName === 'cites' || paneName === 'spelling' ? 'checks' : paneName}"]`); if (tab && S.pane !== paneName) tab.classList.add('ping');
         if (document.hidden) { document.title = `● ${document.title.replace(/^● /, '')}`; if (window.Notification && Notification.permission === 'granted') { try { new Notification('PlatOpypus', { body: msg, icon: '/icons/icon-192.png' }); } catch { /* not allowed here */ } } }
     }
     addEventListener('visibilitychange', () => { if (!document.hidden) document.title = document.title.replace(/^● /, ''); });
@@ -444,7 +457,7 @@
         S.detail = d; const b = d.build; let html = '';
         if (b) html += `<div class="build ${b.ok ? '' : 'bad'}">${b.ok ? `Built · ${b.pages} page${b.pages === 1 ? '' : 's'} · ${b.warnings} warning${b.warnings === 1 ? '' : 's'}` : `Build failed: ${esc((b.errors || []).join(' · ') || 'see paper/build/main.log')}`}</div>`;
         const pr = $('#problems'); const msgs = [...(b && !b.ok ? b.errors || [] : []), ...(b?.undefinedCites?.length ? [`Undefined citations: ${b.undefinedCites.join(', ')}`] : [])];
-        pr.textContent = msgs.join('\n'); pr.classList.toggle('on', msgs.length > 0);
+        pr.textContent = msgs.join('\n'); S.build = b ? { ok: !!b.ok && !msgs.length, failed: !b.ok, n: msgs.length, pages: b.pages } : null; pr.classList.toggle('on', msgs.length > 0 && !!S.showProblems); cites();
         if (!d.pagesAvailable) { box.innerHTML = html + '<div class="empty">Nothing built yet. Press Build.</div>'; return; }
         let links = { pages: [] }; try { links = await api(`/api/research/${enc}/links`); } catch { /* pages still show */ }
         html += Array.from({ length: d.pagesAvailable }, (_, i) => {
