@@ -30,7 +30,7 @@ async function call(p, method = 'GET', body) {
     const d = await r.json().catch(() => ({})); if (!r.ok) die(d.error || `HTTP ${r.status}`, r.status === 403 ? 3 : 1); return d;
 }
 
-const TOOLS = ['nmap', 'nikto', 'testssl.sh', 'testssl', 'sslscan', 'whatweb', 'dnsrecon', 'dnstwist', 'arp-scan', 'netdiscover', 'tshark', 'tcpdump'];
+const TOOLS = ['nmap', 'nikto', 'testssl.sh', 'testssl', 'sslscan', 'whatweb', 'dnsrecon', 'dnstwist', 'arp-scan', 'netdiscover', 'tshark', 'tcpdump', 'metasploit-framework', 'burpsuite', 'sqlmap', 'nuclei', 'ffuf', 'feroxbuster', 'netexec', 'impacket-scripts', 'bloodhound', 'certipy-ad', 'bettercap', 'aircrack-ng', 'hashcat', 'john'];
 try {
     switch (cmd) {
         case 'status': { engagement(); const s = await call('/api/agent/lab/status'); console.log(`${s.title}\nScope (${s.scope.length}):`); for (const t of s.scope) console.log(`  ${t.value.padEnd(32)} ${t.kind.padEnd(7)} ${t.status}`); console.log(`Recent runs:`); for (const r of s.runs.slice(0, 15)) console.log(`  ${r.id}  ${r.status.padEnd(8)} ${r.cmd.slice(0, 80)}${r.headline ? `\n          ${r.headline}` : ''}`); break; }
@@ -49,10 +49,15 @@ try {
             if (process.getuid && process.getuid() !== 0) die('Run as root (add Security Lab from the Apps tab).');
             const sh = c => { console.log('$ ' + c); const r = spawnSync('bash', ['-lc', c], { stdio: 'inherit' }); if (r.status !== 0) die(`failed: ${c}`); };
             sh('DEBIAN_FRONTEND=noninteractive apt-get update -q');
-            sh('DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nmap nikto lynis dnsutils whois traceroute net-tools tcpdump tshark mtr-tiny iperf3 arp-scan netdiscover sslscan testssl.sh whatweb dnsrecon dnstwist sleuthkit autopsy binwalk foremost libimage-exiftool-perl yara rkhunter chkrootkit radare2 jq sqlite3 python3-pip');
+            sh('DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nmap nikto lynis dnsutils whois traceroute net-tools tcpdump tshark mtr-tiny iperf3 arp-scan netdiscover sslscan testssl.sh whatweb dnsrecon dnstwist sleuthkit autopsy binwalk foremost libimage-exiftool-perl yara rkhunter chkrootkit radare2 jq metasploit-framework burpsuite sqlmap nuclei ffuf feroxbuster netexec impacket-scripts bloodhound certipy-ad bettercap aircrack-ng hashcat john');
             sh('pip3 install --break-system-packages -q sqlite-web || true');
             // The scanners are for `lab run` (which checks scope): only root may run them directly.
-            for (const t of TOOLS) { const r = spawnSync('bash', ['-lc', `p=$(command -v ${t}) && f=$(readlink -f "$p") && chown root:root "$f" && chmod 0750 "$f" && echo "locked: ${t}"`], { stdio: 'inherit' }); void r; }
+            for (const t of TOOLS) { 
+                const r = spawnSync('bash', ['-lc', `p=$(command -v ${t}) && f=$(readlink -f "$p") && chown root:root "$f" && chmod 0750 "$f" && echo "locked: ${t}"`], { stdio: 'inherit' }); 
+                if (r.status !== 0) {
+                    console.log(`Warning: Could not lock tool ${t}`);
+                }
+            }
             console.log('Security Lab tools are installed.');
             break;
         }

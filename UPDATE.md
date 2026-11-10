@@ -603,6 +603,13 @@ phone's Update button. Mechanism:
   runs it) as Cline's `openai-compatible` provider at `<address>/v1`. Normal sessions run `cline -i --auto-approve false`;
   auto-approve sessions leave Cline's default; one-shot runs `cline --auto-approve true "<prompt>"`. Cline is offered
   for research runs and in the Research agent setting; global instructions also go to `~/.agents/AGENTS.md`.
+- **2.7.0** — agents can ask each other: `bin/consult` (`consult list`, `consult <claude|codex|antigravity|cline>
+  "question"`) → agent routes `GET/POST /api/agent/consult` → `server/lib/consult.js` runs the asked agent once as the
+  agent user in the caller's folder, read-only (Claude `-p`; Codex `exec --sandbox read-only`; Cline
+  `--auto-approve false`; Antigravity `-p --mode plan` inside `script` for a pseudo-terminal), 5-minute limit, one at a
+  time per shell, 30 an hour, audited (`agent-consult`). Allowed per session type in `state/consult.json`
+  (`GET/PUT /api/agents/consult`): Security Lab and Research on by default, project and control off. Signed-out agents
+  are refused up front.
 
 ## Release checklist
 

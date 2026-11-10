@@ -42,6 +42,7 @@ import * as research from './lib/research.js';
 import * as addons from './lib/addons.js';
 import * as lab from './lib/lab.js';
 import * as clineLib from './lib/cline.js';
+import * as consult from './lib/consult.js';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
 import * as qa from './lib/researchqa.js';
@@ -87,6 +88,7 @@ const AGENT_ROUTES = [
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
+    ['GET', /^\/api\/agent\/consult$/], ['POST', /^\/api\/agent\/consult$/],
     ['GET', /^\/api\/agent\/lab\/status$/], ['POST', /^\/api\/agent\/lab\/run$/], ['GET', /^\/api\/agent\/lab\/run\/r\d{3,5}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
@@ -352,6 +354,9 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, elevate.request(session.agent, { cmd: b.cmd, cwd: pr.cwd, reason: b.reason }));
             }
             if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
+            // Asking another agent: allowed or not by this shell's session type; the asked agent runs read-only in this folder.
+            if (p === '/api/agent/consult' && method === 'GET') return send(res, 200, await consult.available(sh.session || null));
+            if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question })); }
             // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
             if (p.startsWith('/api/agent/lab/')) {
                 const slug = lab.engagementOf(sh.cwd); if (!slug) return send(res, 403, { error: 'This shell is not in a Security Lab engagement.' });
@@ -592,6 +597,8 @@ const server = http.createServer(async (req, res) => {
 
         // AI agents + Claude profiles
         if (p === '/api/agents' && method === 'GET') return send(res, 200, await agents.status());
+        if (p === '/api/agents/consult' && method === 'GET') return send(res, 200, consult.settings());
+        if (p === '/api/agents/consult' && method === 'PUT') return send(res, 200, consult.configure(await readJson(req, 4096)));
         if (p === '/api/agents/cline' && method === 'GET') return send(res, 200, clineLib.settings());
         if (p === '/api/agents/cline' && method === 'PUT') return send(res, 200, clineLib.configure(await readJson(req, 8192)));
         if (p === '/api/agents/cline/models' && method === 'GET') return send(res, 200, await clineLib.models(url.searchParams.get('endpoint') || ''));

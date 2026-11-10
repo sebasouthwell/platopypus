@@ -29,8 +29,8 @@ export const CATALOG = [
     {
         id: 'lab', title: 'Security Lab', icon: 'shield',
         blurb: 'Test your own domains, services and applications, wherever they are hosted: port and TLS checks, web and DNS scans, lookalike domains, forensics tools, and agents that test with you, always inside a scope you verify.',
-        installs: ['nmap, nikto, sslscan, testssl.sh, whatweb', 'dnsutils, whois, dnsrecon, dnstwist', 'mtr, traceroute, iperf3, arp-scan, netdiscover, net-tools', 'tcpdump, tshark', 'sleuthkit, autopsy, binwalk, foremost, exiftool, yara', 'lynis, rkhunter, chkrootkit (checks of this box)', 'radare2, sqlite3, sqlite-web, jq'],
-        size: 'about 600 MB', time: 'about 3 to 6 minutes',
+        installs: ['nmap, nikto, sslscan, testssl.sh, whatweb', 'dnsutils, whois, dnsrecon, dnstwist', 'mtr, traceroute, iperf3, arp-scan, netdiscover, net-tools', 'tcpdump, tshark', 'sleuthkit, autopsy, binwalk, foremost, exiftool, yara', 'lynis, rkhunter, chkrootkit (checks of this box)', 'radare2, sqlite3, sqlite-web, jq', 'metasploit-framework, burpsuite, sqlmap, nuclei, ffuf, feroxbuster, netexec, impacket-scripts, bloodhound, certipy-ad, bettercap, aircrack-ng, hashcat, john'],
+        size: 'about 1.2 GB', time: 'about 5 to 8 minutes',
         command: () => ['node', [path.resolve(here, '..', '..', 'bin', 'lab'), 'setup']],
         ready: async () => false,                 // never assumed: only added from the Apps tab
         hasData: () => { try { return fs.readdirSync(path.join(config.root, 'Lab')).length > 0; } catch { return false; } },

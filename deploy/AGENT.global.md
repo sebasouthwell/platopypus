@@ -155,3 +155,12 @@ If `echo $PLATO_SESSION` prints `research`, you are in `/Research/<Topic>` writi
 `$PLATO_SECURITY_FILE` first (it is this topic's brief) and use the `research` tools: `research add`, `find`, `read`,
 `transcript`, `frames`, `cite`, `build`, `ask`. Never paste a whole source into the chat; search and read small excerpts.
 Downloading a video, taking frames and showing images to you all wait for the user's Allow on their phone.
+
+## Asking another agent
+
+Other AI agents on this box can give a second view: `consult list` shows which ones can be asked here and whether
+asking is switched on for this kind of session (the user decides; project work is off unless they turned it on).
+`consult <claude|codex|antigravity|cline> "question"` (antigravity is Gemini) runs that agent once in this folder; it can read the files but not change
+them, and its answer is printed for you. Use it when another agent is better placed (searching, a second opinion on
+reasoning or a design, reviewing a change), give it the context it needs in the question, and weigh its answer
+yourself. Each question is logged for the user.

@@ -236,6 +236,7 @@ ln -sf "$APP_DIR/bin/project" /usr/local/bin/project
 ln -sf "$APP_DIR/bin/live" /usr/local/bin/live
 ln -sf "$APP_DIR/bin/research" /usr/local/bin/research
 ln -sf "$APP_DIR/bin/lab" /usr/local/bin/lab
+ln -sf "$APP_DIR/bin/consult" /usr/local/bin/consult
 ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
 # Publishing gate: a global pre-push hook asks PlatOpypus whether the folder is flagged as a repo; .pasted/ never enters git.
 install -d -o "$PORTHOLE_USER" -g "$PORTHOLE_USER" -m 0755 "$STATE_DIR/githooks"

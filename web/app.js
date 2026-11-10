@@ -2866,6 +2866,7 @@ async function loadAgents() {
         </div>`).join('');
     const body = $('#agents-body');
     clineCard(body).catch(() => {});
+    consultCard(body).catch(() => {});
     $('[data-move-logins]', body)?.addEventListener('click', async e => {
         if (!(await confirmDialog({ title: 'Move AI logins to the agent user?', text: 'Claude (with every profile), Codex and Antigravity logins move from root to the agent user, so new agent shells run without root and keep the same accounts. A backup is made first; root agent shells must be ended. Undo is on this page.', action: 'Move logins', danger: false }))) return;
         e.target.disabled = true;
@@ -2900,6 +2901,16 @@ async function loadAgents() {
     });
 }
 
+// Agents asking agents: one switch per kind of session.
+async function consultCard(body) {
+    const s = await api('/api/agents/consult');
+    const box = document.createElement('div'); box.className = 'consult-wrap';
+    const rows = [['lab', 'Security Lab', 'Testing inside a verified scope'], ['research', 'Research', 'Papers and questions on a topic'], ['project', 'Project work', 'Coding in a project'], ['control', 'Control sessions', 'Moving files, checking logs']];
+    box.innerHTML = `<h2 class="section">Agents asking each other</h2><div class="list">${rows.map(([k, t, sub]) => `<label class="row consult-row"><span class="ico ${s[k] ? 'brass' : ''}">${icon('send')}</span><div class="main"><div class="title">${t}</div><div class="sub">${sub}</div></div><span class="switch"><input type="checkbox" data-consult="${k}" ${s[k] ? 'checked' : ''}><span></span></span></label>`).join('')}</div>
+        <p class="note">When on, an agent in that kind of session can run <span class="mono">consult</span> to ask Claude, Codex, Gemini or Cline (whichever are signed in) for a second view. The one asked can read the folder but not change it. Every question is in the audit log.</p>`;
+    body.prepend(box);
+    $$('[data-consult]', box).forEach(c => c.onchange = async () => { try { await api('/api/agents/consult', { method: 'PUT', body: { [c.dataset.consult]: c.checked } }); toast(`${rows.find(r => r[0] === c.dataset.consult)[1]}: asking other agents ${c.checked ? 'on' : 'off'}`); c.closest('.row').querySelector('.ico').classList.toggle('brass', c.checked); } catch (ex) { toast(ex.message, true); c.checked = !c.checked; } });
+}
 // Cline's Ollama server: the address, the model (picked from what the server has), and an optional key.
 async function clineCard(body) {
     const sec = [...body.querySelectorAll('h2.section')].find(h => h.textContent.startsWith('Cline')); if (!sec) return;

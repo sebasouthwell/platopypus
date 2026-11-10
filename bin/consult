@@ -1,0 +1,34 @@
+#!/usr/bin/env node
+// consult: ask another AI agent on this box for its view, from inside an agent shell.
+//
+//   consult list                          who can be asked here (installed, signed in) and whether asking is allowed
+//   consult <agent> "question"            ask claude, codex, antigravity (Gemini) or cline; prints its answer (it may read this folder, not change it)
+//   echo "question" | consult <agent>     the question from standard input
+//
+// Whether asking is allowed depends on the session type (the user sets it on More → AI agents).
+const argv = process.argv.slice(2); const cmd = argv[0];
+const die = (m, c = 1) => { console.error(m); process.exit(c); };
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+async function call(p, method = 'GET', body) {
+    const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) die('This shell has no PlatOpypus token (only agent shells started from the app can ask other agents).');
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) die('PlatOpypus did not accept this shell\'s token.');
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: body && JSON.stringify({ ...body, pid: process.pid }), signal: AbortSignal.timeout(330_000) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) die(d.error || `HTTP ${r.status}`, r.status === 403 ? 3 : 1); return d;
+}
+const readStdin = () => new Promise(ok => { if (process.stdin.isTTY) return ok(''); let s = ''; process.stdin.on('data', d => { s += d; }); process.stdin.on('end', () => ok(s)); });
+try {
+    if (!cmd || cmd === '-h' || cmd === '--help') { const fs = await import('node:fs'); console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n')); }
+    else if (cmd === 'list') {
+        const d = await call('/api/agent/consult');
+        console.log(d.allowed ? `Asking other agents is ON for ${d.session} sessions.` : `Asking other agents is OFF for ${d.session || 'this kind of'} sessions (the user can switch it on in More → AI agents).`);
+        for (const a of d.agents) console.log(`  ${a.key.padEnd(12)} ${a.ready ? 'can be asked' : !a.installed ? 'not installed' : !a.signedIn ? 'not signed in' : 'cannot answer without a terminal'}`);
+    } else {
+        const question = argv.slice(1).join(' ').trim() || (await readStdin()).trim();
+        if (!question) die('usage: consult <agent> "question"   (consult list shows who can be asked)');
+        process.stderr.write(`Asking ${cmd}…\n`);
+        const d = await call('/api/agent/consult', 'POST', { to: cmd, question });
+        console.log(d.answer);
+    }
+} catch (e) { die(`consult: ${e.message}`); }

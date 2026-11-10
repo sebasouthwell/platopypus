@@ -140,6 +140,20 @@ export const TOOLS = {
     lynis: { bin: 'lynis', title: 'This box: security audit (lynis)', presets: { default: () => ['audit', 'system', '--quick', '--no-colors'] }, local: true, minutes: 15 },
     rkhunter: { bin: 'rkhunter', title: 'This box: rootkit check (rkhunter)', presets: { default: () => ['--check', '--sk', '--nocolors', '--rwo'] }, local: true },
     chkrootkit: { bin: 'chkrootkit', title: 'This box: rootkit check (chkrootkit)', presets: { default: () => ['-q'] }, local: true },
+    sqlmap: { bin: 'sqlmap', title: 'SQL injection scanner (sqlmap)', presets: { default: t => ['--batch', '--risk=3', '--level=5', '-u', t] }, free: true },
+    nuclei: { bin: 'nuclei', title: 'Vulnerability scanner (nuclei)', presets: { default: t => ['-u', t, '-timeout', '10s', '-c', '10'] }, free: true },
+    burpsuite: { bin: 'burpsuite', title: 'Web proxy (burpsuite)', presets: { default: () => [] }, local: true },
+    metasploit: { bin: 'msfconsole', title: 'Exploitation framework (metasploit)', presets: { default: () => ['-r', 'exploit.rb'] }, local: true },
+    ffuf: { bin: 'ffuf', title: 'Fuzzing tool (ffuf)', presets: { default: t => ['-u', t, '-w', 'wordlist.txt'] }, free: true },
+    feroxbuster: { bin: 'feroxbuster', title: 'Web scanner (feroxbuster)', presets: { default: t => ['-u', t, '--quiet'] }, free: true },
+    netexec: { bin: 'netexec', title: 'Network execution tool (netexec)', presets: { default: t => ['--target', t] }, free: true },
+    impacket: { bin: 'impacket', title: 'Python-based network tools (impacket)', presets: { default: () => [] }, local: true },
+    bloodhound: { bin: 'bloodhound', title: 'Active Directory analysis (bloodhound)', presets: { default: () => [] }, local: true },
+    certipy: { bin: 'certipy', title: 'Certificate manipulation tool (certipy)', presets: { default: () => [] }, free: true },
+    bettercap: { bin: 'bettercap', title: 'Network capture and manipulation (bettercap)', presets: { default: () => [] }, local: true },
+    aircrack: { bin: 'aircrack-ng', title: 'WiFi security auditing (aircrack-ng)', presets: { default: () => [] }, free: true },
+    hashcat: { bin: 'hashcat', title: 'Password cracking tool (hashcat)', presets: { default: () => [] }, local: true },
+    john: { bin: 'john', title: 'Password cracker (john)', presets: { default: () => [] }, local: true },
 };
 const runsDir = slug => path.join(enginePath(slug), 'runs');
 export function runs(slug) {
