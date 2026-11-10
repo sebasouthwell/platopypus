@@ -541,6 +541,14 @@ phone's Update button. Mechanism:
 - **2.2.3** — paper editor: LaTeX and BibTeX colouring (coloured text under a transparent text box; no new
   dependency); selectable text over PDF source pages (`GET /api/research/:slug/source/:id/lines/:n`, cached beside the
   page images). CI builds its images on the host network. No state change.
+- **2.2.4** — editor: citation check (`GET/POST /api/research/:slug/citecheck`: a mechanical scan of every cited
+  paragraph, then one agent run that reads each cited passage and writes `.platopypus/citereport.json`; the app lists
+  what needs a look first and folds the supported ones away); a notice when any agent task in the topic finishes;
+  selectable PDF text placed word by word, on a page box of the page's real shape (`…/lines/:n` now returns words;
+  cache `p<n>.words.json`). Research agent and model: `GET/PUT /api/research-settings` (`state/research-settings.json`:
+  `agent`, `models`), used by Ask, editor changes, citation checks and new research sessions; `shells.create` and
+  `agents.command` take an optional `model` passed to `--model` (Claude Code, Codex; checked as a plain name).
+  `research setup`: pip no longer fails on Debian's `typing_extensions`. No migration.
 
 ## Release checklist
 

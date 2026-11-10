@@ -148,15 +148,54 @@ export async function sourceLines(slug, id, n) {
     const dir = topicPath(slug); if (!T.validId(id)) throw httpError(400, 'Bad source id.');
     const pdf = path.join(dir, 'sources', id, 'original.pdf'); if (!T.exists(pdf)) throw httpError(404, 'No PDF for this source.');
     const p = Number(n); if (!Number.isInteger(p) || p < 1 || p > 2000) throw httpError(400, 'Bad page.');
-    const out = path.join(dir, 'sources', id, 'pages'); fs.mkdirSync(out, { recursive: true }); const cache = path.join(out, `p${p}.lines.json`);
+    const out = path.join(dir, 'sources', id, 'pages'); fs.mkdirSync(out, { recursive: true }); const cache = path.join(out, `p${p}.words.json`);
     const hit = T.readJson(cache, null); if (hit) return hit;
     let html = ''; try { html = (await run('pdftotext', ['-bbox-layout', '-f', String(p), '-l', String(p), pdf, '-'], { maxBuffer: 32 * 1024 * 1024, timeout: 60_000 })).stdout; } catch { throw httpError(501, 'pdftotext is not installed.'); }
     const w = Number(html.match(/<page width="([\d.]+)"/)?.[1] || 0), h = Number(html.match(/<page width="[\d.]+" height="([\d.]+)"/)?.[1] || 0);
     const un = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
     const lines = [];
     if (w && h) for (const m of html.matchAll(/<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([\s\S]*?)<\/line>/g)) {
-        const text = [...m[5].matchAll(/<word[^>]*>([^<]*)<\/word>/g)].map(x => un(x[1])).join(' '); if (!text.trim()) continue;
-        lines.push({ x: +m[1] / w, y: +m[2] / h, w: (+m[3] - +m[1]) / w, h: (+m[4] - +m[2]) / h, s: text });
+        // Word by word: a whole line stretched as one block drifts inside the line, because the page's font is not ours.
+        const words = [...m[5].matchAll(/<word xMin="([\d.]+)" yMin="[\d.]+" xMax="([\d.]+)" yMax="[\d.]+">([^<]*)<\/word>/g)].map(x => ({ x: +x[1] / w, w: (+x[2] - +x[1]) / w, s: un(x[3]) })).filter(x => x.s);
+        if (!words.length) continue;
+        lines.push({ y: +m[2] / h, h: (+m[4] - +m[2]) / h, words });
     }
-    const res = { page: p, lines: lines.slice(0, 4000) }; T.writeJson(cache, res); return res;
+    const res = { page: p, aspect: w && h ? w / h : null, lines: lines.slice(0, 4000) }; T.writeJson(cache, res); return res;
+}
+
+// ---------- citation check, the part that needs no AI ----------
+// Every paragraph that cites something, with what can be checked mechanically: is the key in refs.bib, is it tied to
+// a source in this topic, does the cited page or time exist. The agent's check starts from this list.
+const CITE_RE = /\\[a-zA-Z]*cite[a-zA-Z]*\*?((?:\[[^\]]*\])*)\{([^}]*)\}/g;
+export function citeScan(slug) {
+    const dir = topicPath(slug); const bib = new Map(bibEntries(slug).map(e => [e.key, e])); const used = new Set(); const items = [];
+    for (const f of files(slug).filter(x => x.path.endsWith('.tex'))) {
+        const lines = fs.readFileSync(path.join(dir, 'paper', f.path), 'utf8').split('\n');
+        let start = 0;
+        const flush = end => {
+            const raw = lines.slice(start, end).map(l => l.replace(/(^|[^\\])%.*$/, '$1')).join(' ').replace(/\s+/g, ' ').trim(); if (!raw) return;
+            const cites = [];
+            for (const m of raw.matchAll(CITE_RE)) {
+                const where = ((m[1].match(/\[([^\]]*)\]/g) || []).pop() || '').slice(1, -1);
+                for (const key of m[2].split(',').map(k => k.trim()).filter(Boolean)) {
+                    used.add(key); const e = bib.get(key); const c = { key, where, problems: [] };
+                    if (!e) c.problems.push('not in refs.bib');
+                    else if (!e.source) c.problems.push('no source file in this topic, so it cannot be checked');
+                    else {
+                        c.source = e.source.id; c.kind = e.source.kind; c.title = e.title;
+                        const pg = Number(where.match(/(?:pp?\.?|page)[\s~]*(\d+)/i)?.[1] || 0); const t = where.match(/(\d+):(\d{2})(?::(\d{2}))?/);
+                        if (pg && e.source.pages && pg > e.source.pages) c.problems.push(`cites page ${pg}, but the file has ${e.source.pages} pages (a journal page number?)`);
+                        if (t && e.source.duration) { const sec = t[3] ? +t[1] * 3600 + +t[2] * 60 + +t[3] : +t[1] * 60 + +t[2]; if (sec > e.source.duration) c.problems.push(`cites ${t[0]}, past the end of the video`); }
+                        if (!where && (e.source.kind === 'pdf' || e.source.kind === 'video')) c.problems.push(`no ${e.source.kind === 'video' ? 'time' : 'page'} given`);
+                    }
+                    cites.push(c);
+                }
+            }
+            if (cites.length) items.push({ n: items.length + 1, file: f.path, line: start + 1, text: raw.slice(0, 900), cites });
+        };
+        for (let i = 0; i <= lines.length; i++) { if (i === lines.length || !lines[i].trim()) { flush(i); start = i + 1; } }
+    }
+    const unused = [...bib.keys()].filter(k => !used.has(k));
+    const problems = items.reduce((n, it) => n + it.cites.reduce((m, c) => m + c.problems.length, 0), 0);
+    return { paragraphs: items.length, citations: items.reduce((n, it) => n + it.cites.length, 0), problems, unused, items };
 }

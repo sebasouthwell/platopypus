@@ -62,7 +62,7 @@ export async function list() {
 
 export const scratchRoot = path.join(config.home, 'scratch');
 
-export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false }) {
+export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false, model = '' }) {
     if (oneshot) {
         if (kind !== 'agent' || !['claude', 'codex'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code or Codex.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
@@ -96,7 +96,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
 
     let command, agentEnv = {}, agentInfo = null;
     if (kind === 'agent') {
-        const built = agents.command({ agent, yolo: !!yolo, resume: !!resume, profile, login: !!login });
+        const built = agents.command({ agent, yolo: !!yolo, resume: !!resume, profile, login: !!login, model });
         command = built.cmd; agentEnv = built.env;
         agentInfo = { agent, yolo: !!yolo, resume: !!resume, profile: profile || 'default' };
         // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
@@ -106,7 +106,8 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
-            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox "$PORTHOLE_FIRST_PROMPT"`;
+            const mf = agents.modelArgs(agent, model).join(' ');
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
             if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';

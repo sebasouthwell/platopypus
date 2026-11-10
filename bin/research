@@ -160,7 +160,7 @@ try {
             if (process.getuid && process.getuid() !== 0) die('Run as root, or ask the user (research ask "install research tools: apt + pip").');
             const sh = c => { console.log('$ ' + c); const r = spawnSync('bash', ['-lc', c], { stdio: 'inherit' }); if (r.status !== 0) die(`failed: ${c}`); };
             sh('DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended lmodern latexmk poppler-utils ffmpeg tesseract-ocr zip python3-pip aspell aspell-en aspell-fr');
-            sh('pip3 install --break-system-packages -q yt-dlp faster-whisper');
+            sh('pip3 install --break-system-packages -q --ignore-installed typing_extensions yt-dlp faster-whisper');
             const d = await R.doctor(); for (const [k, v] of Object.entries(d)) console.log(`${v.path ? 'ok     ' : 'MISSING'} ${k}`);
             break;
         }

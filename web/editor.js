@@ -25,10 +25,10 @@
     // "both" keeps the source open beside the preview, so you can write against the original and see the result.
     function pane(p) {
         S.pane = p; const both = p === 'both'; localStorage.setItem('editor.pane', both ? 'both' : 'preview');
-        $('#preview').hidden = !(p === 'preview' || both); $('#source').hidden = !(p === 'source' || both); $('#spelling').hidden = p !== 'spelling'; $('#agent').hidden = p !== 'agent'; if (p === 'agent') drawAgent(); $('#changes').hidden = p !== 'changes'; if (p === 'changes') drawChanges();
+        $('#preview').hidden = !(p === 'preview' || both); $('#source').hidden = !(p === 'source' || both); $('#spelling').hidden = p !== 'spelling'; $('#agent').hidden = p !== 'agent'; if (p === 'agent') drawAgent(); $('#changes').hidden = p !== 'changes'; if (p === 'changes') drawChanges(); $('#citecheck').hidden = p !== 'cites'; if (p === 'cites') drawCiteCheck();
         $('#side').classList.toggle('both', both); $('#grid').classList.toggle('wide-side', both);
         if (both && !$('#source').innerHTML.trim()) $('#source').innerHTML = '<div class="empty">Open a source from References, or click a citation, and it stays here while you write.</div>';
-        if (p === 'spelling') checkSpelling(); $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.pane === p));
+        if (p === 'spelling') checkSpelling(); $$('#tabs button').forEach(b => { b.classList.toggle('on', b.dataset.pane === p); if (b.dataset.pane === p) b.classList.remove('ping'); });
     }
     $$('#tabs button').forEach(b => b.onclick = () => pane(b.dataset.pane));
 
@@ -231,6 +231,75 @@
         const line = code.value.slice(0, m.index).split('\n').length; code.scrollTop = Math.max(0, (line - 6) * parseFloat(getComputedStyle(code).lineHeight));
     }
 
+    // ----- tell me when an agent is done -----
+    // One watcher for every kind of agent task (an edit, a citation check, a question). It runs whichever pane is open,
+    // marks the pane's tab, and shows a note you can click.
+    const seenDone = new Set(); let watchPrimed = false, watchTimer = null;
+    function notice(msg, paneName) {
+        const t = $('#toast'); t.textContent = msg; t.className = 'on act'; clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 12000);
+        t.onclick = () => { t.className = ''; pane(paneName); if (innerWidth <= 900) view('side'); };
+        const tab = $(`#tabs [data-pane="${paneName}"]`); if (tab && S.pane !== paneName) tab.classList.add('ping');
+        if (document.hidden) { document.title = `● ${document.title.replace(/^● /, '')}`; if (window.Notification && Notification.permission === 'granted') { try { new Notification('PlatOpypus', { body: msg, icon: '/icons/icon-192.png' }); } catch { /* not allowed here */ } } }
+    }
+    addEventListener('visibilitychange', () => { if (!document.hidden) document.title = document.title.replace(/^● /, ''); });
+    async function watch() {
+        clearTimeout(watchTimer); let qs; try { qs = (await api(`/api/research/${enc}/questions`)).questions; } catch { watchTimer = setTimeout(watch, 15000); return; }
+        for (const q of qs) {
+            const done = q.status !== 'waiting' && (q.toPaper !== 'requested');
+            if (!watchPrimed) { if (done) seenDone.add(q.id + (q.toPaper || '')); continue; }
+            const key = q.id + (q.toPaper || ''); if (!done || seenDone.has(key)) continue; seenDone.add(key);
+            if (q.kind === 'check') { notice('Citation check finished. Click to see the report.', 'cites'); if (S.pane === 'cites') drawCiteCheck(); }
+            else if (q.kind === 'edit') { notice('The agent has finished its change. Click to see what changed.', 'changes'); if (!S.dirty && S.cur) openFile(S.cur).catch(() => {}); refreshPreview(); if (S.pane === 'agent') drawAgent(); }
+            else notice(q.toPaper === 'done' ? 'An answer was added to the paper.' : 'Your question has been answered (see Ask on the topic page).', 'agent');
+        }
+        watchPrimed = true;
+        const busy = qs.some(q => (q.status === 'waiting' && !q.problem) || q.toPaper === 'requested');
+        watchTimer = setTimeout(watch, busy ? 5000 : 30000);
+    }
+    const kick = () => { clearTimeout(watchTimer); watchTimer = setTimeout(watch, 1500); if (window.Notification && Notification.permission === 'default') Notification.requestPermission().catch(() => {}); };
+
+    // ----- citation check: the mechanical part at once, the agent's reading of each source on request -----
+    let ccPoll = null;
+    async function jump(file, line) {
+        if (S.cur !== file) await openFile(file).catch(e => toast(e.message, true));
+        const ls = code.value.split('\n'); const from = ls.slice(0, Math.max(0, line - 1)).join('\n').length + (line > 1 ? 1 : 0); let to = from; for (let i = line - 1; i < ls.length && ls[i].trim(); i++) to += ls[i].length + 1;
+        view('edit'); code.focus(); code.setSelectionRange(from, Math.max(from, to - 1)); code.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(code).lineHeight)); cites();
+    }
+    async function drawCiteCheck() {
+        const box = $('#citecheck'); if (box.hidden) return;
+        let d; try { d = await api(`/api/research/${enc}/citecheck`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        const sc = d.scan, rp = d.report, busy = d.run && d.run.status === 'waiting' && !d.run.problem;
+        const queues = new Map(); if (rp) for (const i of rp.items) { const k = `${i.file}|${i.key}`; if (!queues.has(k)) queues.set(k, []); queues.get(k).push(i); }
+        const byKey = new Map(); for (const it of sc.items) for (const c of it.cites) { const r = queues.get(`${it.file}|${c.key}`)?.shift(); if (r) byKey.set(`${it.n}:${c.key}:${c.where}`, r); }
+        const count = v => rp ? rp.items.filter(i => i.verdict === v).length : 0; const LABEL = { supported: 'Supported', partly: 'Partly', unsupported: 'Not supported', unclear: 'Could not tell' };
+        const stale = rp && sc.items.some(it => it.cites.some(c => c.source && !byKey.has(`${it.n}:${c.key}:${c.where}`)));
+        // The report reads top-down: the counts, then one row per thing that needs you (a problem, where it is, what
+        // to do), then everything that is fine, folded away.
+        const where = it => `${esc(it.file.replace(/^sections\//, ''))} · line ${it.line}`;
+        const attention = []; const fine = [];
+        for (const it of sc.items) for (const c of it.cites) {
+            const r = byKey.get(`${it.n}:${c.key}:${c.where}`);
+            const row = { it, c, r };
+            if (c.problems.length || (r && r.verdict !== 'supported')) attention.push(row); else fine.push(row);
+        }
+        const order = { unsupported: 0, partly: 1, unclear: 2 }; attention.sort((x, y) => (order[x.r?.verdict] ?? 3) - (order[y.r?.verdict] ?? 3));
+        const rowHtml = ({ it, c, r }) => `<div class="cc-cite"><div class="cc-row">${r ? `<span class="v ${r.verdict}">${LABEL[r.verdict]}</span>` : c.problems.length ? '<span class="v unsupported">Problem</span>' : '<span class="v unclear">Not checked</span>'}<b>${esc(c.key)}</b>${c.where ? `<span class="muted">${esc(c.where)}</span>` : ''}<button class="d-open" data-jump="${esc(it.file)}|${it.line}">${where(it)}</button>${c.source ? `<button class="pill" data-src-key="${esc(c.key)}" data-src-where="${esc(c.where)}">Open source</button>` : ''}</div>${c.problems.map(p => `<p class="cc-prob">${esc(p)}</p>`).join('')}${r?.note ? `<p class="cc-note">${esc(r.note)}</p>` : ''}${r?.fix ? `<p class="cc-fix">Do: ${esc(r.fix)}</p>` : ''}</div>`;
+        const nUncited = rp?.uncited.length || 0;
+        box.innerHTML = `<div class="cc-top"><div><b>${sc.citations} citation${sc.citations === 1 ? '' : 's'} in ${sc.paragraphs} paragraph${sc.paragraphs === 1 ? '' : 's'}</b><span>${sc.problems ? `${sc.problems} problem${sc.problems === 1 ? '' : 's'} found without reading the sources` : 'Keys, source files, pages and times all line up'}</span></div><button class="btn pri" id="cc-run" ${busy || !sc.citations ? 'disabled' : ''}>${busy ? 'Checking…' : rp ? 'Check again' : 'Check against the sources'}</button></div>
+            ${busy ? '<div class="s-note">An agent is reading each cited passage. This takes a few minutes for a long paper; you can keep writing and you will be told when it is done.</div>' : d.run?.problem ? `<div class="s-note">${esc(d.run.problem)}</div>` : !rp ? '<p class="muted cc-hint">"Check against the sources" has an agent open every cited page or moment and judge whether it supports the sentence: wrong numbers, overstated claims, the right source at the wrong page. It reports; it does not edit.</p>' : ''}
+            ${rp ? `<div class="cc-counts big">${['supported', 'partly', 'unsupported', 'unclear'].map(v => `<span class="v ${v}"><b>${count(v)}</b> ${LABEL[v].toLowerCase()}</span>`).join('')}${nUncited ? `<span class="v partly"><b>${nUncited}</b> with no citation</span>` : ''}${sc.unused.length ? `<span class="v unclear"><b>${sc.unused.length}</b> never cited</span>` : ''}</div><p class="muted cc-when">Checked ${esc(new Date(rp.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${d.run?.by ? ` by ${esc(d.run.by)}` : ''}${stale ? ' · the paper has changed since, so some citations have no verdict yet' : ''}</p>` : ''}
+            ${attention.length ? `<h3 class="cc-h">Needs a look (${attention.length})</h3>${attention.map(rowHtml).join('')}` : rp ? '<div class="s-note ok">Every citation checked out against its source.</div>' : ''}
+            ${nUncited ? `<h3 class="cc-h">Statements with no citation (${nUncited})</h3>${rp.uncited.map(u => `<div class="cc-cite"><div class="cc-row"><span class="v partly">No citation</span><button class="d-open" data-jump="${esc(u.file)}|${u.line}">${where(u)}</button></div><p class="cc-note">${esc(u.note)}</p></div>`).join('')}` : ''}
+            ${sc.unused.length ? `<h3 class="cc-h">In refs.bib but never cited (${sc.unused.length})</h3><p class="cc-note cc-keys">${sc.unused.map(k => `<span>${esc(k)}</span>`).join('')}</p>` : ''}
+            ${rp?.summary ? `<details class="cc-fold"><summary>The agent's summary</summary><p class="cc-note">${esc(rp.summary)}</p></details>` : ''}
+            ${fine.length ? `<details class="cc-fold" ${rp || attention.length ? '' : 'open'}><summary>${rp ? `Supported citations (${fine.length})` : `All citations (${fine.length})`}</summary>${fine.map(rowHtml).join('')}</details>` : ''}
+            ${!sc.items.length ? '<div class="empty">No citations in the paper yet.</div>' : ''}`;
+        $('#cc-run').onclick = async () => { if (!(await save())) return; try { await api(`/api/research/${enc}/citecheck`, { method: 'POST', body: {} }); kick(); } catch (e) { toast(e.message, true); } drawCiteCheck(); };
+        $$('[data-jump]', box).forEach(b => b.onclick = () => { const [f, l] = b.dataset.jump.split('|'); jump(f, Number(l)); });
+        $$('[data-src-key]', box).forEach(b => b.onclick = () => openSource(b.dataset.srcKey, b.dataset.srcWhere));
+        clearTimeout(ccPoll); if (busy) ccPoll = setTimeout(drawCiteCheck, 6000);
+    }
+
     // ----- changes: what is different since the last version, or what a saved version changed -----
     // Within a changed line the words that differ are marked, because a LaTeX paragraph is one long line.
     function wordDiff(a, b) {
@@ -288,7 +357,7 @@
         const sv = $('#ag-save'); if (sv) sv.onclick = async () => { if (await saveVersion('Saved from the editor')) { toast('Version saved'); drawAgent(); } };
         const run = async () => {
             const text = $('#ag-text').value.trim(); if (!text) return toast('Say what you want changed.', true);
-            try { await api(`/api/research/${enc}/edits`, { method: 'POST', body: { text, file: S.cur || '', selection: sel, agent: localStorage.getItem('porthole.agent') || 'claude' } }); $('#ag-text').value = ''; } catch (e) { toast(e.message, true); }
+            try { await api(`/api/research/${enc}/edits`, { method: 'POST', body: { text, file: S.cur || '', selection: sel } }); $('#ag-text').value = ''; kick(); } catch (e) { toast(e.message, true); }
             drawAgent();
         };
         $('#ag-run').onclick = async () => {
@@ -307,7 +376,6 @@
         };
         clearTimeout(agentPoll);
         if (busy) agentPoll = setTimeout(async () => { await drawAgent(); }, 5000);
-        else if (S.agentWasBusy) { await loadAll(); if (S.cur && !S.dirty) await openFile(S.cur).catch(() => {}); await refreshPreview(); pane('changes'); toast('The agent has finished: here is what it changed'); }   // pick up what it wrote
         S.agentWasBusy = busy;
     }
 
@@ -356,15 +424,21 @@
             // which page is in view decides what "Cite this page" cites
             const io = new IntersectionObserver(es => { const vis = es.filter(x => x.isIntersecting).sort((x, y) => y.intersectionRatio - x.intersectionRatio)[0]; if (vis) { cur = Number(vis.target.dataset.p); label(); } }, { root: box, threshold: [0.2, 0.5, 0.8] });
             $$('.spg', box).forEach(f => io.observe(f)); label(); setTimeout(() => go(target), 60);
-            // Real text over each page image, so you can select and copy from the PDF. Each line is stretched to sit exactly
-            // on its printed line; it is laid out again when the page changes size (zoom, window).
-            const fit = fig => { const H = fig.clientHeight; for (const d of fig.querySelectorAll('.tl > span')) { d.style.fontSize = `${Math.max(4, Number(d.dataset.h) * H * 0.82)}px`; d.style.transform = ''; const nat = d.offsetWidth; const want = Number(d.dataset.w) * fig.clientWidth; if (nat > 0) d.style.transform = `scaleX(${want / nat})`; } };
+            // Real text over each page image, so you can select and copy from the PDF. Each word is placed on its printed
+            // word and stretched to reach the next one (the space between is part of it, so copying keeps the spaces);
+            // the page box takes the page's real shape, and everything is laid out again when the page changes size.
+            const fit = fig => {
+                const img = fig.querySelector('img'); const W = img.clientWidth, H = img.clientHeight; if (!W || !H) return;
+                for (const d of fig.querySelectorAll('.tl > span')) { d.style.fontSize = `${Math.max(3, Number(d.dataset.h) * H * 0.86)}px`; d.style.transform = ''; const nat = d.offsetWidth; const want = Number(d.dataset.w) * W; if (nat > 0) d.style.transform = `scaleX(${want / nat})`; }
+            };
             const ro = new ResizeObserver(es => es.forEach(e => fit(e.target)));
             const layer = async fig => {
                 if (fig.dataset.text) return; fig.dataset.text = '1';
+                const img = fig.querySelector('img'); if (img.naturalWidth) fig.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
                 let r; try { r = await api(`/api/research/${enc}/source/${sid}/lines/${fig.dataset.p}`); } catch { return; }
                 const tl = document.createElement('div'); tl.className = 'tl';
-                tl.innerHTML = r.lines.map(l => `<span data-w="${l.w}" data-h="${l.h}" style="left:${l.x * 100}%;top:${l.y * 100}%">${esc(l.s)} </span>`).join('');
+                tl.innerHTML = r.lines.map(l => l.words.map((wd, i) => { const next = l.words[i + 1]; const last = !next || next.x <= wd.x; const width = last ? wd.w : next.x - wd.x;
+                    return `<span data-w="${width}" data-h="${l.h}" style="left:${wd.x * 100}%;top:${l.y * 100}%">${esc(wd.s)}${last ? '\n' : ' '}</span>`; }).join('')).join('');
                 fig.appendChild(tl); fit(fig); ro.observe(fig);
             };
             const tio = new IntersectionObserver(es => es.forEach(x => { if (x.isIntersecting) { const img = x.target.querySelector('img'); if (img.complete && img.naturalWidth) layer(x.target); else img.addEventListener('load', () => layer(x.target), { once: true }); } }), { root: box, rootMargin: '300px' });
@@ -386,6 +460,6 @@
     // ----- go -----
     (async () => {
         if (!slug) { $('#title').textContent = 'No topic'; return; }
-        try { if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
+        try { watch(); if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
     })();
 })();

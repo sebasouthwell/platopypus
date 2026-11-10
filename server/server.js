@@ -654,6 +654,8 @@ const server = http.createServer(async (req, res) => {
         // Research: topics under /Research, the paper's pages, sources, exports, and the asks agents wait on.
         if (p === '/api/research' && method === 'GET') return send(res, 200, { topics: research.list(), asks: research.pendingAsks() });
         if (p === '/api/research' && method === 'POST') return send(res, 201, await research.create(await readJson(req, 16 * 1024)));
+        if (p === '/api/research-settings' && method === 'GET') return send(res, 200, { ...research.settings(), runner: research.runner() });
+        if (p === '/api/research-settings' && method === 'PUT') return send(res, 200, research.setSettings(await readJson(req, 4096)));
         if (p === '/api/research/tools' && method === 'GET') return send(res, 200, await (await import('./lib/researchtools.js')).doctor());
         if (p === '/api/research/asks' && method === 'GET') return send(res, 200, research.pendingAsks());
         if ((m = p.match(/^\/api\/research\/([\w.-]{1,60})(?:\/(.*))?$/)) && (method === 'GET' || method === 'POST')) {
@@ -677,6 +679,8 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'upload' && method === 'POST') return send(res, 201, await repo.upload(slug, req, url.searchParams.get('name') || ''));
             if (rest === 'commit' && method === 'POST') return send(res, 200, await repo.commit(slug, (await readJson(req, 4096).catch(() => ({}))).message));
             if (rest === 'diff' && method === 'GET') return send(res, 200, await repo.diff(slug, url.searchParams.get('version') || ''));
+            if (rest === 'citecheck' && method === 'GET') return send(res, 200, { scan: editor.citeScan(slug), ...qa.checkReport(slug) });
+            if (rest === 'citecheck' && method === 'POST') { const b = await readJson(req, 4096).catch(() => ({})); return send(res, 201, await qa.check(slug, { agent: b.agent, scan: editor.citeScan(slug) })); }
             if (rest === 'versions' && method === 'GET') return send(res, 200, await repo.state(slug));
             if (rest === 'revert' && method === 'POST') return send(res, 200, await repo.revert(slug));
             if (rest === 'edits' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 201, await qa.edit(slug, b.text, { agent: b.agent, file: b.file, selection: b.selection })); }

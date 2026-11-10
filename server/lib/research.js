@@ -210,3 +210,26 @@ export function addNote(slug, text) {
     record('activity', 'research-note', { actor: 'phone', what: `${slug}: ${a.answer.slice(0, 80)}`, cwd: dir });
     return a;
 }
+
+// ---------- which agent (and model) does the research ----------
+// One setting for the box: used by Ask, the editor's agent and citation check, and as the default for a research
+// session you start by hand. Unattended runs need an agent with a run-once mode (Claude Code or Codex).
+const settingsFile = () => path.join(config.state, 'research-settings.json');
+const AGENTS = ['claude', 'codex', 'antigravity'], MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
+export function settings() {
+    const s = T.readJson(settingsFile(), {}) || {}; const models = {};
+    for (const a of AGENTS) models[a] = MODEL_OK.test(String(s.models?.[a] || '')) ? s.models[a] : '';
+    return { agent: AGENTS.includes(s.agent) ? s.agent : 'claude', models };
+}
+export function setSettings(body = {}) {
+    const cur = settings();
+    if (body.agent !== undefined) { if (!AGENTS.includes(body.agent)) throw httpError(400, 'Agent: claude, codex or antigravity.'); cur.agent = body.agent; }
+    if (body.models && typeof body.models === 'object') for (const a of AGENTS) if (body.models[a] !== undefined) {
+        const m = String(body.models[a] || '').trim(); if (m && !MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes), or empty for the agent\'s own default.');
+        cur.models[a] = m;
+    }
+    T.writeJson(settingsFile(), cur); record('activity', 'research-settings', { actor: 'phone', what: `research agent: ${cur.agent}${cur.models[cur.agent] ? ` (${cur.models[cur.agent]})` : ''}` });
+    return cur;
+}
+// What an unattended run uses: the chosen agent if it can run once, otherwise Claude Code.
+export function runner() { const s = settings(); const agent = ['claude', 'codex'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }

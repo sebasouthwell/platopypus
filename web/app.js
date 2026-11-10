@@ -528,7 +528,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
           <p class="sub" data-runas-note style="margin:6px 2px 0"></p></div>
         <div class="field"><label for="ns-name">Name</label><input id="ns-name" type="text" value="${esc(suggested)}" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
         <div class="buttons"><button class="primary" data-ok>Start</button><button data-close>Cancel</button></div>`);
-    let kind = preferredKind, agent = localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false, runAs = 'root';
+    let kind = preferredKind, agent = (/^\/?Research\//.test(folder || '') && localStorage.getItem('porthole.researchAgent')) || localStorage.getItem('porthole.agent') || 'claude', yolo = false, resume = false, profile = 'default', scratch = false, runAs = 'root';
     let agentSignIns = {};
     const runNote = () => { const noLogin = runAs === 'agent' && kind === 'agent' && agentSignIns[agent] === false; $('[data-runas-note]', panel).style.color = noLogin ? 'var(--flare)' : ''; $('[data-runas-note]', panel).textContent = noLogin ? `${agentTitle(agent)} is not signed in for the agent user yet: it starts as a fresh install and asks you to sign in (your root login is separate and untouched). ` + 'No root; root commands are asked for on this phone.' : runAs === 'agent' ? 'No root. Root commands are asked for on this phone (elevate). Project credentials via vault get from the project folder. Needs a folder under /Projects or a scratch folder; signs in as the agent user, separately from root logins.' : 'Full access to the whole box, as today.'; };
     api('/api/agent-user').then(a => { if (!a.available) return; const f = $('[data-runas-field]', panel); f.hidden = false; runAs = kind === 'agent' ? 'agent' : 'root'; agentSignIns = a.signedIn || {}; $$('[data-runas] button', panel).forEach(b => { b.classList.toggle('selected', b.dataset.r === runAs); b.onclick = () => { runAs = b.dataset.r; $$('[data-runas] button', panel).forEach(x => x.classList.toggle('selected', x === b)); runNote(); }; }); runNote(); }).catch(() => {});
@@ -3205,10 +3205,25 @@ async function loadResearch() {
     html += r.topics.map(t => `<button class="r-card" data-topic="${esc(t.slug)}"><div class="r-cover" ${t.pages ? `style="background-image:url('/api/research/${encodeURIComponent(t.slug)}/page/1');background-size:cover;background-position:top"` : ''}>${t.pages ? '' : '<div class="t"></div><i></i><i></i><i style="width:60%"></i><i></i><i style="width:70%"></i>'}<div class="c"></div></div>
         <div><h3>${esc(t.title)}</h3><div class="r-meta"><span class="tag ${t.status === 'writing' ? 'brass' : ''}">${esc(t.status)}</span><span class="tag dim">${t.sources} source${t.sources === 1 ? '' : 's'}</span>${t.pages ? `<span class="tag dim">${t.pages} page${t.pages === 1 ? "" : "s"}</span>` : ''}${t.pending ? `<span class="tag brass">${t.pending} for you</span>` : ''}</div><div class="r-line">${t.builtAt ? `Built ${esc(new Date(t.builtAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}` : 'Not built yet'}</div></div></button>`).join('');
     html += `<button class="r-new" data-new-topic><span class="ico brass">${icon('plus')}</span>New research topic</button>`;
+    html += `<h2 class="section">Research agent</h2><div id="r-agent"></div>`;
     body.innerHTML = html;
+    researchAgentCard($('#r-agent', body)).catch(() => {});
     $$('[data-topic].r-card', body).forEach(b => b.onclick = () => openTopic(b.dataset.topic));
     $('[data-new-topic]', body).onclick = newTopicDialog;
     bindAsks(body, () => loadResearch().catch(() => {}));
+}
+// Which agent and model do research work: Ask answers, editor changes, citation checks, and new research sessions.
+async function researchAgentCard(box) {
+    const s = await api('/api/research-settings');
+    const AG = [['claude', 'Claude Code', 'Anthropic', 'for example claude-opus-5-5, claude-sonnet-5-5'], ['codex', 'Codex CLI', 'OpenAI', 'for example gpt-5-codex'], ['antigravity', 'Antigravity', 'Google', 'set in Antigravity itself']];
+    const draw = () => {
+        box.innerHTML = `<div class="card r-agent"><div class="seg" role="radiogroup" aria-label="Research agent">${AG.map(([k, t, v]) => `<button role="radio" aria-checked="${s.agent === k}" data-ra="${k}" class="${s.agent === k ? 'on' : ''}"><b>${t}</b><span>${v}</span></button>`).join('')}</div>
+            ${s.agent === 'antigravity' ? '<p class="note">Antigravity has no run-once mode, so questions, editor changes and citation checks use Claude Code. Sessions you start yourself use Antigravity.</p>' : `<div class="field"><label for="ra-model">Model (optional)</label><input id="ra-model" type="text" spellcheck="false" autocomplete="off" placeholder="${esc(AG.find(a => a[0] === s.agent)[3])}" value="${esc(s.models[s.agent] || '')}"><p class="note" style="margin-top:6px">Empty uses the agent's own default. The name goes to the agent's --model option as you type it.</p></div><div class="r-actions"><button class="btn" data-ra-save>${icon('check')}Save model</button></div>`}
+            <p class="note" style="margin:8px 0 0">Used for Ask, the editor's agent, citation checks, and research sessions you start.</p></div>`;
+        $$('[data-ra]', box).forEach(b => b.onclick = async () => { try { Object.assign(s, await api('/api/research-settings', { method: 'PUT', body: { agent: b.dataset.ra } })); localStorage.setItem('porthole.researchAgent', s.agent); draw(); toast(`Research uses ${AG.find(a => a[0] === s.agent)[1]}`); } catch (ex) { toast(ex.message, true); } });
+        const sv = $('[data-ra-save]', box); if (sv) sv.onclick = async () => { const m = $('#ra-model', box).value.trim(); try { Object.assign(s, await api('/api/research-settings', { method: 'PUT', body: { models: { [s.agent]: m } } })); toast(m ? `Model set: ${m}` : "Back to the agent's default model"); draw(); } catch (ex) { toast(ex.message, true); } };
+    };
+    draw();
 }
 function newTopicDialog() {
     const { panel, close } = openDialog(`<h2>${icon('file-text')}New research topic</h2>
@@ -3252,15 +3267,14 @@ async function loadTopic() {
         $('[data-build]', body).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Building…'; try { const r = await api(`/api/research/${enc}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         $('[data-export]', body).onclick = () => exportDialog(t);
     } else if (tab === 'ask') {
-        const questions = (await api(`/api/research/${enc}/questions`)).questions.filter(q => q.kind !== 'edit');   // edit requests live in the editor
+        const questions = (await api(`/api/research/${enc}/questions`)).questions.filter(q => !q.kind);   // edit requests live in the editor
         const cite = s => esc(s).replace(/\[(s\d{2,4})([^\]]{0,24})\]/g, (m, id, w) => `<button class="r-cite" data-src="${id}">${id}${w}</button>`);
         body.innerHTML = `<p class="r-sub">Ask anything about this topic. The answer comes from its sources and stays here as a note unless you add it to the paper.</p>
             <div class="r-thread">${questions.length ? questions.map(q => `<div class="r-q" data-q="${esc(q.id)}"><p class="you">${esc(q.text)}</p>${q.status === 'waiting' ? `<p class="wait"><span class="dotlive"></span>${q.problem ? esc(q.problem) : 'Looking through the sources…'}</p>` : `<div class="ans">${cite(q.answer || '')}</div><div class="r-actions">${q.toPaper === 'done' ? `<span class="tag" style="color:var(--kelp)">In the paper · ${esc(q.section || '')}</span>` : q.toPaper === 'requested' ? `<span class="tag dim">${q.problem ? esc(q.problem) : 'Being added to the paper…'}</span>` : `<button class="btn" data-add>${icon('plus')}Add to paper</button>`}<button class="btn" data-drop>${icon('x')}Remove</button></div>`}</div>`).join('') : '<p class="empty">No questions yet.</p>'}</div>
             <div class="r-askbox"><textarea id="r-ask" rows="2" placeholder="What do you want to know?"></textarea><button class="btn pri" data-send>${icon('send')}Ask</button></div>`;
-        const agent = localStorage.getItem('porthole.agent') || 'claude';
-        $('[data-send]', body).onclick = async e => { const v = $('#r-ask', body).value.trim(); if (!v) return toast('Write the question first', true); e.currentTarget.disabled = true; try { await api(`/api/research/${enc}/questions`, { method: 'POST', body: { text: v, agent } }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+        $('[data-send]', body).onclick = async e => { const v = $('#r-ask', body).value.trim(); if (!v) return toast('Write the question first', true); e.currentTarget.disabled = true; try { await api(`/api/research/${enc}/questions`, { method: 'POST', body: { text: v } }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         $$('.r-q', body).forEach(card => { const id = card.dataset.q;
-            const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/research/${enc}/questions/${id}/add`, { method: 'POST', body: { agent } }); toast('An agent is working it into the paper'); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
+            const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/research/${enc}/questions/${id}/add`, { method: 'POST', body: {} }); toast('An agent is working it into the paper'); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
             const drop = $('[data-drop]', card); if (drop) drop.onclick = async () => { try { await api(`/api/research/${enc}/questions/${id}/remove`, { method: 'POST', body: {} }); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         });
         $$('.r-cite', body).forEach(b => b.onclick = () => sourceDialog(slug, b.dataset.src));
