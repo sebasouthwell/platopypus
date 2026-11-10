@@ -216,3 +216,18 @@ a.pill { color: var(--foam); text-decoration: none; }
 .s-note.ok { border-color: rgba(63,211,154,.5); background: rgba(63,211,154,.10); }
 #toast.act { pointer-events: auto; cursor: pointer; border-color: var(--brass); box-shadow: 0 10px 30px rgba(0,0,0,.5); padding: 12px 18px; font-weight: 600; }
 #tabs button.ping { position: relative; } #tabs button.ping::after { content: ""; position: absolute; top: 5px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--brass); }
+/* ---------- citation marks under the text ---------- */
+#edbox #marks { position: absolute; inset: 0; margin: 0; border: 0; padding: 12px 14px; font: var(--ts)/1.55 var(--mono); tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; overflow-y: scroll; box-sizing: border-box; color: transparent; background: var(--sea); pointer-events: none; }
+#edbox #hl { background: transparent; }
+#marks mark { color: transparent; border-radius: 3px; }
+#marks .m-partly { background: rgba(240,184,64,.20); box-shadow: 0 2px 0 rgba(240,184,64,.85); }
+#marks .m-unsupported { background: rgba(244,106,92,.20); box-shadow: 0 2px 0 rgba(244,106,92,.9); }
+#marks .m-unclear { background: rgba(147,164,186,.16); box-shadow: 0 2px 0 rgba(147,164,186,.7); }
+#marks .m-uncited { background: transparent; text-decoration: underline wavy rgba(240,184,64,.9); text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
+.mk-info { font-size: 13px; line-height: 1.4; flex: 1 1 100%; padding: 6px 10px; border-radius: 10px; background: var(--hull); border-left: 3px solid var(--mist); }
+.mk-info.m-partly, .mk-info.m-uncited { border-left-color: var(--brass); } .mk-info.m-unsupported { border-left-color: var(--flare); }
+.mk-info i { color: var(--kelp); font-style: normal; }
+.mk-toggle[aria-pressed="false"] { color: var(--mist); }
+.cc-row .pill.edit-it { border-color: var(--brass); color: var(--brass); }
+.cc-row .pill.edit-it + .pill { margin-left: 0; }
+.cc-row .pill.edit-it { margin-left: auto; }

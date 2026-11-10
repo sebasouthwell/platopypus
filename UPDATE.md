@@ -549,6 +549,10 @@ phone's Update button. Mechanism:
   `agent`, `models`), used by Ask, editor changes, citation checks and new research sessions; `shells.create` and
   `agents.command` take an optional `model` passed to `--model` (Claude Code, Codex; checked as a plain name).
   `research setup`: pip no longer fails on Debian's `typing_extensions`. No migration.
+- **2.2.5** — editor: the citation check's findings are marked on the text (partly / not supported / could not
+  check, and statements that need a citation), found by searching the text so they follow edits; the strip under the
+  editor explains the mark at the cursor and switches the marks off (`editor.marks` in the browser). Each problem in
+  the report has "Edit this sentence", which opens the file with those words selected. No server or state change.
 
 ## Release checklist
 

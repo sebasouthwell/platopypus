@@ -92,6 +92,44 @@
     });
     addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+    // ----- citation marks: the check's findings shown on the text itself -----
+    // Found by searching the text (not by stored positions), so they stay on the right sentence while you write.
+    // A third layer under the coloured text carries only the backgrounds and underlines.
+    S.cred = null; S.marks = []; S.marksOn = localStorage.getItem('editor.marks') !== '0';
+    const VERDICT = { partly: 'Partly supported', unsupported: 'Not supported', unclear: 'Could not check' };
+    async function loadCred() { try { const d = await api(`/api/research/${enc}/citecheck`); S.cred = d.report ? { items: d.report.items, uncited: d.report.uncited } : null; } catch { S.cred = null; } paint(); cites(); }
+    function sentenceStart(text, i, floor) { let j = i; while (j > floor) { const c = text[j - 1]; if ((c === '.' || c === '?' || c === '!') && /\s/.test(text[j] || '')) break; if (c === '\n') { const prev = text.slice(text.lastIndexOf('\n', j - 2) + 1, j - 1).trim(); if (!prev || prev.startsWith('\\') || prev.startsWith('%')) break; } j--; } while (j < i && /\s/.test(text[j])) j++; return j; }
+    function computeMarks(text, force = false) {
+        const out = []; if (!S.cred || (!S.marksOn && !force) || !S.cur) return out;
+        const lineStart = n => { let p = 0; for (let k = 1; k < n && p >= 0; k++) p = text.indexOf('\n', p) + 1; return Math.max(0, p); };
+        const paraOf = pos => { let a = text.lastIndexOf('\n\n', pos); a = a < 0 ? 0 : a + 2; let b = text.indexOf('\n\n', pos); b = b < 0 ? text.length : b; return [a, b]; };
+        for (const it of S.cred.items) {
+            if (it.file !== S.cur || it.verdict === 'supported') continue;
+            // the \cite holding this key nearest to the line the report names
+            const re = /\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^}]*)\}/g; const near = lineStart(it.line); let best = null;
+            for (const m of text.matchAll(re)) if (m[1].split(',').map(x => x.trim()).includes(it.key)) { const d = Math.abs(m.index - near); if (!best || d < best.d) best = { d, at: m.index, end: m.index + m[0].length }; }
+            // too far from where the check saw it: that citation has moved or gone since, so do not mark a different one
+            // (the report names the line its paragraph starts on, so: still inside that paragraph, or within a few lines)
+            if (!best) continue; { const [qa, qb] = paraOf(near); if (!(best.at >= qa && best.at <= qb) && Math.abs(text.slice(0, best.at).split('\n').length - it.line) > 8) continue; }
+            const [pa] = paraOf(best.at); out.push({ from: sentenceStart(text, best.at, pa), to: best.end, cls: `m-${it.verdict}`, label: VERDICT[it.verdict] || it.verdict, note: it.note, fix: it.fix, key: it.key });
+        }
+        const words = s => new Set(String(s).toLowerCase().match(/[a-z][a-z-]{3,}/g) || []);
+        for (const u of S.cred.uncited) {
+            if (u.file !== S.cur) continue;
+            const [pa, pb] = paraOf(Math.min(lineStart(u.line), Math.max(0, text.length - 1))); const want = words(u.note); let best = null;
+            // the sentence in that paragraph that shares the most words with the agent's note
+            for (const m of text.slice(pa, pb).matchAll(/[^.!?]+[.!?]?/g)) { const s = m[0]; const got = [...words(s)].filter(w => want.has(w)).length; if (got >= 2 && (!best || got > best.got)) { const lead = s.length - s.trimStart().length; best = { got, from: pa + m.index + lead, to: pa + m.index + s.trimEnd().length }; } }
+            if (best) out.push({ from: best.from, to: best.to, cls: 'm-uncited', label: 'Needs a citation', note: u.note });
+        }
+        return out.sort((x, y) => x.from - y.from).filter((m, i, a) => !i || m.from >= a[i - 1].to);   // no overlaps
+    }
+    function paintMarks(text) {
+        S.marks = computeMarks(text); let html = '', last = 0;
+        for (const m of S.marks) { html += esc(text.slice(last, m.from)) + `<mark class="${m.cls}">${esc(text.slice(m.from, m.to))}</mark>`; last = m.to; }
+        $('#marks').innerHTML = html + esc(text.slice(last)) + '\n ';
+        $('#marks').scrollTop = code.scrollTop;
+    }
+
     // ----- colour for LaTeX and BibTeX -----
     // The text box itself stays a plain text box (so typing, selection, spelling and undo behave as usual). Its letters
     // are transparent, and the same text, coloured, sits exactly underneath.
@@ -100,7 +138,7 @@
     function paint() {
         const text = code.value, bib = /\.bib$/.test(S.cur || ''); let out = '', last = 0;
         const put = (cls, s) => { out += `<span class="${cls}">${esc(s)}</span>`; };
-        if (text.length > 400000) { $('#hl').textContent = text + '\n '; return; }      // very large file: plain, still aligned
+        if (text.length > 400000) { $('#hl').textContent = text + '\n '; paintMarks(text); return; }      // very large file: plain, still aligned
         for (const m of text.matchAll(bib ? BIB : TEX)) {
             out += esc(text.slice(last, m.index)); last = m.index + m[0].length;
             if (bib) {
@@ -114,10 +152,10 @@
             else put('t-br', m[7]);
         }
         $('#hl').innerHTML = out + esc(text.slice(last)) + '\n ';
-        $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft;
+        $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft; paintMarks(text);
     }
     code.addEventListener('input', paint);
-    code.addEventListener('scroll', () => { $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft; });
+    code.addEventListener('scroll', () => { $('#hl').scrollTop = code.scrollTop; $('#hl').scrollLeft = code.scrollLeft; $('#marks').scrollTop = code.scrollTop; });
 
     // ----- size and layout: text size on the left, zoom on the right, a side panel you can put away -----
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -155,10 +193,12 @@
     }
     function cites() {
         const list = citesAt(code.selectionStart); const box = $('#cites');
-        const pos = `<span id="pos">Line ${code.value.slice(0, code.selectionStart).split('\n').length}</span>`;
-        if (!list.length) { box.innerHTML = '<span class="muted">Put the cursor in a \\cite{…} to see its source. Ctrl/Cmd-click a key to open it.</span>' + pos; return; }
+        const at = code.selectionStart; const mk = S.marksOn ? S.marks.find(m => at >= m.from && at <= m.to) : null;
+        const pos = `${mk ? `<span class="mk-info ${mk.cls}"><b>${esc(mk.label)}${mk.key ? ` · ${esc(mk.key)}` : ''}</b> ${esc(mk.note || '')}${mk.fix ? ` <i>Do: ${esc(mk.fix)}</i>` : ''}</span>` : ''}${S.cred ? `<button class="pill mk-toggle" aria-pressed="${S.marksOn}" title="Show the citation check on the text">Citation marks ${S.marksOn ? 'on' : 'off'}</button>` : ''}<span id="pos">Line ${code.value.slice(0, at).split('\n').length}</span>`;
+        const bindToggle = () => { const t = $('.mk-toggle', box); if (t) t.onclick = () => { S.marksOn = !S.marksOn; localStorage.setItem('editor.marks', S.marksOn ? '1' : '0'); paint(); cites(); }; };
+        if (!list.length) { box.innerHTML = (mk ? '' : '<span class="muted">Put the cursor in a \\cite{…} to see its source. Ctrl/Cmd-click a key to open it.</span>') + pos; bindToggle(); return; }
         box.innerHTML = list.map((c, i) => { const e = S.bib.get(c.key); return `<span class="chip ${e ? '' : 'bad'}"><b>${esc(c.key)}</b>${e ? `<span>${esc(e.title.slice(0, 46))}${c.where ? ` · ${esc(c.where)}` : ''}</span><button class="pill" data-open="${i}">Open source</button>` : '<span>not in refs.bib</span>'}</span>`; }).join('') + pos;
-        $$('#cites [data-open]', box).forEach(b => b.onclick = () => openSource(list[+b.dataset.open].key, list[+b.dataset.open].where));
+        $$('#cites [data-open]', box).forEach(b => b.onclick = () => openSource(list[+b.dataset.open].key, list[+b.dataset.open].where)); bindToggle();
     }
     ['keyup', 'click'].forEach(ev => code.addEventListener(ev, e => {
         cites();
@@ -248,7 +288,7 @@
             const done = q.status !== 'waiting' && (q.toPaper !== 'requested');
             if (!watchPrimed) { if (done) seenDone.add(q.id + (q.toPaper || '')); continue; }
             const key = q.id + (q.toPaper || ''); if (!done || seenDone.has(key)) continue; seenDone.add(key);
-            if (q.kind === 'check') { notice('Citation check finished. Click to see the report.', 'cites'); if (S.pane === 'cites') drawCiteCheck(); }
+            if (q.kind === 'check') { notice('Citation check finished: problems are marked on the text. Click for the report.', 'cites'); loadCred(); if (S.pane === 'cites') drawCiteCheck(); }
             else if (q.kind === 'edit') { notice('The agent has finished its change. Click to see what changed.', 'changes'); if (!S.dirty && S.cur) openFile(S.cur).catch(() => {}); refreshPreview(); if (S.pane === 'agent') drawAgent(); }
             else notice(q.toPaper === 'done' ? 'An answer was added to the paper.' : 'Your question has been answered (see Ask on the topic page).', 'agent');
         }
@@ -260,8 +300,24 @@
 
     // ----- citation check: the mechanical part at once, the agent's reading of each source on request -----
     let ccPoll = null;
-    async function jump(file, line) {
+    // Go to what a report row is about: the marked sentence itself when it can be found, otherwise the paragraph.
+    async function jump(file, line, { key = '', uncited = null } = {}) {
         if (S.cur !== file) await openFile(file).catch(e => toast(e.message, true));
+        if (key || uncited) {
+            const marks = computeMarks(code.value, true); const lineAt = pos => code.value.slice(0, pos).split('\n').length;
+            const pick = marks.filter(m => uncited ? m.cls === 'm-uncited' && m.note === uncited.note : m.key === key).sort((a, b) => Math.abs(lineAt(a.from) - line) - Math.abs(lineAt(b.from) - line))
+                // the same rule as the marks: inside the paragraph the report names (it starts on `line`), or within a few lines
+                .filter(m => { const ls = code.value.split('\n'); let end = line - 1; while (end < ls.length && ls[end].trim()) end++; const l = lineAt(m.from); return (l >= line && l <= end) || Math.abs(l - line) <= 8; })[0];
+            if (!pick) toast(uncited ? 'That sentence has changed since the check: showing its paragraph.' : 'That citation has moved or been removed since the check: showing where it was.', true);
+            if (pick) {
+                view('edit'); if (innerWidth > 900 && S.pane !== 'cites') pane('cites');
+                code.focus(); code.setSelectionRange(pick.from, pick.to);
+                // scroll so the sentence sits a third of the way down, using the marks layer (it wraps exactly like the text)
+                const el = [...$('#marks').querySelectorAll('mark')].find(x => x.textContent === code.value.slice(pick.from, pick.to));
+                if (el) code.scrollTop = Math.max(0, el.offsetTop - code.clientHeight / 3);
+                $('#marks').scrollTop = code.scrollTop; $('#hl').scrollTop = code.scrollTop; cites(); return;
+            }
+        }
         const ls = code.value.split('\n'); const from = ls.slice(0, Math.max(0, line - 1)).join('\n').length + (line > 1 ? 1 : 0); let to = from; for (let i = line - 1; i < ls.length && ls[i].trim(); i++) to += ls[i].length + 1;
         view('edit'); code.focus(); code.setSelectionRange(from, Math.max(from, to - 1)); code.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(code).lineHeight)); cites();
     }
@@ -269,6 +325,7 @@
         const box = $('#citecheck'); if (box.hidden) return;
         let d; try { d = await api(`/api/research/${enc}/citecheck`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         const sc = d.scan, rp = d.report, busy = d.run && d.run.status === 'waiting' && !d.run.problem;
+        S.cred = rp ? { items: rp.items, uncited: rp.uncited } : null; paint();
         const queues = new Map(); if (rp) for (const i of rp.items) { const k = `${i.file}|${i.key}`; if (!queues.has(k)) queues.set(k, []); queues.get(k).push(i); }
         const byKey = new Map(); for (const it of sc.items) for (const c of it.cites) { const r = queues.get(`${it.file}|${c.key}`)?.shift(); if (r) byKey.set(`${it.n}:${c.key}:${c.where}`, r); }
         const count = v => rp ? rp.items.filter(i => i.verdict === v).length : 0; const LABEL = { supported: 'Supported', partly: 'Partly', unsupported: 'Not supported', unclear: 'Could not tell' };
@@ -283,19 +340,19 @@
             if (c.problems.length || (r && r.verdict !== 'supported')) attention.push(row); else fine.push(row);
         }
         const order = { unsupported: 0, partly: 1, unclear: 2 }; attention.sort((x, y) => (order[x.r?.verdict] ?? 3) - (order[y.r?.verdict] ?? 3));
-        const rowHtml = ({ it, c, r }) => `<div class="cc-cite"><div class="cc-row">${r ? `<span class="v ${r.verdict}">${LABEL[r.verdict]}</span>` : c.problems.length ? '<span class="v unsupported">Problem</span>' : '<span class="v unclear">Not checked</span>'}<b>${esc(c.key)}</b>${c.where ? `<span class="muted">${esc(c.where)}</span>` : ''}<button class="d-open" data-jump="${esc(it.file)}|${it.line}">${where(it)}</button>${c.source ? `<button class="pill" data-src-key="${esc(c.key)}" data-src-where="${esc(c.where)}">Open source</button>` : ''}</div>${c.problems.map(p => `<p class="cc-prob">${esc(p)}</p>`).join('')}${r?.note ? `<p class="cc-note">${esc(r.note)}</p>` : ''}${r?.fix ? `<p class="cc-fix">Do: ${esc(r.fix)}</p>` : ''}</div>`;
+        const rowHtml = ({ it, c, r }) => `<div class="cc-cite"><div class="cc-row">${r ? `<span class="v ${r.verdict}">${LABEL[r.verdict]}</span>` : c.problems.length ? '<span class="v unsupported">Problem</span>' : '<span class="v unclear">Not checked</span>'}<b>${esc(c.key)}</b>${c.where ? `<span class="muted">${esc(c.where)}</span>` : ''}<button class="d-open" data-jump="${esc(it.file)}|${it.line}" data-jkey="${esc(c.key)}">${where(it)}</button>${r && r.verdict !== 'supported' || c.problems.length ? `<button class="pill edit-it" data-jump="${esc(it.file)}|${it.line}" data-jkey="${esc(c.key)}">Edit this sentence</button>` : ''}${c.source ? `<button class="pill" data-src-key="${esc(c.key)}" data-src-where="${esc(c.where)}">Open source</button>` : ''}</div>${c.problems.map(p => `<p class="cc-prob">${esc(p)}</p>`).join('')}${r?.note ? `<p class="cc-note">${esc(r.note)}</p>` : ''}${r?.fix ? `<p class="cc-fix">Do: ${esc(r.fix)}</p>` : ''}</div>`;
         const nUncited = rp?.uncited.length || 0;
         box.innerHTML = `<div class="cc-top"><div><b>${sc.citations} citation${sc.citations === 1 ? '' : 's'} in ${sc.paragraphs} paragraph${sc.paragraphs === 1 ? '' : 's'}</b><span>${sc.problems ? `${sc.problems} problem${sc.problems === 1 ? '' : 's'} found without reading the sources` : 'Keys, source files, pages and times all line up'}</span></div><button class="btn pri" id="cc-run" ${busy || !sc.citations ? 'disabled' : ''}>${busy ? 'Checking…' : rp ? 'Check again' : 'Check against the sources'}</button></div>
             ${busy ? '<div class="s-note">An agent is reading each cited passage. This takes a few minutes for a long paper; you can keep writing and you will be told when it is done.</div>' : d.run?.problem ? `<div class="s-note">${esc(d.run.problem)}</div>` : !rp ? '<p class="muted cc-hint">"Check against the sources" has an agent open every cited page or moment and judge whether it supports the sentence: wrong numbers, overstated claims, the right source at the wrong page. It reports; it does not edit.</p>' : ''}
             ${rp ? `<div class="cc-counts big">${['supported', 'partly', 'unsupported', 'unclear'].map(v => `<span class="v ${v}"><b>${count(v)}</b> ${LABEL[v].toLowerCase()}</span>`).join('')}${nUncited ? `<span class="v partly"><b>${nUncited}</b> with no citation</span>` : ''}${sc.unused.length ? `<span class="v unclear"><b>${sc.unused.length}</b> never cited</span>` : ''}</div><p class="muted cc-when">Checked ${esc(new Date(rp.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}${d.run?.by ? ` by ${esc(d.run.by)}` : ''}${stale ? ' · the paper has changed since, so some citations have no verdict yet' : ''}</p>` : ''}
             ${attention.length ? `<h3 class="cc-h">Needs a look (${attention.length})</h3>${attention.map(rowHtml).join('')}` : rp ? '<div class="s-note ok">Every citation checked out against its source.</div>' : ''}
-            ${nUncited ? `<h3 class="cc-h">Statements with no citation (${nUncited})</h3>${rp.uncited.map(u => `<div class="cc-cite"><div class="cc-row"><span class="v partly">No citation</span><button class="d-open" data-jump="${esc(u.file)}|${u.line}">${where(u)}</button></div><p class="cc-note">${esc(u.note)}</p></div>`).join('')}` : ''}
+            ${nUncited ? `<h3 class="cc-h">Statements with no citation (${nUncited})</h3>${rp.uncited.map((u, ui) => `<div class="cc-cite"><div class="cc-row"><span class="v partly">No citation</span><button class="d-open" data-jump="${esc(u.file)}|${u.line}" data-juncited="${ui}">${where(u)}</button><button class="pill edit-it" data-jump="${esc(u.file)}|${u.line}" data-juncited="${ui}">Edit this sentence</button></div><p class="cc-note">${esc(u.note)}</p></div>`).join('')}` : ''}
             ${sc.unused.length ? `<h3 class="cc-h">In refs.bib but never cited (${sc.unused.length})</h3><p class="cc-note cc-keys">${sc.unused.map(k => `<span>${esc(k)}</span>`).join('')}</p>` : ''}
             ${rp?.summary ? `<details class="cc-fold"><summary>The agent's summary</summary><p class="cc-note">${esc(rp.summary)}</p></details>` : ''}
             ${fine.length ? `<details class="cc-fold" ${rp || attention.length ? '' : 'open'}><summary>${rp ? `Supported citations (${fine.length})` : `All citations (${fine.length})`}</summary>${fine.map(rowHtml).join('')}</details>` : ''}
             ${!sc.items.length ? '<div class="empty">No citations in the paper yet.</div>' : ''}`;
         $('#cc-run').onclick = async () => { if (!(await save())) return; try { await api(`/api/research/${enc}/citecheck`, { method: 'POST', body: {} }); kick(); } catch (e) { toast(e.message, true); } drawCiteCheck(); };
-        $$('[data-jump]', box).forEach(b => b.onclick = () => { const [f, l] = b.dataset.jump.split('|'); jump(f, Number(l)); });
+        $$('[data-jump]', box).forEach(b => b.onclick = () => { const [f, l] = b.dataset.jump.split('|'); jump(f, Number(l), { key: b.dataset.jkey, uncited: b.dataset.juncited !== undefined ? rp?.uncited[Number(b.dataset.juncited)] : null }); });
         $$('[data-src-key]', box).forEach(b => b.onclick = () => openSource(b.dataset.srcKey, b.dataset.srcWhere));
         clearTimeout(ccPoll); if (busy) ccPoll = setTimeout(drawCiteCheck, 6000);
     }
@@ -460,6 +517,6 @@
     // ----- go -----
     (async () => {
         if (!slug) { $('#title').textContent = 'No topic'; return; }
-        try { watch(); if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
+        try { watch(); if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); loadCred(); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
     })();
 })();
