@@ -385,3 +385,48 @@ a.pill { color: var(--foam); text-decoration: none; }
 #refs .acts { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: var(--hull-2); border: 1px solid var(--rail); border-radius: 10px; padding: 2px; display: flex; gap: 2px; }
 #cc-run { background: none; border: 1px solid var(--rail); color: var(--foam); font-weight: 500; }
 #cc-run:hover:not(:disabled) { border-color: var(--mist); }
+/* ---------- quiet scrollbars: thin, and only a faint thumb ---------- */
+* { scrollbar-width: thin; scrollbar-color: rgba(147,164,186,.28) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(147,164,186,.22); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(147,164,186,.45); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* the coloured layers under the text keep the same scrollbar width (so lines wrap alike) but never show it */
+#edbox #hl, #edbox #marks { scrollbar-color: transparent transparent; }
+#edbox #hl::-webkit-scrollbar-thumb, #edbox #marks::-webkit-scrollbar-thumb { background: transparent; }
+
+/* ---------- resizable columns (desktop) ---------- */
+@media (min-width: 901px) {
+  #grid { grid-template-columns: var(--rail-w, 220px) minmax(300px, 1fr) var(--side-w, minmax(320px, 44%)); }
+  #grid.norail { grid-template-columns: minmax(300px, 1fr) var(--side-w, minmax(320px, 44%)); }
+  #grid.wide-side { grid-template-columns: var(--rail-w, 220px) minmax(300px, 1fr) var(--split-w, minmax(520px, 60%)); }
+  #grid.norail.wide-side { grid-template-columns: minmax(300px, 1fr) var(--split-w, minmax(520px, 62%)); }
+  #rail, #side { position: relative; }
+  .gut { position: absolute; top: 0; bottom: 0; width: 9px; z-index: 5; cursor: col-resize; touch-action: none; }
+  .gut-rail { right: -5px; } .gut-side { left: -5px; }
+  .gut::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background .12s; }
+  .gut:hover::after, body.resizing .gut::after { background: var(--brass); }
+  body.resizing { cursor: col-resize; user-select: none; }
+  body.resizing iframe, body.resizing #side * { pointer-events: none; }
+}
+@media (max-width: 900px) { .gut { display: none; } }
+/* ---------- reference record ---------- */
+.rec { border: 1px solid var(--rail); border-radius: 12px; margin: 0 0 12px; background: var(--hull); }
+.rec > summary { cursor: pointer; display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; font-size: 13px; color: var(--mist); }
+.rec > summary span { font-weight: 600; color: var(--foam); } .rec > summary em { font-style: normal; } .rec > summary b { font: 500 12.5px var(--mono); color: var(--k-key); }
+.rec-why { margin: 0 12px 8px; font-size: 12.5px; color: var(--dim); }
+.rec dl { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; margin: 0 12px 10px; font-size: 13px; }
+.rec dt { color: var(--mist); } .rec dd { margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .rec dd span { overflow-wrap: anywhere; }
+.rec dd small { font-size: 11px; color: var(--dim); white-space: nowrap; } .rec dd small.from-you { color: var(--brass); } .rec dd small.from-doi { color: var(--s-ok); }
+.rec-acts { display: flex; gap: 6px; margin: 0 12px 10px; }
+.rec-bib { margin: 0 12px 12px; } .rec-bib > summary { cursor: pointer; font-size: 12.5px; color: var(--mist); } .rec-bib pre { margin: 6px 0 0; font-size: 12px; }
+.rec-form { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0 12px 10px; align-items: center; }
+.rec-form label { display: contents; } .rec-form label span { font-size: 13px; color: var(--mist); }
+.rec-form input, .rec-form select { background: var(--sea); color: var(--foam); border: 1px solid var(--rail); border-radius: 8px; padding: 6px 9px; font: 13px var(--font); }
+.rec-form .rec-acts { grid-column: 1 / -1; margin: 6px 0 0; } .pill.pri { border-color: var(--brass); color: var(--brass); }
+#menu a.mitem { text-decoration: none; }
+@media (min-width: 901px) { #ed { position: relative; } .gut-rail { right: auto; left: -5px; } #grid.norail .gut-rail { display: none; } }
+#refs li.sub { display: block; padding: 14px 14px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--dim); cursor: default; }
+#refs .k.t-plain { color: var(--foam); font: 13px var(--font); }

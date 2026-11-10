@@ -3200,12 +3200,12 @@ async function loadResearch() {
     const r = await api('/api/research');
     const sub = $('#more-research-sub'); if (sub) sub.textContent = r.asks.length ? `${r.asks.length} need${r.asks.length === 1 ? 's' : ''} you` : r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'}` : 'Papers your agents write from sources';
     const body = $('#research-body');
-    let html = `<p class="r-sub">${r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'} · papers built from sources your agents read` : 'A paper, written by an agent from real sources you can check.'}</p>`;
+    let html = `<div id="r-agent"></div>`;
+    html += `<p class="r-sub">${r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'} · papers built from sources your agents read` : 'A paper, written by an agent from real sources you can check.'}</p>`;
     if (r.asks.length) html += `<h2 class="section">Needs you</h2>${r.asks.map(askCard).join('')}`;
     html += r.topics.map(t => `<button class="r-card" data-topic="${esc(t.slug)}"><div class="r-cover" ${t.pages ? `style="background-image:url('/api/research/${encodeURIComponent(t.slug)}/page/1');background-size:cover;background-position:top"` : ''}>${t.pages ? '' : '<div class="t"></div><i></i><i></i><i style="width:60%"></i><i></i><i style="width:70%"></i>'}<div class="c"></div></div>
         <div><h3>${esc(t.title)}</h3><div class="r-meta"><span class="tag ${t.status === 'writing' ? 'brass' : ''}">${esc(t.status)}</span><span class="tag dim">${t.sources} source${t.sources === 1 ? '' : 's'}</span>${t.pages ? `<span class="tag dim">${t.pages} page${t.pages === 1 ? "" : "s"}</span>` : ''}${t.pending ? `<span class="tag brass">${t.pending} for you</span>` : ''}</div><div class="r-line">${t.builtAt ? `Built ${esc(new Date(t.builtAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}` : 'Not built yet'}</div></div></button>`).join('');
     html += `<button class="r-new" data-new-topic><span class="ico brass">${icon('plus')}</span>New research topic</button>`;
-    html += `<h2 class="section">Research agent</h2><div id="r-agent"></div>`;
     body.innerHTML = html;
     researchAgentCard($('#r-agent', body)).catch(() => {});
     $$('[data-topic].r-card', body).forEach(b => b.onclick = () => openTopic(b.dataset.topic));
@@ -3217,30 +3217,64 @@ async function researchAgentCard(box) {
     const s = await api('/api/research-settings');
     const AG = [['claude', 'Claude Code', 'Anthropic', 'for example claude-opus-5-5, claude-sonnet-5-5'], ['codex', 'Codex CLI', 'OpenAI', 'for example gpt-5-codex'], ['antigravity', 'Antigravity', 'Google', 'set in Antigravity itself']];
     const draw = () => {
-        box.innerHTML = `<div class="card r-agent"><div class="seg" role="radiogroup" aria-label="Research agent">${AG.map(([k, t, v]) => `<button role="radio" aria-checked="${s.agent === k}" data-ra="${k}" class="${s.agent === k ? 'on' : ''}"><b>${t}</b><span>${v}</span></button>`).join('')}</div>
-            ${s.agent === 'antigravity' ? '<p class="note">Antigravity has no run-once mode, so questions, editor changes and citation checks use Claude Code. Sessions you start yourself use Antigravity.</p>' : `<div class="field"><label for="ra-model">Model (optional)</label><input id="ra-model" type="text" spellcheck="false" autocomplete="off" placeholder="${esc(AG.find(a => a[0] === s.agent)[3])}" value="${esc(s.models[s.agent] || '')}"><p class="note" style="margin-top:6px">Empty uses the agent's own default. The name goes to the agent's --model option as you type it.</p></div><div class="r-actions"><button class="btn" data-ra-save>${icon('check')}Save model</button></div>`}
+        box.innerHTML = `<div class="card r-agent"><div class="r-agent-h"><b>Research agent</b><span>${esc(AG.find(a => a[0] === s.agent)[1])}${s.agent !== 'antigravity' && s.models[s.agent] ? ` · ${esc(s.models[s.agent])}` : s.agent !== 'antigravity' ? ' · its default model' : ''}</span></div><div class="seg" role="radiogroup" aria-label="Research agent">${AG.map(([k, t, v]) => `<button role="radio" aria-checked="${s.agent === k}" data-ra="${k}" class="${s.agent === k ? 'on' : ''}"><b>${t}</b><span>${v}</span></button>`).join('')}</div>
+            ${s.agent === 'antigravity' ? '<p class="note">Antigravity has no run-once mode, so questions, editor changes and citation checks use Claude Code. Sessions you start yourself use Antigravity.</p>' : `<div class="field"><label for="ra-model">Model (optional)</label><input id="ra-model" type="text" spellcheck="false" autocomplete="off" placeholder="${esc(AG.find(a => a[0] === s.agent)[3])}" value="${esc(s.models[s.agent] || '')}"><p class="note" style="margin-top:6px">Empty uses the agent's own default. The name goes to the agent's --model option as you type it.</p></div><div class="r-actions"><button class="btn" data-ra-save disabled>${icon('check')}Current model</button></div>`}
             <p class="note" style="margin:8px 0 0">Used for Ask, the editor's agent, citation checks, and research sessions you start.</p></div>`;
         $$('[data-ra]', box).forEach(b => b.onclick = async () => { try { Object.assign(s, await api('/api/research-settings', { method: 'PUT', body: { agent: b.dataset.ra } })); localStorage.setItem('porthole.researchAgent', s.agent); draw(); toast(`Research uses ${AG.find(a => a[0] === s.agent)[1]}`); } catch (ex) { toast(ex.message, true); } });
+        const inp = $('#ra-model', box), sv0 = $('[data-ra-save]', box);
+        if (inp && sv0) inp.oninput = () => { const changed = inp.value.trim() !== (s.models[s.agent] || ''); sv0.disabled = !changed; sv0.innerHTML = `${icon('check')}${changed ? 'Save model' : 'Current model'}`; };
         const sv = $('[data-ra-save]', box); if (sv) sv.onclick = async () => { const m = $('#ra-model', box).value.trim(); try { Object.assign(s, await api('/api/research-settings', { method: 'PUT', body: { models: { [s.agent]: m } } })); toast(m ? `Model set: ${m}` : "Back to the agent's default model"); draw(); } catch (ex) { toast(ex.message, true); } };
     };
     draw();
 }
+// Template and style for a topic: a LaTeX zip or an example PDF, your style notes, and pictures from it (a logo).
+async function templateCard(box, slug) {
+    const enc = encodeURIComponent(slug);
+    const draw = ({ template: tp, structure, notes, images }) => {
+        box.innerHTML = `<div class="card tpl">
+            <div class="tpl-h"><b>Template and style</b><span>${tp ? `${esc(tp.name)} · ${tp.kind === 'latex' ? `LaTeX, ${tp.files} files${tp.adopted ? ', used as the paper' : ''}` : `example PDF, ${tp.pages} page${tp.pages === 1 ? '' : 's'}`}` : 'none yet (optional)'}</span></div>
+            ${tp ? '' : '<p class="note" style="margin:0 0 10px">Upload a LaTeX template (a zip, such as Overleaf: Menu, Download, Source) or a PDF of a paper whose look you want. The agent keeps to its structure and style; it never cites or copies its text.</p>'}
+            <div class="field"><label for="tpl-notes">Style notes (optional)</label><textarea id="tpl-notes" rows="3" placeholder="For example: two columns, Times, IEEE citations, our logo top left, no more than 8 pages">${esc(notes || '')}</textarea></div>
+            ${images?.length ? `<p class="tpl-sub">Pictures from it (a logo?). Use one in the paper:</p><div class="tpl-imgs">${images.map(n => `<button class="tpl-img" data-img="${esc(n)}" title="${esc(n)}"><img alt="" src="/api/files/download?inline=1&path=${encodeURIComponent(`Research/${slug}/template/${n}`)}"><span>${esc(n.split('/').pop())}</span></button>`).join('')}</div>` : ''}
+            ${!tp || tp.kind === 'latex' ? `<label class="chk-row"><input type="checkbox" id="tpl-adopt"> For a LaTeX zip: make it the paper's starting point (the current paper is kept as a version)</label>` : ''}
+            <div class="r-actions"><button class="btn" data-tpl-up>${icon('upload')}${tp ? 'Replace' : 'Upload a zip or PDF'}</button><button class="btn" data-tpl-save>${icon('check')}Save notes</button>${tp ? `<button class="btn" data-tpl-rm>${icon('x')}Remove</button>` : ''}<input type="file" id="tpl-file" accept=".zip,.pdf,application/zip,application/pdf" hidden></div>
+            ${structure ? `<details class="tpl-struct"><summary>What the agent takes from it</summary><pre class="r-notes">${esc(structure)}</pre></details>` : ''}</div>`;
+        $('[data-tpl-up]', box).onclick = () => $('#tpl-file', box).click();
+        $('#tpl-file', box).onchange = async e => { const f = e.target.files[0]; if (!f) return; try { draw(await uploadTemplate(slug, f, !!$('#tpl-adopt', box)?.checked)); } catch (ex) { toast(ex.message, true); } };
+        $('[data-tpl-save]', box).onclick = async () => { try { draw(await api(`/api/research/${enc}/template/notes`, { method: 'POST', body: { text: $('#tpl-notes', box).value } })); toast('Style notes saved'); } catch (ex) { toast(ex.message, true); } };
+        const rm = $('[data-tpl-rm]', box); if (rm) rm.onclick = async () => { try { await api(`/api/research/${enc}/template/remove`, { method: 'POST', body: {} }); draw({ template: null, structure: '', notes: '', images: [] }); } catch (ex) { toast(ex.message, true); } };
+        $$('[data-img]', box).forEach(b => b.onclick = async () => { try { const r = await api(`/api/research/${enc}/template/use-image`, { method: 'POST', body: { name: b.dataset.img } }); try { await navigator.clipboard.writeText(r.latex); } catch { /* no clipboard */ } toast(`Copied to ${r.file}. The line to show it is on your clipboard: ${r.latex}`); } catch (ex) { toast(ex.message, true); } });
+    };
+    draw(await api(`/api/research/${enc}/template`));
+}
+async function uploadTemplate(slug, file, adopt) {
+    toast(`Uploading ${file.name}…`);
+    const res = await fetch(`/api/research/${encodeURIComponent(slug)}/template?name=${encodeURIComponent(file.name)}${adopt ? '&adopt=1' : ''}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: file, credentials: 'same-origin' });
+    const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText);
+    toast(r.template.adopted ? 'The template is now the paper' : 'Template saved: the agent will keep to it'); return r;
+}
 function newTopicDialog() {
     const { panel, close } = openDialog(`<h2>${icon('file-text')}New research topic</h2>
-        <div class="field"><label for="rt-title">Topic</label><input id="rt-title" type="text" maxlength="120" placeholder="Tidal energy storage in coastal grids" autocapitalize="sentences"></div>
-        <div class="field"><label for="rt-brief">What should it find out? (optional)</label><textarea id="rt-brief" rows="4" placeholder="Scope, questions, what kind of sources, how long"></textarea></div>
-        <p class="muted">A folder is made at <span class="mono">/Research/&lt;topic&gt;</span> with a LaTeX paper, a place for sources and notes.</p>
-        <div class="buttons"><button data-close>Cancel</button><button data-ok>Create</button><button class="primary" data-go>Create and start an agent</button></div>`);
-    const make = async start => {
-        const title = $('#rt-title', panel).value.trim(), brief = $('#rt-brief', panel).value.trim();
+        <div class="field"><label for="rt-title">Title</label><input id="rt-title" type="text" maxlength="120" placeholder="Tidal energy storage in coastal grids" autocapitalize="sentences"></div>
+        <div class="field"><label>Start with</label><div class="seg2" role="radiogroup"><button type="button" role="radio" aria-checked="true" class="on" data-start="blank"><b>A blank paper</b><span>An empty LaTeX paper. Add sources and write.</span></button><button type="button" role="radio" aria-checked="false" data-start="tpl"><b>A template or example</b><span>A LaTeX zip or a PDF whose look to keep.</span></button></div></div>
+        <div data-tplbox hidden><div class="field"><input type="file" id="rt-file" accept=".zip,.pdf,application/zip,application/pdf"></div><label class="chk-row"><input type="checkbox" id="rt-adopt" checked> For a LaTeX zip: make it the paper itself</label><div class="field"><label for="rt-notes">Style notes (optional)</label><textarea id="rt-notes" rows="2" placeholder="Two columns, IEEE citations, our logo top left"></textarea></div></div>
+        <div class="field"><label for="rt-brief">What should it find out? (optional, for an agent)</label><textarea id="rt-brief" rows="3" placeholder="Scope, questions, what kind of sources, how long"></textarea></div>
+        <label class="chk-row"><input type="checkbox" id="rt-agent"> Start a research agent on it now</label>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Create</button></div>`);
+    let start = 'blank';
+    $$('[data-start]', panel).forEach(b => b.onclick = () => { start = b.dataset.start; $$('[data-start]', panel).forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on)); }); $('[data-tplbox]', panel).hidden = start !== 'tpl'; });
+    $('[data-ok]', panel).onclick = async () => {
+        const title = $('#rt-title', panel).value.trim(), brief = $('#rt-brief', panel).value.trim(), agent = $('#rt-agent', panel).checked;
         if (title.length < 3) return toast('Give the topic a title', true);
+        const file = $('#rt-file', panel).files[0]; if (start === 'tpl' && !file) return toast('Choose the template zip or example PDF, or start with a blank paper', true);
+        $('[data-ok]', panel).disabled = true;
         try {
-            const t = await api('/api/research', { method: 'POST', body: { title, brief } }); close();
-            await openTopic(t.slug);
-            if (start) newShellDialog(`Research/${t.slug}`, 'agent', null, { firstPrompt: `Research: ${title}.${brief ? '\n\n' + brief : ''}\n\nRead notes/outline.md and .platopypus/research.md first, then gather sources with the research tools and write the paper.` });
-        } catch (ex) { toast(ex.message, true); }
+            const t = await api('/api/research', { method: 'POST', body: { title, brief, blank: !agent } });
+            if (start === 'tpl') { await uploadTemplate(t.slug, file, $('#rt-adopt', panel).checked); const n = $('#rt-notes', panel).value.trim(); if (n) await api(`/api/research/${encodeURIComponent(t.slug)}/template/notes`, { method: 'POST', body: { text: n } }); }
+            close(); await openTopic(t.slug, 'paper');
+            if (agent) newShellDialog(`Research/${t.slug}`, 'agent', null, { firstPrompt: `Research: ${title}.${brief ? '\n\n' + brief : ''}\n\nRead notes/outline.md and .platopypus/research.md first, then gather sources with the research tools and write the paper.` });
+        } catch (ex) { toast(ex.message, true); $('[data-ok]', panel).disabled = false; }
     };
-    $('[data-ok]', panel).onclick = () => make(false); $('[data-go]', panel).onclick = () => make(true);
 }
 
 async function openTopic(slug, tab) {
@@ -3260,12 +3294,13 @@ async function loadTopic() {
         const b = t.build;
         let html = '';
         if (t.pagesAvailable) html += `<div class="r-pages">${Array.from({ length: t.pagesAvailable }, (_, i) => `<img class="r-page" loading="lazy" alt="Page ${i + 1} of ${t.pagesAvailable}" src="/api/research/${enc}/page/${i + 1}?v=${b?.at || 0}">`).join('')}</div>`;
-        else html += `<div class="card"><p style="margin:0">${b && !b.ok ? 'The last build failed.' : 'The paper has not been built yet.'} ${t.sources.length ? '' : 'It builds once the agent has written something; you can build at any time.'}</p></div>`;
+        else html += `<div class="card"><p style="margin:0">${b && !b.ok ? 'The last build failed.' : 'Not built yet.'} Press Build whenever you want to see it.</p></div>`;
         html += `<div class="r-actions"><button class="btn pri" data-build>${icon('restart')}Build</button><a class="btn" href="/editor.html?topic=${enc}" target="_blank" rel="noopener">${icon('file-text')}Edit</a><button class="btn" data-export>${icon('download')}Export</button></div>`;
         if (b) html += `<div class="r-build ${b.ok ? '' : 'bad'}"><span class="dotlive ${b.ok ? '' : 'flare'}"></span>${b.ok ? `Built ${esc(new Date(b.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }))} · ${b.pages} page${b.pages === 1 ? "" : "s"} · ${b.warnings} warning${b.warnings === 1 ? '' : 's'} · ${(b.ms / 1000).toFixed(1)} s` : `Build failed: ${esc((b.errors || []).join(' · ') || 'see paper/build/main.log')}`}</div>${b.undefinedCites?.length ? `<div class="r-build bad"><span class="dotlive flare"></span>Undefined citations: ${esc(b.undefinedCites.join(', '))}</div>` : ''}`;
         body.innerHTML = html;
         $('[data-build]', body).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Building…'; try { const r = await api(`/api/research/${enc}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); } catch (ex) { toast(ex.message, true); } loadTopic().catch(() => {}); };
         $('[data-export]', body).onclick = () => exportDialog(t);
+        const tb = document.createElement('div'); tb.className = 'tpl-wrap'; body.appendChild(tb); templateCard(tb, slug).catch(() => {});
     } else if (tab === 'ask') {
         const questions = (await api(`/api/research/${enc}/questions`)).questions.filter(q => !q.kind);   // edit requests live in the editor
         const cite = s => esc(s).replace(/\[(s\d{2,4})([^\]]{0,24})\]/g, (m, id, w) => `<button class="r-cite" data-src="${id}">${id}${w}</button>`);
@@ -3284,25 +3319,27 @@ async function loadTopic() {
     } else if (tab === 'sources') {
         const c = t.cost;
         let html = `<div class="tokens"><div class="free"><b>${(c.ingestedChars / 1000).toFixed(0)}k</b><span>characters read for you by the tools</span></div><div><b>${c.excerpts + c.searches}</b><span>excerpts and searches by the agent</span></div><div><b>${(c.readChars / 1000).toFixed(1)}k</b><span>characters it actually read</span></div></div>`;
-        html += t.sources.length ? `<div class="list">${t.sources.map(s => `<button class="row" data-src="${esc(s.id)}"><span class="ico ${kindTone(s.kind)}">${icon(kindIcon(s.kind))}</span><div class="main"><div class="title">${esc(s.title)}</div><div class="sub"><span class="mono">${esc(s.id)}</span> · ${esc(s.kind)}${s.author ? ' · ' + esc(s.author) : ''}${s.year ? ' · ' + esc(s.year) : ''}${s.state?.transcript ? ` · transcript (${esc(s.state.transcript.replace('whisper-', 'Whisper '))})` : s.kind === 'video' ? ' · no transcript yet' : ''}${s.state?.frames ? ` · ${s.state.frames.count} frames` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No sources yet. The agent adds them with <span class="mono">research add</span>.</p>';
+        html += `<div class="r-drop" data-drop><div><b>Drop files here</b><span>PDF, Word, images, text, CSV, HTML, LaTeX, or a .bib of references</span></div><button class="btn" data-addfiles>${icon('upload')}Choose files</button><input type="file" data-filein multiple hidden accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.markdown,.csv,.tsv,.tex,.html,.htm,.json,.bib"></div><div class="r-link"><input type="url" data-link placeholder="Or paste a link: a web page, a PDF, a YouTube video"><button class="btn" data-addlink>Add</button></div>`;
+        html += t.sources.length ? `<div class="list">${t.sources.map(s => `<button class="row" data-src="${esc(s.id)}"><span class="ico ${kindTone(s.kind)}">${icon(kindIcon(s.kind))}</span><div class="main"><div class="title">${esc(s.title)}</div><div class="sub"><span class="mono">${esc(s.id)}</span> · ${esc(s.kind)}${s.author ? ' · ' + esc(s.author) : ''}${s.year ? ' · ' + esc(s.year) : ''}${s.state?.transcript ? ` · transcript (${esc(s.state.transcript.replace('whisper-', 'Whisper '))})` : s.kind === 'video' ? ' · no transcript yet' : ''}${s.state?.frames ? ` · ${s.state.frames.count} frames` : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : '<p class="empty">No sources yet. Drop files above, paste a link, or let an agent find them.</p>';
         body.innerHTML = html;
         $$('[data-src]', body).forEach(b => b.onclick = () => sourceDialog(slug, b.dataset.src));
+        // adding sources by hand: drop or choose files (several at once), or paste a link
+        const send = async files => {
+            let ok = 0; for (const f of files) { toast(`Adding ${f.name}…`);
+                try { const res = await fetch(`/api/research/${enc}/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' }); const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(`${f.name}: ${r.error || res.statusText}`); ok += r.imported || 1; } catch (ex) { toast(ex.message, true); } }
+            if (ok) toast(`Added ${ok} source${ok === 1 ? '' : 's'}`); loadTopic().catch(() => {});
+        };
+        const dz = $('[data-drop]', body);
+        $('[data-addfiles]', body).onclick = () => $('[data-filein]', body).click();
+        $('[data-filein]', body).onchange = e => { const l = [...e.target.files]; e.target.value = ''; if (l.length) send(l); };
+        ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+        ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('over')));
+        dz.addEventListener('drop', e => { e.preventDefault(); const l = [...(e.dataTransfer?.files || [])]; if (l.length) send(l); });
+        $('[data-addlink]', body).onclick = async () => { const u = $('[data-link]', body).value.trim(); if (!/^https?:\/\//i.test(u)) return toast('Paste a web address (https://…)', true); toast('Fetching…'); try { const r = await api(`/api/research/${enc}/sources`, { method: 'POST', body: { url: u } }); toast(`Added ${r.meta?.id || 'the source'}`); loadTopic().catch(() => {}); } catch (ex) { toast(ex.message, true); } };
     } else if (tab === 'notes') {
         body.innerHTML = `<h2 class="section">Outline</h2><pre class="r-notes">${esc(t.notes.outline || '(empty)')}</pre><h2 class="section">Claims and their evidence</h2><pre class="r-notes">${esc(t.notes.claims || '(none yet)')}</pre>
-            <div class="r-actions"><button class="btn" data-edit="outline">${icon('pencil')}Edit outline</button><button class="btn" data-edit="claims">${icon('pencil')}Edit claims</button></div>
-            <h2 class="section">Template or example</h2><div id="r-tpl"></div>`;
+            <div class="r-actions"><button class="btn" data-edit="outline">${icon('pencil')}Edit outline</button><button class="btn" data-edit="claims">${icon('pencil')}Edit claims</button></div>`;
         $$('[data-edit]', body).forEach(b => b.onclick = () => openEditor(`Research/${slug}/notes/${b.dataset.edit}.md`, `${b.dataset.edit}.md`));
-        const tplBox = $('#r-tpl', body);
-        const drawTpl = ({ template: tp, structure }) => {
-            tplBox.innerHTML = `${tp ? `<div class="card"><p style="margin:0 0 6px"><b>${esc(tp.name)}</b> <span class="tag dim">${tp.kind === 'latex' ? `LaTeX · ${tp.files} files` : `PDF · ${tp.pages} page${tp.pages === 1 ? '' : 's'}`}</span>${tp.adopted ? ' <span class="tag" style="color:var(--kelp)">used as the paper</span>' : ''}</p><pre class="r-notes" style="max-height:220px">${esc(structure || '')}</pre></div>` : '<p class="note">Optional. Give the agent a LaTeX template (a zip, such as Overleaf: Menu, Download, Source) or a PDF of a paper whose structure you want to follow. It follows the layout; it never cites or copies it.</p>'}
-                <label class="chk-row"><input type="checkbox" id="r-tpl-adopt"> For a LaTeX zip: use it as the paper's starting point (the current paper is saved as a version first)</label>
-                <div class="r-actions"><button class="btn" data-tpl-up>${icon('upload')}${tp ? 'Replace' : 'Upload a zip or PDF'}</button>${tp ? `<button class="btn" data-tpl-rm>${icon('x')}Remove</button>` : ''}<input type="file" id="r-tpl-file" accept=".zip,.pdf,application/zip,application/pdf" hidden></div>`;
-            $('[data-tpl-up]', tplBox).onclick = () => $('#r-tpl-file', tplBox).click();
-            $('#r-tpl-file', tplBox).onchange = async e => { const f = e.target.files[0]; if (!f) return; const adopt = $('#r-tpl-adopt', tplBox).checked; toast(`Uploading ${f.name}…`);
-                try { const res = await fetch(`/api/research/${enc}/template?name=${encodeURIComponent(f.name)}${adopt ? '&adopt=1' : ''}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' }); const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText); toast(r.template.adopted ? 'Template is now the paper' : 'Saved: the agent will follow it'); drawTpl(r); } catch (ex) { toast(ex.message, true); } };
-            const rm = $('[data-tpl-rm]', tplBox); if (rm) rm.onclick = async () => { try { await api(`/api/research/${enc}/template/remove`, { method: 'POST', body: {} }); drawTpl({ template: null, structure: '' }); } catch (ex) { toast(ex.message, true); } };
-        };
-        api(`/api/research/${enc}/template`).then(drawTpl).catch(() => {});
     } else {
         const mine = (state.shells || []).filter(s => String(s.cwd || '').replace(/\/+$/, '').endsWith(`/Research/${slug}`) || String(s.cwd || '').includes(`/Research/${slug}/`));
         const pend = t.asks.filter(a => a.status === 'pending').map(a => ({ ...a, topicTitle: t.title }));
@@ -3322,7 +3359,7 @@ async function loadTopic() {
 }
 function exportDialog(t) {
     const enc = encodeURIComponent(t.slug);
-    const items = [['pdf', 'PDF', 'file-pdf', t.pagesAvailable ? 'The built paper' : 'Build it first'], ['tex', 'LaTeX source', 'file-code', 'main.tex, sections, references (zip)'], ['bib', 'BibTeX', 'file-text', 'The references file'], ['zip', 'Everything', 'file-archive', 'Paper, sources, notes (zip, no raw media)']];
+    const items = [['pdf', 'PDF', 'file-pdf', t.pagesAvailable ? 'The built paper' : 'Build it first'], ['tex', 'LaTeX source', 'file-code', 'main.tex, sections, references (zip)'], ['bib', 'BibTeX', 'file-text', 'The references file'], ['csv', 'Source list', 'file-text', 'Every source and its record, cited or not (CSV)'], ['zip', 'Everything', 'file-archive', 'Paper, sources, notes (zip, no raw media)']];
     openDialog(`<h2>${icon('download')}Export</h2><div class="list">${items.map(([k, l, ic, sub]) => `<a class="row" href="/api/research/${enc}/export/${k}" download style="text-decoration:none;color:inherit"><span class="ico">${icon(ic)}</span><div class="main"><div class="title">${l}</div><div class="sub">${esc(sub)}</div></div>${icon('download', 'i chev')}</a>`).join('')}</div><div class="buttons"><button data-close>Close</button></div>`);
 }
 async function sourceDialog(slug, id) {

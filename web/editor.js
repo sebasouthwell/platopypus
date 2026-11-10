@@ -65,7 +65,7 @@
         try {
             const r = await api(`/api/research/${enc}/file`, { method: 'POST', body: { path: S.cur, text: $('#code').value, baseMtime: S.conflict ? 0 : S.mtime } });
             S.mtime = r.mtime; S.dirty = false; S.conflict = false; state();
-            if (S.cur === 'refs.bib') { const f = await api(`/api/research/${enc}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); renderRefs(); cites(); }
+            if (S.cur === 'refs.bib') { const f = await api(`/api/research/${enc}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); renderRefs(); cites(); const fresh = await api(`/api/research/${enc}/file?path=refs.bib`); if (fresh.text !== code.value) { const at = code.selectionStart; code.value = fresh.text; code.setSelectionRange(Math.min(at, fresh.text.length), Math.min(at, fresh.text.length)); paint(); gutter(); } S.mtime = fresh.mtime; }
             return true;
         } catch (e) { if (e.status === 409) { S.conflict = true; state(); toast(e.message, true); } else toast(e.message, true); return false; }
     }
@@ -167,6 +167,30 @@
     document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) setMenu(false); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); more.focus(); } });
     $$('#checkseg button').forEach(b => b.onclick = () => pane(b.dataset.check));
+    $('#dl-csv').href = `/api/research/${enc}/export/csv`; $('#dl-bib').href = `/api/research/${enc}/export/bib`;
+
+    // ----- resizable columns: drag a border, double-click it to go back to the default -----
+    (() => {
+        const grid = $('#grid'); const W = { rail: Number(localStorage.getItem('editor.w.rail')) || 0, side: Number(localStorage.getItem('editor.w.side')) || 0, split: Number(localStorage.getItem('editor.w.split')) || 0 };
+        const apply = () => { grid.style.setProperty('--rail-w', W.rail ? `${W.rail}px` : ''); grid.style.setProperty('--side-w', W.side ? `${W.side}px` : ''); grid.style.setProperty('--split-w', W.split ? `${W.split}px` : ''); };
+        const handle = (host, which) => {
+            const g = document.createElement('div'); g.className = `gut gut-${which}`; g.setAttribute('role', 'separator'); g.setAttribute('aria-orientation', 'vertical'); g.title = 'Drag to resize, double-click to reset'; host.appendChild(g);
+            g.addEventListener('pointerdown', e => {
+                e.preventDefault(); g.setPointerCapture(e.pointerId); document.body.classList.add('resizing');
+                const move = ev => {
+                    const r = grid.getBoundingClientRect();
+                    if (which === 'rail') W.rail = Math.round(Math.min(440, Math.max(160, ev.clientX - r.left)));
+                    else { const w = Math.round(Math.min(r.width - (grid.classList.contains('norail') ? 0 : (W.rail || 220)) - 300, Math.max(300, r.right - ev.clientX))); if (grid.classList.contains('wide-side')) W.split = w; else W.side = w; }
+                    apply();
+                };
+                const up = () => { g.removeEventListener('pointermove', move); document.body.classList.remove('resizing'); for (const k of ['rail', 'side', 'split']) localStorage.setItem(`editor.w.${k}`, String(W[k] || '')); fitAllPages(); };
+                g.addEventListener('pointermove', move); g.addEventListener('pointerup', up, { once: true }); g.addEventListener('pointercancel', up, { once: true });
+            });
+            g.addEventListener('dblclick', () => { if (which === 'rail') W.rail = 0; else if (grid.classList.contains('wide-side')) W.split = 0; else W.side = 0; apply(); for (const k of ['rail', 'side', 'split']) localStorage.setItem(`editor.w.${k}`, String(W[k] || '')); });
+        };
+        handle($('#ed'), 'rail'); handle($('#side'), 'side'); apply();
+    })();
+    function fitAllPages() { window.dispatchEvent(new Event('resize')); }
 
     // ----- size and layout: text size on the left, zoom on the right, a side panel you can put away -----
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -224,7 +248,7 @@
         const rows = [...S.bib.values()].filter(e => !q || (e.key + ' ' + e.title + ' ' + e.author + ' ' + e.year).toLowerCase().includes(q));
         let html = rows.map(e => `<li data-k="${esc(e.key)}" title="${esc([e.title, [e.author, e.year].filter(Boolean).join(', ')].filter(Boolean).join(' — '))}"><div class="rl"><span class="k">${esc(e.key)}</span><span class="kind">${e.source ? esc(e.source.kind) : 'no file'}</span></div><span class="t">${esc(e.title)}</span><div class="acts"><button class="pill" data-cite="${esc(e.key)}">Cite</button><button class="pill" data-view="${esc(e.key)}">Open</button></div></li>`).join('');
         const loose = S.sources.filter(s => !inBib.has(s.key) && (!q || (s.title + s.key).toLowerCase().includes(q)));
-        if (loose.length) html += `<li style="cursor:default"><span class="a">Sources not cited yet</span></li>` + loose.map(s => `<li><span class="k">${esc(s.id)}</span><span class="kind">${esc(s.kind)}</span><span class="t">${esc(s.title)}</span><div class="acts"><button class="pill" data-add="${esc(s.id)}">Cite and add to refs.bib</button></div></li>`).join('');
+        if (loose.length) html += `<li class="sub">Sources not cited yet</li>` + loose.map(x => `<li title="${esc(x.title)}"><div class="rl"><span class="k t-plain">${esc(x.title)}</span><span class="kind">${esc(x.kind)}</span></div><span class="t">${esc(x.id)}</span><div class="acts"><button class="pill" data-add="${esc(x.id)}">Cite</button></div></li>`).join('');
         $('#refs').innerHTML = html || '<li class="muted" style="cursor:default">No references yet. Add a source, or ask the agent.</li>';
         $$('#refs [data-cite]').forEach(b => b.onclick = () => insert(`\\cite{${b.dataset.cite}}`));
         $$('#refs [data-view]').forEach(b => b.onclick = () => openSource(b.dataset.view, ''));
@@ -243,16 +267,15 @@
         try { const r = await api(`/api/research/${enc}/sources`, { method: 'POST', body: { url: u } }); await loadAll(); toast(`Added ${r.meta?.id || 'source'}`); } catch (e) { toast(e.message, true); }
     };
 
-    // PDFs from this device become sources (stored on the box, in the topic's local history, never pushed).
+    // Files from this device become sources (stored on the box, in the topic's local history, never pushed).
     $('#addpdf').onclick = () => $('#pdffile').click();
     async function uploadPdfs(list) {
         for (const f of list) {
-            if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { toast(`${f.name} is not a PDF.`, true); continue; }
             toast(`Uploading ${f.name}…`);
             try {
-                const res = await fetch(`/api/research/${enc}/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/pdf' }, body: f, credentials: 'same-origin' });
+                const res = await fetch(`/api/research/${enc}/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' });
                 const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText);
-                toast(r.doi ? `Added ${r.id}: details from DOI ${r.doi}` : `Added ${r.id}. No DOI found: the agent can fill in author and year (research meta ${r.id}).`);
+                toast(r.kind === 'references' ? `Imported ${r.imported} reference${r.imported === 1 ? '' : 's'}${r.skipped ? ` (${r.skipped} already here)` : ''}` : r.doi ? `Added ${r.id}: details from DOI ${r.doi}` : r.needsMeta ? `Added ${r.id}. No DOI found: the agent can fill in author and year.` : `Added ${r.id} (${r.kind})`);
             } catch (e) { toast(e.message, true); }
         }
         await loadAll(); if (S.cur === 'refs.bib' && !S.dirty) await openFile('refs.bib');
@@ -468,6 +491,30 @@
         $$('#preview a.l').forEach(a => a.onclick = e => { e.preventDefault(); openSource(a.dataset.key, ''); });
     }
 
+    // ----- the reference record: what this source's entry in refs.bib is made from, and where each detail came from -----
+    const FROM = { bib: 'from refs.bib', doi: 'from the DOI', pdf: 'from the PDF', page: 'from the web page', video: 'from YouTube', agent: 'by the agent', you: 'by you' };
+    const FIELD_LABEL = { title: 'Title', author: 'Authors', year: 'Year', journal: 'Journal', booktitle: 'Book or proceedings', volume: 'Volume', number: 'Issue', pages: 'Pages', publisher: 'Publisher', doi: 'DOI', url: 'Link' };
+    function recordHtml(r) {
+        if (!r) return '';
+        return `<details class="rec"><summary><span>Reference record</span><em>${r.inBib ? `in refs.bib as <b>${esc(r.key)}</b>` : 'not in refs.bib yet'}</em></summary>
+            <p class="rec-why">refs.bib is written from this record. Change a detail here (or in refs.bib) and both stay the same.</p>
+            <dl>${r.fields.map(f => `<dt>${esc(FIELD_LABEL[f.field] || f.field)}</dt><dd><span>${esc(f.value)}</span><small class="from-${esc(f.from)}">${esc(FROM[f.from] || f.from)}</small></dd>`).join('')}<dt>Entry type</dt><dd><span>${esc(r.type)}</span></dd></dl>
+            <div class="rec-acts"><button class="pill" data-rec-edit>Edit the record</button>${r.inBib ? '' : '<button class="pill" data-rec-cite>Cite it</button>'}</div>
+            <details class="rec-bib"><summary>The BibTeX it makes</summary><pre>${esc(r.bibtex)}</pre></details></details>`;
+    }
+    function bindRecord(box, sid, key, where) {
+        const rec = $('.rec', box); if (!rec) return;
+        const c = $('[data-rec-cite]', rec); if (c) c.onclick = async () => { try { const r = await api(`/api/research/${enc}/cite`, { method: 'POST', body: { id: sid } }); await reloadBib(); insert(r.latex); } catch (er) { toast(er.message, true); } };
+        $('[data-rec-edit]', rec).onclick = async () => {
+            const v = await api(`/api/research/${enc}/source/${sid}`); const m = v.meta;
+            const keys = ['title', 'author', 'year', 'journal', 'volume', 'pages', 'publisher', 'doi', 'url'];
+            rec.querySelector('dl').outerHTML = `<form class="rec-form">${keys.map(k => `<label><span>${FIELD_LABEL[k]}</span><input name="${k}" value="${esc((k === 'pages' ? m.pageRange : m[k]) || '')}" ${k === 'year' ? 'inputmode="numeric" maxlength="4"' : ''}></label>`).join('')}<label><span>Entry type</span><select name="type">${['', 'article', 'inproceedings', 'book', 'incollection', 'techreport', 'phdthesis', 'misc', 'online'].map(t => `<option value="${t}" ${t === (m.bibType || '') ? 'selected' : ''}>${t || 'automatic'}</option>`).join('')}</select></label><div class="rec-acts"><button class="pill pri" type="submit">Save the record</button><button class="pill" type="button" data-rec-cancel>Cancel</button></div></form>`;
+            $('[data-rec-edit]', rec).hidden = true;
+            const form = $('.rec-form', rec); $('[data-rec-cancel]', form).onclick = () => openSource(key, where);
+            form.onsubmit = async ev => { ev.preventDefault(); const fields = Object.fromEntries(new FormData(form)); try { await api(`/api/research/${enc}/source/${sid}/record`, { method: 'POST', body: { fields } }); await reloadBib(); toast('Record saved: refs.bib is updated'); openSource(key, where); } catch (er) { toast(er.message, true); } };
+        };
+    }
+
     // ----- opening a source: PDF page, video moment, or text -----
     function parseWhere(w) {
         w = String(w || ''); const t = w.match(/(\d+):(\d{2})(?::(\d{2}))?/); const p = w.match(/(?:pp?\.?|page)[\s~]*(\d+)/i);
@@ -479,8 +526,8 @@
         if (!e.source) { box.innerHTML = `<div class="src"><h2>${esc(e.title)}</h2><div class="meta">${esc([e.author, e.year].filter(Boolean).join(', '))}</div><p class="muted">This reference has no source file in the topic.${e.url ? ` <a target="_blank" rel="noopener" href="${esc(e.url)}">Open the link</a>` : ''}</p><p class="muted">Add its file or page as a source and put <b>source = {sNN}</b> in its refs.bib entry to link it.</p></div>`; return; }
         box.innerHTML = '<div class="empty">Loading…</div>';
         let v; try { v = await api(`/api/research/${enc}/source/${e.source.id}`); } catch (er) { box.innerHTML = `<div class="empty">${esc(er.message)}</div>`; return; }
-        const w = parseWhere(where); const m = v.meta; const sid = e.source.id;
-        let head = `<div class="src"><h2>${esc(m.title || e.title)}</h2><div class="meta"><span>${esc([m.author, m.year].filter(Boolean).join(', '))}</span><span class="pill">${esc(m.kind)}</span>${where ? `<span class="pill">${esc(where)}</span>` : ''}${m.url ? `<a target="_blank" rel="noopener" href="${esc(m.url)}">Original</a>` : ''}</div>`;
+        const w = parseWhere(where); const m = v.meta; const sid = e.source.id; setTimeout(() => bindRecord(box, sid, key, where), 0);
+        let head = `<div class="src"><h2>${esc(m.title || e.title)}</h2><div class="meta"><span>${esc([m.author, m.year].filter(Boolean).join(', '))}</span><span class="pill">${esc(m.kind)}</span>${where ? `<span class="pill">${esc(where)}</span>` : ''}${m.url ? `<a target="_blank" rel="noopener" href="${esc(m.url)}">Original</a>` : ''}</div>${recordHtml(v.record)}`;
         if (e.source.hasPdf) {
             // Every page, one under another: scroll to read. A citation with a page opens there; without one, the banner
             // says what the source was cited for and which page that is on.

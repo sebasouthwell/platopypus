@@ -23,7 +23,29 @@ const infoFile = dir => path.join(dir, '.platopypus', 'template.json');
 export function get(slug) {
     const dir = topicPath(slug); const info = T.readJson(infoFile(dir), null);
     let structure = ''; try { structure = fs.readFileSync(path.join(dir, 'template', 'structure.md'), 'utf8').slice(0, 20000); } catch { /* none */ }
-    return { template: info, structure };
+    let notes = ''; try { notes = fs.readFileSync(path.join(dir, 'template', 'style.md'), 'utf8').replace(/^# Style notes from the user\n+/, '').slice(0, 8000); } catch { /* none */ }
+    return { template: info, structure, notes, images: images(dir) };
+}
+// Pictures that came with the template or example (a logo, a crest, a header graphic), offered for reuse in the paper.
+const IMG = /\.(png|jpe?g|pdf|eps|svg)$/i;
+function images(dir) {
+    const out = []; const root = path.join(dir, 'template');
+    const walk = (d, rel = '') => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) walk(path.join(d, e.name), r); else if (IMG.test(e.name) && r !== 'example.pdf' && fs.statSync(path.join(d, e.name)).size > 100) out.push(r); } };
+    walk(root); return out.slice(0, 40);
+}
+// Style notes: free text about how the paper should look (fonts, margins, citation style, where the logo goes).
+export function setNotes(slug, text) {
+    const dir = topicPath(slug); const t = String(text || '').trim().slice(0, 8000); fs.mkdirSync(path.join(dir, 'template'), { recursive: true });
+    const f = path.join(dir, 'template', 'style.md'); if (t) fs.writeFileSync(f, `# Style notes from the user\n\n${t}\n`); else fs.rmSync(f, { force: true });
+    shareWithAgent(path.join(dir, 'template')); record('activity', 'research-style', { actor: 'phone', what: `${slug}: style notes ${t ? 'saved' : 'cleared'}`, cwd: dir });
+    return get(slug);
+}
+// Copy one of those pictures into the paper (paper/figures/) and give the line that shows it.
+export function useImage(slug, rel) {
+    const dir = topicPath(slug); const r = String(rel || ''); if (!images(dir).includes(r)) throw httpError(404, 'No such picture in the template.');
+    const name = path.basename(r).replace(/[^\w.-]+/g, '_'); const dest = path.join(dir, 'paper', 'figures', name); fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(dir, 'template', r), dest); shareWithAgent(path.dirname(dest));
+    return { file: `figures/${name}`, latex: `\\includegraphics[height=1.4cm]{figures/${name}}` };
 }
 export function remove(slug) {
     const dir = topicPath(slug); fs.rmSync(path.join(dir, 'template'), { recursive: true, force: true }); fs.rmSync(infoFile(dir), { force: true });
@@ -88,6 +110,7 @@ export async function upload(slug, req, name, { adopt = false } = {}) {
             const { stdout } = await run('pdftotext', ['-layout', path.join(tdir, 'example.pdf'), '-'], { maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
             const pages = stdout.split('\f').filter(p => p.trim()).length;
             fs.writeFileSync(path.join(tdir, 'example.txt'), stdout); fs.writeFileSync(path.join(tdir, 'structure.md'), pdfStructure(stdout, pages));
+            if (await T.which('pdfimages')) { const idir = path.join(tdir, 'images'); fs.mkdirSync(idir, { recursive: true }); await run('pdfimages', ['-png', '-f', '1', '-l', '1', path.join(tdir, 'example.pdf'), path.join(idir, 'page1')], { timeout: 60_000 }).catch(() => {}); for (const f of fs.readdirSync(idir)) if (fs.statSync(path.join(idir, f)).size < 120) fs.rmSync(path.join(idir, f)); }
             info = { kind: 'pdf', name: clean || 'example.pdf', at: Date.now(), pages, adopted: false };
         } else if (head.startsWith('PK')) {
             // Look before unpacking: no absolute paths, no "..", a sane number of files and total size.

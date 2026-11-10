@@ -561,6 +561,16 @@ phone's Update button. Mechanism:
   on save, save now, save a version) and Build; Spelling and Citations share one Checks tab; Split is an icon; references
   are one line with actions on hover; under the text a single status line with the build result as a chip. No server
   or state change.
+- **2.3.0** — research references have one master: each source's `meta.json` record (title, authors, year, journal,
+  volume, issue, pages as `pageRange`, publisher, DOI, link, entry type, with `from` saying where each came from:
+  DOI, PDF, web page, YouTube, refs.bib, the agent, you). `refs.bib` is written from the records of cited sources
+  (`citeKey` is fixed once cited, so keys never change); editing a linked entry in refs.bib writes back into its record.
+  First sync of an older topic copies details found only in refs.bib into the records (`bibAbsorbed`); entries without
+  a source are untouched. New: `POST …/source/:id/record`, `GET …/export/csv`, uploads of Word, images (OCR), text,
+  Markdown, CSV, HTML, LaTeX and `.bib` (one record per entry), uploads no longer cite automatically; a blank topic
+  (`blank` on create); template style notes (`template/style.md`, `POST …/template/notes`) and pictures from a template
+  or example PDF offered for the paper (`POST …/template/use-image` → `paper/figures/`); resizable editor columns;
+  thin scrollbars; the Research agent card sits first on the Research tab.
 
 ## Release checklist
 

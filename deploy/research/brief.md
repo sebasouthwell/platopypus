@@ -65,6 +65,8 @@ answer is a side note, not paper content. Only work one into the paper when the 
 
 ## A template or example, when the user gave one
 
+If `template/style.md` exists, it is the user's own word on how the paper should look (fonts, margins, citation
+style, a logo): follow it, it wins over anything else. Pictures they chose for the paper are in `paper/figures/`.
 If `template/structure.md` exists, read it before writing: it lists the class, packages and section order the user
 wants (from a LaTeX template they uploaded, or from an example PDF). Follow that structure. `template/latex/` holds the
 template's files and `template/example.txt` the example's text if you need to check a detail. A template or example is

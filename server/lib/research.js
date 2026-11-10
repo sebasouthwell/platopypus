@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config } from './config.js';
@@ -35,19 +36,19 @@ export function topicOf(dir) {
     return SLUG.test(slug) && T.exists(path.join(ROOT, slug, '.platopypus', 'research.json')) ? slug : null;
 }
 
-export async function create({ title, brief = '' }) {
+export async function create({ title, brief = '', blank = false }) {
     const t = String(title || '').trim(); if (t.length < 3 || t.length > 120) throw httpError(400, 'Give the topic a title (3 to 120 characters).');
     let slug = slugify(t); for (let i = 2; T.exists(path.join(ROOT, slug)); i++) slug = `${slugify(t).slice(0, 44)}-${i}`;
     const dir = path.join(ROOT, slug);
     for (const d of ['paper/sections', 'sources', 'notes', '.platopypus/asks']) fs.mkdirSync(path.join(dir, d), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'paper', 'main.tex'), T.TEMPLATE_TEX(t));
-    fs.writeFileSync(path.join(dir, 'paper', 'sections', 'introduction.tex'), `\\section{Introduction}\n% Write here. Cite with: research cite <id> --claim "…"\n`);
+    fs.writeFileSync(path.join(dir, 'paper', 'main.tex'), blank ? T.TEMPLATE_TEX(t).replace('\\noindent Written by an agent from the sources in this topic.', '') : T.TEMPLATE_TEX(t));
+    fs.writeFileSync(path.join(dir, 'paper', 'sections', 'introduction.tex'), blank ? '\\section{Introduction}\n\n' : `\\section{Introduction}\n% Write here. Cite with: research cite <id> --claim "…"\n`);
     fs.writeFileSync(path.join(dir, 'paper', 'refs.bib'), '');
     fs.writeFileSync(path.join(dir, 'notes', 'outline.md'), `# ${t}\n\n${String(brief || '').trim() || '(what this research should find out)'}\n`);
     fs.writeFileSync(path.join(dir, 'notes', 'claims.md'), '# Claims and their evidence\n\n');
     let doc = ''; try { doc = fs.readFileSync(briefFile, 'utf8'); } catch { doc = '# Research session\n\nUse the `research` tools; never paste a whole source into the chat.\n'; }
     fs.writeFileSync(path.join(dir, '.platopypus', 'research.md'), doc);
-    T.writeJson(path.join(dir, '.platopypus', 'research.json'), { title: t, created: Date.now(), brief: String(brief || '').slice(0, 2000) });
+    T.writeJson(path.join(dir, '.platopypus', 'research.json'), { title: t, created: Date.now(), brief: String(brief || '').slice(0, 2000), ...(blank ? { blank: true } : {}) });
     try { await agentUser.prepareFolder(dir); } catch (e) { log('research', `${slug}: agent folder access not set (${e.message})`); }
     record('activity', 'research-new', { actor: 'phone', what: `${t} (/Research/${slug})`, cwd: dir });
     return summary(slug);
@@ -118,7 +119,7 @@ export function sourceView(slug, id, { from = 0, max = 12000 } = {}) {
     const meta = T.sourceMeta(dir, id); const sd = path.join(dir, 'sources', id);
     let text = ''; try { text = fs.readFileSync(path.join(sd, 'text.md'), 'utf8'); } catch { /* none */ }
     const tr = T.readJson(path.join(sd, 'transcript.json'), null);
-    return { meta: { ...meta, key: T.bibKey(meta) }, text: text.slice(Number(from), Number(from) + max), chars: text.length, transcript: tr ? T.windows(tr, 20) : null, frames: T.readJson(path.join(sd, 'ocr.json'), null), claims: claimsFor(dir, id, text) };
+    return { meta: { ...meta, key: T.bibKey(meta) }, record: { fields: T.RECORD_FIELDS.filter(k => T.recGet(meta, k)).map(k => ({ field: k, value: T.recGet(meta, k), from: T.provenance(meta)[k] })), type: T.entryType(meta), key: T.bibKey(meta), inBib: !!meta.inBib, bibtex: T.renderEntry(meta) }, text: text.slice(Number(from), Number(from) + max), chars: text.length, transcript: tr ? T.windows(tr, 20) : null, frames: T.readJson(path.join(sd, 'ocr.json'), null), claims: claimsFor(dir, id, text) };
 }
 // What this source was cited for (notes/claims.md), and where in it: the page the citation named, or, when it named
 // none, the page its quoted words are found on. This is what tells a reader where to look.
@@ -145,6 +146,13 @@ export function sourceOriginal(slug, id) { const dir = topicPath(slug); if (!T.v
 export async function exportFile(slug, kind) {
     const dir = topicPath(slug);
     if (kind === 'pdf') return { file: pdfFile(slug), name: `${slug}.pdf`, type: 'application/pdf' };
+    if (kind === 'csv') {
+        // Every source's record, cited or not: the master list refs.bib is made from.
+        const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`; const cols = ['id', 'kind', 'cite_key', 'in_refs', 'type', ...T.RECORD_FIELDS, 'added', 'details_from'];
+        const rows = T.listSources(dir).map(m => { const pv = T.provenance(m); return [m.id, m.kind, m.inBib ? T.bibKey(m) : '', m.inBib ? 'yes' : 'no', T.entryType(m), ...T.RECORD_FIELDS.map(k => T.recGet(m, k) || ''), new Date(m.added || 0).toISOString().slice(0, 10), [...new Set(Object.values(pv))].join(' ')].map(q).join(','); });
+        const tmp = path.join(os.tmpdir(), `plato-sources-${crypto.randomBytes(4).toString('hex')}.csv`); fs.writeFileSync(tmp, [cols.join(','), ...rows].join('\r\n') + '\r\n');
+        return { file: tmp, name: `${slug}-sources.csv`, type: 'text/csv; charset=utf-8', remove: true };
+    }
     if (kind === 'bib') { const f = path.join(dir, 'paper', 'refs.bib'); if (!T.exists(f)) throw httpError(404, 'No references yet.'); return { file: f, name: `${slug}.bib`, type: 'text/plain; charset=utf-8' }; }
     if (!['tex', 'zip'].includes(kind)) throw httpError(400, 'pdf, bib, tex or zip.');
     if (!(await T.which('zip'))) throw httpError(501, 'zip is not installed on this box.');

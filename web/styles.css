@@ -750,3 +750,35 @@ details.pidle > summary::-webkit-details-marker { display: none; }
 .r-agent .seg button b { font-size: 14.5px; } .r-agent .seg button span { font-size: 12px; color: var(--mist); }
 .r-agent .seg button.on { border-color: var(--brass); background: rgba(240,184,64,.12); } .r-agent .seg button.on b { color: var(--brass); }
 @media (max-width: 420px) { .r-agent .seg { grid-template-columns: 1fr; } }
+/* ---------- quiet scrollbars: thin, and only a faint thumb ---------- */
+* { scrollbar-width: thin; scrollbar-color: rgba(147,164,186,.28) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(147,164,186,.22); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(147,164,186,.45); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+.r-agent { margin-bottom: 14px; }
+.r-agent-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+.r-agent-h b { font-size: 15px; } .r-agent-h span { font-size: 13px; color: var(--mist); }
+[data-ra-save]:disabled { opacity: .55; }
+/* ---------- template and style ---------- */
+.tpl-wrap { margin-top: 18px; }
+.tpl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 10px; } .tpl-h b { font-size: 15px; } .tpl-h span { font-size: 13px; color: var(--mist); text-align: right; }
+.tpl-sub { font-size: 13px; color: var(--mist); margin: 4px 0 8px; }
+.tpl-imgs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.tpl-img { display: flex; flex-direction: column; gap: 4px; align-items: center; width: 96px; padding: 6px; border-radius: 12px; background: var(--sea-2); border: 1px solid var(--rail); color: var(--mist); font-size: 11px; }
+.tpl-img img { width: 80px; height: 56px; object-fit: contain; background: #fff; border-radius: 6px; } .tpl-img span { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-img:hover { border-color: var(--brass); color: var(--foam); }
+.tpl-struct { margin-top: 10px; } .tpl-struct > summary { cursor: pointer; font-size: 13px; color: var(--mist); }
+.seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.seg2 button { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 14px; background: var(--sea-2); border: 1px solid var(--rail); color: var(--foam); min-height: 64px; }
+.seg2 button b { font-size: 14.5px; } .seg2 button span { font-size: 12.5px; color: var(--mist); line-height: 1.35; }
+.seg2 button.on { border-color: var(--brass); background: rgba(240,184,64,.10); } .seg2 button.on b { color: var(--brass); }
+@media (max-width: 420px) { .seg2 { grid-template-columns: 1fr; } }
+/* ---------- adding sources by hand ---------- */
+.r-drop { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border: 1.5px dashed var(--rail); border-radius: 16px; margin: 4px 0 10px; transition: border-color .12s, background .12s; }
+.r-drop b { display: block; font-size: 15px; } .r-drop span { display: block; font-size: 12.5px; color: var(--mist); margin-top: 2px; }
+.r-drop.over { border-color: var(--brass); background: rgba(240,184,64,.08); }
+.r-link { display: flex; gap: 8px; margin-bottom: 14px; } .r-link input { flex: 1; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .r-drop { transition: none; } }
+a.btn { text-decoration: none; color: inherit; }

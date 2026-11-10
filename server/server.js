@@ -691,8 +691,11 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'template' && method === 'GET') return send(res, 200, template.get(slug));
             if (rest === 'template' && method === 'POST') return send(res, 201, await template.upload(slug, req, url.searchParams.get('name') || '', { adopt: url.searchParams.get('adopt') === '1' }));
             if (rest === 'template/remove' && method === 'POST') return send(res, 200, template.remove(slug));
+            if (rest === 'template/notes' && method === 'POST') return send(res, 200, template.setNotes(slug, (await readJson(req, 16 * 1024)).text));
+            if (rest === 'template/use-image' && method === 'POST') return send(res, 200, template.useImage(slug, (await readJson(req, 4096)).name));
             if (rest === 'note' && method === 'POST') return send(res, 201, research.addNote(slug, (await readJson(req, 8192)).text));
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/lines\/(\d{1,4})$/)) && method === 'GET') return send(res, 200, await editor.sourceLines(slug, r2[1], r2[2]));
+            if ((r2 = rest.match(/^source\/(s\d{2,4})\/record$/)) && method === 'POST') { const b = await readJson(req, 16 * 1024); return send(res, 200, editor.setRecord(slug, r2[1], b.fields || {})); }
             if (rest === 'links' && method === 'GET') return send(res, 200, await editor.links(slug));
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/page\/(\d{1,4})$/)) && method === 'GET') return sendFile(await editor.sourcePage(slug, r2[1], r2[2]), 'image/png', `${r2[1]}-${r2[2]}.png`, { inline: true });
             if (rest === 'build' && method === 'POST') { const r = await research.build(slug); if (r.ok) await repo.commit(slug, `Build: ${r.pages} page${r.pages === 1 ? '' : 's'}`).catch(() => {}); return send(res, 200, r); }
@@ -701,7 +704,7 @@ const server = http.createServer(async (req, res) => {
             if ((r2 = rest.match(/^source\/(s\d{2,4})$/)) && method === 'GET') return send(res, 200, research.sourceView(slug, r2[1], { from: url.searchParams.get('from') || 0 }));
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/frame\/(f\d{4}\.jpg)$/)) && method === 'GET') return sendFile(research.frameFile(slug, r2[1], r2[2]), 'image/jpeg', r2[2], { inline: true });
             if ((r2 = rest.match(/^source\/(s\d{2,4})\/original$/)) && method === 'GET') return sendFile(research.sourceOriginal(slug, r2[1]), 'application/pdf', `${r2[1]}.pdf`);
-            if ((r2 = rest.match(/^export\/(pdf|bib|tex|zip)$/)) && method === 'GET') { const e = await research.exportFile(slug, r2[1]); return sendFile(e.file, e.type, e.name, { remove: !!e.remove }); }
+            if ((r2 = rest.match(/^export\/(pdf|bib|tex|zip|csv)$/)) && method === 'GET') { const e = await research.exportFile(slug, r2[1]); return sendFile(e.file, e.type, e.name, { remove: !!e.remove }); }
             if ((r2 = rest.match(/^asks\/([a-f0-9]{12})\/(allow|deny)$/)) && method === 'POST') { const b = await readJson(req, 4096).catch(() => ({})); return send(res, 200, research.decide(slug, r2[1], { allow: r2[2] === 'allow', answer: b.answer })); }
         }
 

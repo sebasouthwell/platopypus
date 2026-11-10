@@ -34,6 +34,8 @@ export function writeFile(slug, rel, text, { baseMtime = 0 } = {}) {
     // An agent may have changed the file since the editor opened it: say so rather than overwrite silently.
     if (!fresh && baseMtime && fs.statSync(f).mtimeMs > Number(baseMtime) + 1) throw httpError(409, 'An agent changed this file since you opened it. Reload it to see their edit.');
     fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, s, { mode: 0o664 });
+    // refs.bib: changes to entries linked to a source go back into that source's record, and refs.bib is written from the records.
+    if (rel === 'refs.bib') { try { T.bibToRecords(topicPath(slug)); } catch (e) { throw httpError(400, `refs.bib could not be read: ${e.message}`); } }
     if (fresh) { const a = agentUser.info(); try { if (a && process.getuid?.() === 0) fs.chownSync(f, 0, a.gid); fs.chmodSync(f, 0o664); } catch { /* best effort */ } }
     record('activity', 'research-edit', { actor: 'phone', what: `${slug}/${rel}`, cwd: path.dirname(f) });
     return { ok: true, mtime: fs.statSync(f).mtimeMs };
@@ -198,4 +200,10 @@ export function citeScan(slug) {
     const unused = [...bib.keys()].filter(k => !used.has(k));
     const problems = items.reduce((n, it) => n + it.cites.reduce((m, c) => m + c.problems.length, 0), 0);
     return { paragraphs: items.length, citations: items.reduce((n, it) => n + it.cites.length, 0), problems, unused, items };
+}
+
+export function setRecord(slug, id, fields) {
+    const dir = topicPath(slug); if (!T.validId(id)) throw httpError(400, 'Bad source id.');
+    const m = T.setRecord(dir, id, fields); record('activity', 'research-record', { actor: 'phone', what: `${slug}/${id}: ${Object.keys(fields).join(', ')}`, cwd: dir });
+    return { ok: true, key: T.bibKey(m) };
 }

@@ -54,31 +54,78 @@ export async function history(slug, n = 30) {
     return out.sort((a, b) => b.at - a.at).slice(0, n);
 }
 
-// A PDF sent from the browser becomes a source: sources/<id>/original.pdf + extracted text, then a version.
+// A file sent from the browser becomes a source (stored in the topic, its text extracted, then a version). Uploading
+// does not put it in refs.bib: it goes there when you cite it, so refs.bib is always the cited part of the sources.
+const KINDS = { pdf: 'PDF', docx: 'Word document', png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', txt: 'text file', md: 'text file', markdown: 'text file', csv: 'table', tsv: 'table', tex: 'LaTeX file', html: 'web page', htm: 'web page', json: 'data file', bib: 'references file' };
+const an = w => (/^[aeiou]/i.test(w) ? `an ${w}` : `a ${w}`);
+// BibTeX entries by matching braces (entries may sit on one line, or have braces inside fields).
+function bibEntriesOf(text) {
+    const out = []; let i = 0;
+    while ((i = text.indexOf('@', i)) >= 0) {
+        const m = /^@(\w+)\s*\{/.exec(text.slice(i)); if (!m) { i++; continue; }
+        let depth = 0, j = i + m[0].length - 1;
+        for (; j < text.length; j++) { if (text[j] === '{') depth++; else if (text[j] === '}' && --depth === 0) break; }
+        const entry = text.slice(i, j + 1); const key = (entry.match(/^@\w+\s*\{\s*([^,\s]+)\s*,/) || [])[1];
+        out.push({ type: m[1].toLowerCase(), key, entry }); i = j + 1;
+    }
+    return out;
+}
+function looksRight(ext, head) {
+    const h = head.toString('latin1');
+    if (ext === 'pdf') return h.startsWith('%PDF-');
+    if (ext === 'docx') return h.startsWith('PK');
+    if (ext === 'png') return head[0] === 0x89 && h.slice(1, 4) === 'PNG';
+    if (ext === 'jpg' || ext === 'jpeg') return head[0] === 0xFF && head[1] === 0xD8;
+    if (ext === 'gif') return h.startsWith('GIF8');
+    if (ext === 'webp') return h.startsWith('RIFF') && h.slice(8, 12) === 'WEBP';
+    return !head.includes(0);                                       // text kinds: no NUL bytes
+}
 export async function upload(slug, req, name) {
     const dir = await ensureRepos(slug);
-    const base = String(name || 'document.pdf').replace(/[^\w .()-]+/g, '_').replace(/\.pdf$/i, '').slice(0, 90) || 'document';
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plato-up-')); const tmp = path.join(tmpDir, base + '.pdf');
+    const clean = String(name || 'file').replace(/[^\w .()-]+/g, '_').slice(0, 100) || 'file'; const ext = (path.extname(clean).slice(1) || '').toLowerCase();
+    if (!KINDS[ext]) throw httpError(400, `${ext ? `.${ext} files` : 'Files without an extension'} cannot be added. Add PDF, Word, images, text, Markdown, CSV, HTML, LaTeX or .bib files.`);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plato-up-')); const tmp = path.join(tmpDir, clean);
     try {
         const MAX = 80 * 1024 * 1024; let size = 0; const ws = fs.createWriteStream(tmp, { mode: 0o600 });
         await new Promise((ok, bad) => {
-            req.on('data', c => { size += c.length; if (size > MAX) { req.destroy(); bad(httpError(413, 'That PDF is over 80 MB.')); } else ws.write(c); });
+            req.on('data', c => { size += c.length; if (size > MAX) { req.destroy(); bad(httpError(413, 'That file is over 80 MB.')); } else ws.write(c); });
             req.on('end', () => ws.end(ok)); req.on('error', bad);
         });
-        const head = Buffer.alloc(5); const fd = fs.openSync(tmp, 'r'); fs.readSync(fd, head, 0, 5, 0); fs.closeSync(fd);
-        if (head.toString('latin1') !== '%PDF-') throw httpError(400, 'That file is not a PDF.');
+        const buf = Buffer.alloc(16); const fd = fs.openSync(tmp, 'r'); const n = fs.readSync(fd, buf, 0, 16, 0); fs.closeSync(fd); const head = buf.subarray(0, n);
+        if (!n) throw httpError(400, 'That file is empty.');
+        if (!looksRight(ext, head)) throw httpError(400, `That file is not really ${an(KINDS[ext])}.`);
+        if (ext === 'bib') return await importBib(slug, dir, fs.readFileSync(tmp, 'utf8'), clean);
         const sha = crypto.createHash('sha256').update(fs.readFileSync(tmp)).digest('hex');
-        const dupe = T.listSources(dir).find(m => m.sha256 === sha); if (dupe) throw httpError(409, `That PDF is already here as ${dupe.id} (${dupe.title}).`);
+        const dupe = T.listSources(dir).find(m => m.sha256 === sha); if (dupe) throw httpError(409, `That file is already here as ${dupe.id} (${dupe.title}).`);
         const r = await T.addSource(dir, tmp, { note: 'uploaded' });
         const id = r.meta.id; const mf = path.join(dir, 'sources', id, 'meta.json');
-        let meta = T.readJson(mf, {}); meta.sha256 = sha; meta.uploaded = true; meta.file = base + '.pdf'; meta.needsMeta = true; T.writeJson(mf, meta);
-        // A DOI gives the publisher's own entry. Without one the agent reads the first and last page (research meta <id>).
-        const doi = await T.resolveDoi(dir, id).catch(e => ({ ok: false, reason: e.message }));
+        let meta = T.readJson(mf, {}); meta.sha256 = sha; meta.uploaded = true; meta.uploadName = clean;
+        const paperLike = ext === 'pdf' || ext === 'docx'; if (paperLike) meta.needsMeta = true; T.writeJson(mf, meta);
+        // A DOI gives the publisher's details. Without one the agent reads the first and last page (research meta <id>).
+        const doi = paperLike ? await T.resolveDoi(dir, id).catch(e => ({ ok: false, reason: e.message })) : { ok: false };
         meta = T.readJson(mf, {});
-        const c = T.cite(dir, id, {});         // a refs.bib entry tied to the file, ready to cite
-        await commit(slug, `Add source ${id}: ${meta.title || base}`);
-        return { id, title: meta.title || base, key: c.key, pages: meta.pages || null, doi: doi.ok ? doi.doi : null, needsMeta: !doi.ok };
+        await commit(slug, `Add source ${id}: ${meta.title || clean}`);
+        return { id, kind: meta.kind, title: meta.title || clean, key: T.bibKey(meta), pages: meta.pages || null, doi: doi.ok ? doi.doi : null, needsMeta: paperLike && !doi.ok };
     } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+}
+// A .bib file: one source per entry, keeping its key so \cite commands already written still work. Entries the paper
+// already cites go straight into refs.bib; the rest wait until you cite them.
+async function importBib(slug, dir, text, name) {
+    const used = new Set(); try { for (const f of fs.readdirSync(path.join(dir, 'paper'), { recursive: true })) if (String(f).endsWith('.tex')) for (const m of fs.readFileSync(path.join(dir, 'paper', String(f)), 'utf8').matchAll(/\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^}]*)\}/g)) m[1].split(',').forEach(k => used.add(k.trim())); } catch { /* no paper yet */ }
+    const have = new Map(T.listSources(dir).filter(m => m.citeKey).map(m => [m.citeKey, m]));
+    let added = 0, skipped = 0; const ids = [];
+    for (const e of bibEntriesOf(text)) {
+        const type = e.type; if (['comment', 'string', 'preamble'].includes(type) || !e.key) continue;
+        if (have.has(e.key)) { skipped++; continue; }
+        const meta = T.addRecordSource(dir, { key: e.key, type, fields: T.bibFields(e.entry) });
+        if (used.has(e.key)) { meta.inBib = true; T.writeJson(path.join(dir, 'sources', meta.id, 'meta.json'), meta); }
+        added++; ids.push(meta.id);
+    }
+    if (!added && !skipped) throw httpError(400, 'No references were found in that .bib file.');
+    T.syncBib(dir);
+    record('activity', 'research-import-bib', { actor: 'phone', what: `${slug}: ${added} reference${added === 1 ? '' : 's'} from ${name}`, cwd: dir });
+    await commit(slug, `Import ${added} reference${added === 1 ? '' : 's'} from ${name}`);
+    return { imported: added, skipped, ids, kind: 'references' };
 }
 
 // What the editor shows before an agent is let loose on the paper: is there anything not yet in a version?

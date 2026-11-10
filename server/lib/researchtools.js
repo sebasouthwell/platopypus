@@ -135,9 +135,23 @@ export async function addSource(topic, input, { note = '' } = {}) {
         else { const h = htmlToText(r.buf.toString('utf8')); meta.title = h.title; meta.author = h.author; meta.site = h.site || new URL(r.url).hostname; meta.year = String(h.published).slice(0, 4); text = `# ${h.title}\n\n${h.text}\n`; }
     } else {
         const f = path.resolve(input); if (!exists(f)) throw httpError(404, `No such file: ${input}`);
-        if (/\.pdf$/i.test(f)) { fs.copyFileSync(f, path.join(dir, 'original.pdf')); meta.kind = 'pdf'; meta.title = path.basename(f, '.pdf'); text = await pdfText(topic, id, dir, meta); }
-        else { meta.kind = 'file'; meta.title = path.basename(f); text = fs.readFileSync(f, 'utf8'); }
+        const ext = (path.extname(f).slice(1) || '').toLowerCase(); const stem = path.basename(f, path.extname(f));
+        if (ext === 'pdf') { fs.copyFileSync(f, path.join(dir, 'original.pdf')); meta.kind = 'pdf'; meta.title = stem; text = await pdfText(topic, id, dir, meta); }
+        else if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+            // A picture (a scanned page, a slide, a chart): kept as it is, its words read with OCR so they can be searched.
+            fs.copyFileSync(f, path.join(dir, `original.${ext}`)); meta.kind = 'image'; meta.title = stem; meta.file = `original.${ext}`;
+            let ocr = ''; if (await which('tesseract')) { try { ocr = (await run('tesseract', [f, '-', '--psm', '3'], { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })).stdout; } catch { /* unreadable */ } }
+            text = `# ${stem}\n\n${ocr.trim() ? ocr.trim() : '(an image with no readable text)'}\n`;
+        } else if (ext === 'docx') {
+            // A Word document: its text is in word/document.xml, one <w:p> per paragraph.
+            fs.copyFileSync(f, path.join(dir, 'original.docx')); meta.kind = 'document'; meta.title = stem; meta.file = 'original.docx';
+            let xml = ''; try { xml = (await run('unzip', ['-p', f, 'word/document.xml'], { maxBuffer: 64 * 1024 * 1024, timeout: 60_000 })).stdout; } catch { throw httpError(400, 'That Word file could not be read.'); }
+            const body = xml.replace(/<w:tab\/>/g, '\t').replace(/<\/w:p>/g, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/\n{3,}/g, '\n\n');
+            text = `# ${stem}\n\n${body.trim()}\n`;
+        } else if (['html', 'htm'].includes(ext)) { const h = htmlToText(fs.readFileSync(f, 'utf8')); meta.kind = 'file'; meta.title = h.title || stem; meta.author = h.author || ''; text = `# ${meta.title}\n\n${h.text}\n`; fs.copyFileSync(f, path.join(dir, `original.${ext}`)); meta.file = `original.${ext}`; }
+        else { meta.kind = 'file'; meta.title = stem; text = fs.readFileSync(f, 'utf8'); if (ext) { fs.copyFileSync(f, path.join(dir, `original.${ext}`)); meta.file = `original.${ext}`; } }
     }
+    meta.from = Object.fromEntries(['title', 'author', 'year'].filter(k => meta[k]).map(k => [k, meta.kind === 'pdf' ? 'pdf' : meta.kind === 'video' ? 'video' : 'page']));
     meta.title = meta.title || input; meta.chars = text.length; meta.state.text = text.trim().length > 40 ? 'ready' : 'empty';
     fs.writeFileSync(path.join(dir, 'text.md'), text);
     writeJson(path.join(dir, 'meta.json'), meta);
@@ -217,6 +231,112 @@ export function readExcerpt(topic, id, { at = null, span = '90s', page = null, c
     return { id, title: meta.title, where, text: body };
 }
 
+// ---------- the reference record ----------
+// Each source's meta.json is the one place its reference details live, with where each detail came from. refs.bib is
+// made from those records: every cited source has an entry, written from its record. Editing a linked entry in refs.bib
+// writes the change back into the record (as yours), so the two never drift apart. Entries without a source are yours
+// alone and are left exactly as written.
+export const RECORD_FIELDS = ['title', 'author', 'year', 'journal', 'booktitle', 'volume', 'number', 'pages', 'publisher', 'doi', 'url'];
+// A record's page range is kept as pageRange: `pages` on a source is how many pages its PDF has.
+export const recKey = k => (k === 'pages' ? 'pageRange' : k);
+export const recGet = (m, k) => m[recKey(k)];
+const saveMeta = (topic, meta) => writeJson(path.join(sourcesDir(topic), meta.id, 'meta.json'), meta);
+const plainField = s => String(s || '').replace(/\\url\{([^}]*)\}/g, '$1').replace(/[{}]/g, '').replace(/\\([&%$#_])/g, '$1').replace(/\s+/g, ' ').trim();
+const texEsc = s => String(s || '').replace(/(?<!\\)([&%$#_])/g, '\\$1').replace(/\s+/g, ' ').trim();
+export function bibFields(entry) {
+    const f = {}; const body = entry.slice(entry.indexOf(',') + 1);
+    for (const m of body.matchAll(/(\w+)\s*=\s*(?:\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}|"([^"]*)"|(\d+))/g)) f[m[1].toLowerCase()] = (m[2] ?? m[3] ?? m[4] ?? '').replace(/\s+/g, ' ').trim();
+    return f;
+}
+// Where each detail of a record came from (older records did not say: work it out from how the source was added).
+export function provenance(meta) {
+    const base = meta.metaFrom === 'doi' ? 'doi' : meta.kind === 'pdf' ? 'pdf' : meta.kind === 'video' ? 'video' : 'page';
+    const out = {}; for (const k of RECORD_FIELDS) if (recGet(meta, k)) out[k] = meta.from?.[k] || (meta.metaFrom === 'agent' && ['title', 'author', 'year'].includes(k) ? 'agent' : base);
+    return out;
+}
+// Set details on a record. Details you set are never overwritten by the DOI lookup or the agent.
+export function setFields(meta, fields, from) {
+    meta.from = meta.from || {}; let changed = false;
+    for (const k of RECORD_FIELDS) {
+        if (fields[k] === undefined) continue; const v = k === 'year' ? String(fields[k]).replace(/\D/g, '').slice(0, 4) : clip(plainField(fields[k]), 400);
+        if (from !== 'you' && meta.from[k] === 'you') continue;
+        if (v === (recGet(meta, k) || '')) continue;
+        if (v) { meta[recKey(k)] = v; meta.from[k] = from; } else { delete meta[recKey(k)]; delete meta.from[k]; }
+        changed = true;
+    }
+    if (fields.type !== undefined) { const t = String(fields.type).replace(/\W/g, '').toLowerCase(); if (t !== (meta.bibType || '') && (from === 'you' || meta.from.type !== 'you')) { if (t) meta.bibType = t; else delete meta.bibType; meta.from.type = from; changed = true; } }
+    return changed;
+}
+export function bibKey(meta) {
+    if (meta.citeKey) return meta.citeKey;          // fixed once the source is cited, so \cite keys never change under you
+    const who = (meta.author || meta.site || meta.title || 'source').split(/[,;&]| and /)[0].trim().split(/\s+/).pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'source';
+    return `${who}${meta.year || 'nd'}${meta.id}`;
+}
+export function entryType(m) { return m.bibType || (m.journal ? 'article' : m.booktitle ? 'inproceedings' : 'misc'); }
+export function renderEntry(m) {
+    const type = entryType(m); const f = []; const put = (k, v) => { if (v) f.push(`  ${k} = {${v}}`); };
+    put('title', texEsc(m.title)); put('author', texEsc(m.author)); put('year', m.year);
+    for (const k of ['journal', 'booktitle', 'volume', 'number', 'pages', 'publisher']) put(k, texEsc(recGet(m, k)));
+    put('doi', m.doi);
+    if (m.url) { const u = m.url.replace(/[{}]/g, ''); if (type === 'misc') put('howpublished', `\\url{${u}}`); else put('url', u); }
+    if (type === 'misc' || m.kind === 'video' || m.kind === 'web') put('note', `${m.kind === 'video' ? 'Video. ' : ''}Accessed ${new Date(m.added || Date.now()).toISOString().slice(0, 10)}`);
+    put('source', m.id);
+    return `@${type}{${bibKey(m)},\n${f.join(',\n')}\n}`;
+}
+function bibParts(text, sources) {
+    const parts = []; let last = 0;
+    for (const m of text.matchAll(/@(\w+)\s*\{\s*([^,\s]+)\s*,[\s\S]*?\n\}/g)) {
+        parts.push({ text: text.slice(last, m.index) });
+        const linked = (m[0].match(/\bsource\s*=\s*\{(s\d{2,4})\}/) || [])[1] || ((m[2].match(/(s\d{2,4})$/) || [])[1]);
+        parts.push({ entry: m[0], type: m[1].toLowerCase(), key: m[2], id: linked && sources.has(linked) ? linked : null });
+        last = m.index + m[0].length;
+    }
+    parts.push({ text: text.slice(last) }); return parts;
+}
+// Write refs.bib from the records: every cited source, in place, from its record; other entries untouched.
+export function syncBib(topic) {
+    const file = path.join(topic, 'paper', 'refs.bib'); const cur = exists(file) ? fs.readFileSync(file, 'utf8') : '';
+    const sources = new Map(listSources(topic).map(m => [m.id, m]));
+    for (const m of sources.values()) if (m.bibtex) { const f = bibFields(m.bibtex); const type = (m.bibtex.match(/^@(\w+)/) || [])[1]?.toLowerCase(); setFields(m, { ...Object.fromEntries(RECORD_FIELDS.filter(k => f[k]).map(k => [k, f[k]])), ...(type ? { type } : {}) }, 'doi'); delete m.bibtex; saveMeta(topic, m); }
+    const parts = bibParts(cur, sources);
+    // Records from before 2.3: take the key the entry already has, and copy into the record any detail that was only in
+    // refs.bib (an agent or you may have added a journal or pages there), so writing refs.bib from the record loses nothing.
+    for (const p of parts) if (p.id) {
+        const m = sources.get(p.id); let changed = false;
+        if (!m.citeKey || !m.inBib) { m.citeKey = m.citeKey || p.key; m.inBib = true; changed = true; }
+        if (!m.bibAbsorbed) {
+            const f = bibFields(p.entry); if (f.howpublished && !f.url) f.url = f.howpublished;
+            const fill = Object.fromEntries(RECORD_FIELDS.filter(k => f[k] && !recGet(m, k)).map(k => [k, f[k]]));
+            if (!m.bibType && p.type !== entryType(m)) fill.type = p.type;
+            setFields(m, fill, 'bib'); m.bibAbsorbed = true; changed = true;
+        }
+        if (changed) saveMeta(topic, m);
+    }
+    const seen = new Set();
+    let out = parts.map(p => (p.entry ? (p.id && !seen.has(p.id) ? (seen.add(p.id), renderEntry(sources.get(p.id))) : p.id ? '' : p.entry) : p.text)).join('');
+    for (const m of sources.values()) if (m.inBib && !seen.has(m.id)) out += `\n\n${renderEntry(m)}`;
+    out = out.replace(/\n{3,}/g, '\n\n').replace(/^\s+/, '').trimEnd() + (out.trim() ? '\n' : '');
+    if (out !== cur) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, out); }
+    return { changed: out !== cur };
+}
+// You edited refs.bib: carry changes to linked entries back into their records, then write refs.bib from them again.
+export function bibToRecords(topic) {
+    const file = path.join(topic, 'paper', 'refs.bib'); const cur = exists(file) ? fs.readFileSync(file, 'utf8') : '';
+    const sources = new Map(listSources(topic).map(m => [m.id, m])); const present = new Set();
+    for (const p of bibParts(cur, sources)) {
+        if (!p.entry || !p.id) continue; const m = sources.get(p.id); present.add(p.id);
+        const f = bibFields(p.entry); if (f.howpublished && !f.url) f.url = f.howpublished;
+        const fields = {}; for (const k of RECORD_FIELDS) fields[k] = f[k] !== undefined ? f[k] : '';
+        if (p.type !== entryType(m)) fields.type = p.type;
+        let changed = setFields(m, fields, 'you');
+        if (p.key !== bibKey(m)) { m.citeKey = p.key; changed = true; }
+        if (!m.inBib) { m.inBib = true; changed = true; }
+        if (changed) saveMeta(topic, m);
+    }
+    for (const m of sources.values()) if (m.inBib && !present.has(m.id)) { m.inBib = false; saveMeta(topic, m); }   // you took it out of refs.bib
+    return syncBib(topic);
+}
+
 // ---------- who wrote it: a DOI when there is one, otherwise the agent reads the first and last page ----------
 const DOI = /\b(10\.\d{4,9}\/[^\s"<>{}|\\^`]+[^\s"<>{}|\\^`.,;:)\]])/;
 export function findDoi(text) {
@@ -224,8 +344,7 @@ export function findDoi(text) {
     const head = String(text).split(/<<page 3>>/)[0].slice(0, 12000);
     return head.match(DOI)?.[1] || null;
 }
-const bibField = (bib, f) => bib.match(new RegExp(`\\b${f}\\s*=\\s*[{"]((?:[^{}"]|\\{[^{}]*\\})*)[}"]`, 'i'))?.[1]?.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim() || '';
-// Fetch the publisher's own BibTeX for a DOI (doi.org content negotiation; only the DOI leaves the box).
+// Fetch the publisher's own BibTeX for a DOI (doi.org content negotiation; only the DOI leaves the box) into the record.
 export async function resolveDoi(topic, id, doi = null) {
     const meta = sourceMeta(topic, id); const dir = path.join(sourcesDir(topic), id);
     const d = doi || meta.doi || findDoi(exists(path.join(dir, 'text.md')) ? fs.readFileSync(path.join(dir, 'text.md'), 'utf8') : '');
@@ -233,10 +352,9 @@ export async function resolveDoi(topic, id, doi = null) {
     let bib = '';
     try { bib = (await fetchText(`https://doi.org/${encodeURI(d)}`, { accept: 'application/x-bibtex', max: 200 * 1024 })).buf.toString('utf8').trim(); } catch (e) { return { ok: false, doi: d, reason: e.message }; }
     if (!/^@\w+\s*\{/.test(bib)) return { ok: false, doi: d, reason: 'doi.org did not return BibTeX' };
-    meta.doi = d; meta.title = bibField(bib, 'title') || meta.title; meta.author = bibField(bib, 'author') || meta.author; meta.year = bibField(bib, 'year') || meta.year; meta.metaFrom = 'doi'; delete meta.needsMeta;
-    // The publisher's entry, under our key, tied to the file with a source field.
-    meta.bibtex = bib.replace(/^(@\w+\s*\{)[^,]*,/, `$1${bibKey(meta)},\n  source = {${id}},`).replace(/\n?\}\s*$/, '\n}');
-    writeJson(path.join(dir, 'meta.json'), meta);
+    const f = bibFields(bib); const type = (bib.match(/^@(\w+)/) || [])[1]?.toLowerCase();
+    setFields(meta, { ...Object.fromEntries(RECORD_FIELDS.filter(k => f[k]).map(k => [k, f[k]])), doi: d, ...(type ? { type } : {}) }, 'doi');
+    meta.metaFrom = 'doi'; delete meta.needsMeta; delete meta.bibtex; saveMeta(topic, meta); syncBib(topic);
     return { ok: true, doi: d, title: meta.title, author: meta.author, year: meta.year };
 }
 // What the agent reads to work out the metadata when there is no DOI: the first and last page, nothing more.
@@ -246,35 +364,21 @@ export function metaPages(topic, id, max = 2500) {
     bump(topic, { excerpts: 1, readChars: first.length + last.length });
     return { id, current: { title: meta.title, author: meta.author, year: meta.year, doi: meta.doi || '' }, first, last, pages: pages.length };
 }
-export function setMeta(topic, id, { title, author, year, doi, type } = {}) {
-    const meta = sourceMeta(topic, id); const f = path.join(sourcesDir(topic), id, 'meta.json'); const before = bibKey(meta);
-    if (title) meta.title = clip(String(title), 300); if (author) meta.author = clip(String(author), 300); if (year) meta.year = String(year).replace(/\D/g, '').slice(0, 4);
-    if (doi) meta.doi = String(doi).trim(); if (type) meta.bibType = String(type).replace(/\W/g, '').toLowerCase();
-    meta.metaFrom = meta.metaFrom === 'doi' ? 'doi' : 'agent'; delete meta.needsMeta; writeJson(f, meta);
-    // A refs.bib entry written before the metadata was known is replaced, so the key and fields are right.
-    const bib = path.join(topic, 'paper', 'refs.bib');
-    if (exists(bib)) { const cur = fs.readFileSync(bib, 'utf8'); const re = new RegExp(`@\\w+\\{${before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')},[\\s\\S]*?\\n\\}\\n*`); if (re.test(cur)) { fs.writeFileSync(bib, cur.replace(re, '')); cite(topic, id, {}); } }
-    return { id, key: bibKey(meta), renamedFrom: before !== bibKey(meta) ? before : null, title: meta.title, author: meta.author, year: meta.year };
+export function setMeta(topic, id, { title, author, year, doi, type, journal, volume, pages, publisher } = {}) {
+    const meta = sourceMeta(topic, id);
+    setFields(meta, Object.fromEntries(Object.entries({ title, author, year, doi, journal, volume, pages, publisher }).filter(([, v]) => v)), 'agent');
+    if (type) setFields(meta, { type }, 'agent');
+    if (meta.metaFrom !== 'doi') meta.metaFrom = 'agent'; delete meta.needsMeta; saveMeta(topic, meta); syncBib(topic);
+    return { id, key: bibKey(meta), renamedFrom: null, title: meta.title, author: meta.author, year: meta.year };
 }
+// Details you set yourself (the editor's record form).
+export function setRecord(topic, id, fields) { const meta = sourceMeta(topic, id); setFields(meta, fields, 'you'); delete meta.needsMeta; saveMeta(topic, meta); syncBib(topic); return meta; }
 
 // ---------- references ----------
-const bibEsc = s => String(s || '').replace(/[\\{}]/g, '').replace(/([&%$#_])/g, '\\$1').replace(/\s+/g, ' ').trim();
-export function bibKey(meta) {
-    const who = (meta.author || meta.site || meta.title || 'source').split(/[,;&]| and /)[0].trim().split(/\s+/).pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'source';
-    return `${who}${meta.year || 'nd'}${meta.id}`;
-}
 export function cite(topic, id, { at = null, page = null, quote = '', claim = '' } = {}) {
-    const meta = sourceMeta(topic, id); const key = bibKey(meta);
-    const bib = path.join(topic, 'paper', 'refs.bib'); fs.mkdirSync(path.dirname(bib), { recursive: true });
-    const cur = exists(bib) ? fs.readFileSync(bib, 'utf8') : '';
-    if (!cur.includes(`{${key},`) && meta.bibtex) fs.appendFileSync(bib, `${cur && !cur.endsWith('\n\n') ? '\n' : ''}${meta.bibtex}\n\n`);
-    else if (!cur.includes(`{${key},`)) {
-        const f = [`  title = {${bibEsc(meta.title)}}`]; if (meta.author) f.push(`  author = {${bibEsc(meta.author)}}`); if (meta.year) f.push(`  year = {${bibEsc(meta.year)}}`);
-        if (meta.url) f.push(`  howpublished = {\\url{${meta.url.replace(/[{}]/g, '')}}}`);
-        f.push(`  source = {${id}}`);
-        f.push(`  note = {${meta.kind === 'video' ? 'Video. ' : ''}Accessed ${new Date(meta.added).toISOString().slice(0, 10)}}`);
-        fs.appendFileSync(bib, `${cur && !cur.endsWith('\n\n') ? '\n' : ''}@${meta.bibType || 'misc'}{${key},\n${f.join(',\n')}\n}\n\n`);
-    }
+    const meta = sourceMeta(topic, id);
+    if (!meta.citeKey) meta.citeKey = bibKey(meta); meta.inBib = true; meta.bibAbsorbed = true; saveMeta(topic, meta); syncBib(topic);
+    const key = meta.citeKey;
     const where = at !== null ? fmtT(parseTime(at)) : page !== null ? `p. ${page}` : '';
     const notes = path.join(topic, 'notes', 'claims.md'); fs.mkdirSync(path.dirname(notes), { recursive: true });
     if (claim) fs.appendFileSync(notes, `- ${claim} — [${id}${where ? ' ' + (at !== null ? '@' : '') + where : ''}]${quote ? ` "${String(quote).replace(/\s+/g, ' ').slice(0, 240)}"` : ''}\n`);
@@ -436,3 +540,16 @@ export const TEMPLATE_TEX = title => `\\documentclass[11pt]{article}
 \\bibliography{refs}
 \\end{document}
 `;
+
+// A reference with no file (from an imported .bib): a source made of its record alone.
+export function addRecordSource(topic, { key, type, fields }) {
+    const id = nextId(topic); const dir = path.join(sourcesDir(topic), id); fs.mkdirSync(dir, { recursive: true });
+    const meta = { id, kind: 'reference', title: '', url: null, author: '', year: '', added: Date.now(), chars: 0, state: { text: 'empty' }, note: 'imported from a .bib file', from: {} };
+    setFields(meta, Object.fromEntries(RECORD_FIELDS.filter(k => fields[k]).map(k => [k, fields[k]])), 'you');
+    if (fields.howpublished && !meta.url) setFields(meta, { url: fields.howpublished }, 'you');
+    if (type) setFields(meta, { type }, 'you');
+    if (key && /^[\w:.-]{1,80}$/.test(key)) meta.citeKey = key;
+    const text = `# ${meta.title || key || id}\n\n${[meta.author, meta.year, meta.journal].filter(Boolean).join('. ')}\n${fields.abstract ? `\n${plainField(fields.abstract)}\n` : ''}`;
+    fs.writeFileSync(path.join(dir, 'text.md'), text); meta.chars = text.length; saveMeta(topic, meta);
+    return meta;
+}
