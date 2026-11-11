@@ -1,6 +1,6 @@
 // Cline, the fourth agent, runs on an Ollama server you choose. Cline's own "ollama" provider only knows this machine,
 // so it is pointed at that server's OpenAI-compatible API (<address>/v1), which every Ollama serves.
-// PlatOpypus keeps the address, the model and an optional key (for a server behind a proxy that wants one; encrypted),
+// PlatOpypus keeps the address, the model and an optional Ollama API key (sent as a bearer token; encrypted),
 // and writes Cline's provider settings for whichever user runs it, just before it starts.
 import fs from 'node:fs';
 import path from 'node:path';

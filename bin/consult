@@ -3,6 +3,10 @@
 //
 //   consult list                          who can be asked here (installed, signed in) and whether asking is allowed
 //   consult <agent> "question"            ask claude, codex, antigravity (Gemini) or cline; prints its answer (it may read this folder, not change it)
+//   consult claude --web "question"       in Security Lab: also let it search the web (nothing else is ever granted)
+//
+// In Security Lab it is zero trust: the asked agent gets your question and nothing else (no folder, files, or context;
+// say it is a security assessment only if you want it to know), once, with no tools unless you add --web.
 //   echo "question" | consult <agent>     the question from standard input
 //
 // Whether asking is allowed depends on the session type (the user sets it on More → AI agents).
@@ -23,12 +27,13 @@ try {
     else if (cmd === 'list') {
         const d = await call('/api/agent/consult');
         console.log(d.allowed ? `Asking other agents is ON for ${d.session} sessions.` : `Asking other agents is OFF for ${d.session || 'this kind of'} sessions (the user can switch it on in More → AI agents).`);
-        for (const a of d.agents) console.log(`  ${a.key.padEnd(12)} ${a.ready ? 'can be asked' : !a.installed ? 'not installed' : !a.signedIn ? 'not signed in' : 'cannot answer without a terminal'}`);
+        if (d.zeroTrust) console.log('Zero trust: the asked agent sees only your question (no folder, files or context), once, with no tools unless you add --web (Claude only).');
+        for (const a of d.agents) console.log(`  ${a.key.padEnd(12)} ${a.ready ? 'can be asked' : !a.installed ? 'not installed' : !a.signedIn ? 'not signed in' : d.zeroTrust ? 'cannot be confined to zero trust' : 'cannot answer without a terminal'}`);
     } else {
-        const question = argv.slice(1).join(' ').trim() || (await readStdin()).trim();
+        const rest = argv.slice(1); const web = rest.includes('--web'); const question = rest.filter(x => x !== '--web').join(' ').trim() || (await readStdin()).trim();
         if (!question) die('usage: consult <agent> "question"   (consult list shows who can be asked)');
         process.stderr.write(`Asking ${cmd}…\n`);
-        const d = await call('/api/agent/consult', 'POST', { to: cmd, question });
+        const d = await call('/api/agent/consult', 'POST', { to: cmd, question, web });
         console.log(d.answer);
     }
 } catch (e) { die(`consult: ${e.message}`); }

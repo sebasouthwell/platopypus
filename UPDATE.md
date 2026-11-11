@@ -610,6 +610,13 @@ phone's Update button. Mechanism:
   time per shell, 30 an hour, audited (`agent-consult`). Allowed per session type in `state/consult.json`
   (`GET/PUT /api/agents/consult`): Security Lab and Research on by default, project and control off. Signed-out agents
   are refused up front.
+- **2.8.0** — zero-trust consulting in Security Lab: the asked agent gets the question word for word and nothing
+  else (a fresh empty folder under the agent home, removed after; no PlatOpypus framing), once. Claude runs with
+  `--tools ""` (or `WebSearch,WebFetch` pre-approved with `--allowedTools` when the asker passes `--web`),
+  `--strict-mcp-config` with no servers (no connectors), `--setting-sources ""`, `--no-session-persistence` and a
+  one-line system prompt; Claude Code still adds the account email and basic environment (folder, OS, date). Cline runs
+  with its own temporary home holding only the Ollama connection. Codex and Antigravity cannot be confined that way and
+  are refused there. `POST /api/agent/consult` takes `web`. The Cline key field is labelled as the Ollama API key.
 
 ## Release checklist
 

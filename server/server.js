@@ -356,7 +356,7 @@ const server = http.createServer(async (req, res) => {
             if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
             // Asking another agent: allowed or not by this shell's session type; the asked agent runs read-only in this folder.
             if (p === '/api/agent/consult' && method === 'GET') return send(res, 200, await consult.available(sh.session || null));
-            if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question })); }
+            if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question, web: !!b.web })); }
             // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
             if (p.startsWith('/api/agent/lab/')) {
                 const slug = lab.engagementOf(sh.cwd); if (!slug) return send(res, 403, { error: 'This shell is not in a Security Lab engagement.' });
