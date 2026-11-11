@@ -619,6 +619,28 @@ phone's Update button. Mechanism:
   are refused there. `POST /api/agent/consult` takes `web`. The Cline key field is labelled as the Ollama API key.
 - **2.8.1** — the Cline model is a text field: type any model name (a tag the list does not show, or one not pulled
   yet); "Load models" fills it with the Ollama server's models as suggestions. No state changes.
+- **2.9.0** — Schedules, power off from the phone, and Cline reads its session brief.
+  - **Schedules** (More → Schedules, `server/lib/schedules.js`): routines are bash scripts in `/Scheduled/<id>.sh` run
+    by the server's own minute timer (five-part cron in box time, plus @hourly/@daily/@weekly/@monthly/@yearly), as
+    the agent user (default) or root, from `/Scheduled/.work/<id>`, with a time limit (default 30 min) and one run at
+    a time. Runs are logged in `/Scheduled/.runs/<id>/` (newest 20; folder 0711, logs 0640) and in the audit log.
+    State: `state/schedules.json` (new; created on first use, no migration). Each routine keeps the SHA-256 of the script
+    you saved or approved; a different file pauses it ("changed") and the run uses an exact copy of the approved text.
+  - **Agents propose, you approve:** `schedule add <name> "<cron>" <script|-> --why …` (`bin/schedule`, linked in
+    `/usr/local/bin`) → `POST /api/agent/schedules`; it is saved switched off, always as the agent user, until you
+    approve exactly the fingerprint you were shown (`POST /api/schedules/:id/approve {hash}`). At most 10 waiting.
+    Agents can list (`GET /api/agent/schedules`) but not create, change, approve, run or delete. New alert kind
+    `schedule` (proposals, failures, time limits, changed scripts; on by default).
+  - **Power off now** (More, under the Start button card): only offered on a device that has the Start button set up,
+    so it can be started again. `POST /api/power/off` records it, sends the power-off alert and runs `systemctl
+    poweroff` after 2.5 s (EC2 stops the instance; its shutdown behaviour is stop). Refused for agent shells and
+    the local token; `{dry:true}` only reports.
+  - **Cline session brief:** Cline puts `$CLINE_DIR/rules/*` into its system prompt but never reads files named in
+    environment variables, so each Cline shell now gets `CLINE_DIR=~/.cline/shells/<shell>` with
+    `rules/platopypus-session.md` (session type, level, root and the brief from `$PORTHOLE_SECURITY_FILE` word for word)
+    and `CLINE_DATA_DIR=~/.cline/data` (settings, providers and history stay shared). Folders older than 14 days are
+    removed. The global `~/.agents/AGENTS.md` is still loaded.
+  - Icons: clock and power added to the sprite.
 
 ## Release checklist
 

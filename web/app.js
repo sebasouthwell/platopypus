@@ -245,6 +245,7 @@ function push(page) {
     if (page === 'audit') loadAudit().catch(e => toast(e.message, true));
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
+    if (page === 'schedules') loadSchedules().catch(e => toast(e.message, true));
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
@@ -2636,7 +2637,9 @@ function offlineCard() {
     let c = null; try { c = JSON.parse(localStorage.getItem('plato.control') || 'null'); } catch { /* none */ }
     const sw = 'serviceWorker' in navigator;
     box.className = 'list gap';
-    box.innerHTML = `<button class="row" data-offline><span class="ico ${c ? 'kelp' : ''}">${icon('play')}</span><div class="main"><div class="title">${c ? 'Start button ready on this device' : 'Start the box when it is off'}</div><div class="sub" style="white-space:normal">${!sw ? 'This browser cannot keep the offline page.' : c ? 'If the box is off when you open PlatOpypus here, you get a page with a Start button.' : 'Paste the control URL and key once, and this device can start the box when it is off.'}</div></div>${icon('chevron', 'i chev')}</button>`;
+    box.innerHTML = `<button class="row" data-offline><span class="ico ${c ? 'kelp' : ''}">${icon('play')}</span><div class="main"><div class="title">${c ? 'Start button ready on this device' : 'Start the box when it is off'}</div><div class="sub" style="white-space:normal">${!sw ? 'This browser cannot keep the offline page.' : c ? 'If the box is off when you open PlatOpypus here, you get a page with a Start button.' : 'Paste the control URL and key once, and this device can start the box when it is off.'}</div></div>${icon('chevron', 'i chev')}</button>
+        <button class="row" data-poweroff ${c ? '' : 'disabled aria-disabled="true"'}><span class="ico ${c ? 'flare' : ''}">${icon('power')}</span><div class="main"><div class="title">Power off now</div><div class="sub" style="white-space:normal">${c ? 'Stops the box (files and settings are kept). Start it again from the Start page.' : 'Set up the Start button above first, so this device can start the box again.'}</div></div>${icon('chevron', 'i chev')}</button>`;
+    const po = $('[data-poweroff]', box); if (po && c) po.onclick = () => powerOffDialog();
     $('[data-offline]', box).onclick = () => {
         const { panel, close } = openDialog(`<h2>${icon('play')}Start the box when it is off</h2>
             <p class="muted">When the box is off, this device shows a page with a Start button instead of an error. It uses the control Lambda, so paste its URL and key (the Telegram message has Copy URL and Copy key). They stay on this device only.</p>
@@ -2656,6 +2659,102 @@ function offlineCard() {
         const f = $('[data-forget]', panel); if (f) f.onclick = () => { localStorage.removeItem('plato.control'); close(); toast('Forgotten on this device'); offlineCard(); };
     };
 }
+// Power off from the phone: says first what is still running, then the box powers itself off (EC2 stops it).
+async function powerOffDialog() {
+    let st = null; try { st = await api('/api/power?settle=0'); } catch { /* still offer it */ }
+    const working = (st?.agents || []).filter(a => a.working).map(a => a.name);
+    const warn = [working.length ? `${working.length === 1 ? 'An agent is' : `${working.length} agents are`} working: ${working.join(', ')}. They stop too.` : '', st?.keepAlive ? `The box is kept on until ${new Date(st.keepAlive.until).toLocaleString()}.` : ''].filter(Boolean);
+    const { panel, close } = openDialog(`<h2>${icon('power')}Power off the box?</h2>
+        <p class="muted">The box stops: shells, servers, containers and public links end. Files, settings and the address are kept. Open PlatOpypus on this device later and tap Start to bring it back.</p>
+        ${warn.length ? `<p class="note" style="color:var(--flare)">${warn.map(esc).join('<br>')}</p>` : '<p class="note">No agent is working right now.</p>'}
+        <div class="buttons"><button data-close>Cancel</button><button class="danger" data-ok>${icon('power')}Power off</button></div>`, { size: 'small' });
+    $('[data-ok]', panel).onclick = async () => {
+        const b = $('[data-ok]', panel); b.disabled = true; b.textContent = 'Powering off…';
+        try { await api('/api/power/off', { method: 'POST', body: {} }); close(); toast('Powering off. Tap Start on this device when you need it again.'); setTimeout(() => location.reload(), 12000); }
+        catch (ex) { b.disabled = false; b.innerHTML = `${icon('power')}Power off`; toast(ex.message, true); }
+    };
+}
+
+// ---------- schedules ----------
+const SCHED_PRESETS = [['Every 15 minutes', '*/15 * * * *'], ['Every hour', '0 * * * *'], ['Every day at 03:00', '0 3 * * *'], ['Weekdays at 08:30', '30 8 * * 1-5'], ['Mondays at 09:00', '0 9 * * 1'], ['1st of the month', '0 6 1 * *']];
+const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function cronWords(c) {
+    const t = String(c || '').trim(); const p = SCHED_PRESETS.find(x => x[1] === t); if (p) return p[0];
+    const m = { '@hourly': 'Every hour', '@daily': 'Every day at midnight', '@midnight': 'Every day at midnight', '@weekly': 'Sundays at midnight', '@monthly': '1st of the month at midnight' }[t]; if (m) return m;
+    const f = t.split(/\s+/); if (f.length !== 5) return t;
+    const [mi, h, dom, mon, dow] = f; const two = n => String(n).padStart(2, '0'); const num = /^\d+$/;
+    if (/^\*\/\d+$/.test(mi) && h === '*' && dom === '*' && mon === '*' && dow === '*') return `Every ${mi.slice(2)} minutes`;
+    if (num.test(mi) && h === '*' && dom === '*' && mon === '*' && dow === '*') return `Every hour at :${two(mi)}`;
+    if (num.test(mi) && num.test(h) && mon === '*') {
+        const at = `${two(h)}:${two(mi)}`;
+        if (dom === '*' && dow === '*') return `Every day at ${at}`;
+        if (dom === '*' && dow === '1-5') return `Weekdays at ${at}`;
+        if (dom === '*' && /^[0-7]$/.test(dow)) return `${DOW[Number(dow) % 7]}s at ${at}`;
+        if (num.test(dom) && dow === '*') return `Day ${dom} of each month at ${at}`;
+    }
+    return t;
+}
+const SCHED_TEMPLATE = '#!/usr/bin/env bash\n# What this routine does, in one line.\nset -euo pipefail\ncd "$PLATO_ROUTINE_DIR"   # its own work folder\n\necho "Ran at $(date -u)"\n';
+async function loadSchedules() {
+    const d = await api('/api/schedules'); const body = $('#sched-body'); if (!body) return;
+    const sub = $('#more-schedules-sub'); const on = d.items.filter(i => i.state === 'on').length, prop = d.items.filter(i => i.state === 'proposed').length;
+    if (sub) sub.textContent = d.items.length ? `${on} on${prop ? ` · ${prop} waiting for you` : ''}` : 'Routines the box runs on a timetable';
+    const proposed = d.items.filter(i => i.state === 'proposed'), rest = d.items.filter(i => i.state !== 'proposed');
+    const when = t => t ? new Date(t).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    const lastTxt = l => !l ? 'Not run yet' : `${l.exit === 0 && !l.timedOut ? 'OK' : l.timedOut ? 'Stopped at the time limit' : `Failed (exit ${l.exit})`} ${when(l.at)}`;
+    const stateTxt = i => i.running ? 'Running now' : i.state === 'on' ? `Next ${when(i.next)}` : i.state === 'changed' ? 'Paused: the script changed, check it' : i.state === 'missing' ? 'Paused: the script file is gone' : 'Off';
+    let html = `<p class="note">The box runs these while it is on, in box time (${esc(d.timezone)}). Scripts live in <span class="mono">${esc(d.folder)}</span>. Agents can propose one with <span class="mono">schedule add</span>; it stays off until you read it and approve it here.</p>`;
+    if (proposed.length) html += `<h2 class="section">Waiting for you</h2><div class="list">${proposed.map(i => `<button class="row" data-sched="${esc(i.id)}"><span class="ico brass">${icon('clock')}</span><div class="main"><div class="title">${esc(i.name)}</div><div class="sub" style="white-space:normal">${esc(cronWords(i.cron))} · proposed by ${esc(i.by)}${i.why ? ` · ${esc(i.why)}` : ''}</div></div><span class="text-btn">Review</span></button>`).join('')}</div>`;
+    html += `<h2 class="section">Routines</h2>`;
+    html += rest.length ? `<div class="list">${rest.map(i => { const bad = i.state === 'changed' || i.state === 'missing' || (i.last && (i.last.exit !== 0 || i.last.timedOut)); return `<div class="row sched-row"><button class="sched-open" data-sched="${esc(i.id)}"><span class="ico ${bad ? 'flare' : i.state === 'on' ? 'kelp' : ''}">${icon('clock')}</span><div class="main"><div class="title">${esc(i.name)}${i.runAs === 'root' ? ' <span class="pill sm danger sc-root">root</span>' : ''}</div><div class="sub" style="white-space:normal">${esc(cronWords(i.cron))} · ${esc(stateTxt(i))} · ${esc(lastTxt(i.last))}</div></div></button><button class="switch" role="switch" aria-label="Switch ${esc(i.name)} on or off" aria-checked="${i.enabled && i.state !== 'changed' ? 'true' : 'false'}" data-sched-on="${esc(i.id)}"><span></span></button></div>`; }).join('')}</div>`
+        : `<div class="card"><p style="margin:0 0 12px">No routines yet. A routine is a short bash script and a time, for example a nightly clean-up or a check every hour.</p><button class="primary" data-sched-new>${icon('plus')}New routine</button></div>`;
+    body.innerHTML = html;
+    $$('[data-sched]', body).forEach(b => b.onclick = () => scheduleDialog(b.dataset.sched));
+    $$('[data-sched-new]', body).forEach(b => b.onclick = () => scheduleDialog(null));
+    $$('[data-sched-on]', body).forEach(b => b.onclick = async () => { const on = b.getAttribute('aria-checked') !== 'true'; try { await api(`/api/schedules/${b.dataset.schedOn}`, { method: 'PUT', body: { enabled: on } }); toast(on ? 'Switched on' : 'Switched off'); } catch (ex) { toast(ex.message, true); } loadSchedules().catch(() => {}); });
+}
+$('#sched-new')?.addEventListener('click', () => scheduleDialog(null));
+async function scheduleDialog(id) {
+    let it = null; if (id) { try { it = await api(`/api/schedules/${id}`); } catch (ex) { return toast(ex.message, true); } }
+    const review = it?.state === 'proposed';
+    const v = it || { name: '', cron: '0 3 * * *', runAs: 'agent', timeoutMin: 30, script: SCHED_TEMPLATE, runs: [] };
+    const when = t => new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const { panel, close } = openDialog(`<h2>${icon('clock')}${review ? 'Review proposed routine' : it ? esc(it.name) : 'New routine'}</h2>
+        ${review ? `<p class="note" style="color:var(--brass)">Proposed by ${esc(it.by)}${it.why ? `: ${esc(it.why)}` : ''}. Read the script. It runs only after you approve it.</p>` : ''}
+        ${it?.state === 'changed' ? '<p class="note" style="color:var(--flare)">The script file changed since it was last saved or approved, so the routine is paused. Check the script below and save it to switch it back on.</p>' : ''}
+        <div class="field"><label for="sc-name">Name</label><input id="sc-name" type="text" maxlength="60" value="${esc(v.name)}" placeholder="Nightly clean-up"></div>
+        <div class="ka-label">When</div>
+        <div class="ka-chips" id="sc-presets">${SCHED_PRESETS.map(([l, c]) => `<button type="button" data-cron="${c}" class="${c === v.cron ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="field"><label for="sc-cron">Schedule (minute hour day month weekday)</label><input id="sc-cron" class="mono" type="text" spellcheck="false" autocomplete="off" value="${esc(v.cron)}"><div class="note" id="sc-words"></div></div>
+        <div class="sc-two"><div class="field"><label for="sc-as">Runs as</label><select id="sc-as" ${review ? '' : ''}><option value="agent" ${v.runAs === 'agent' ? 'selected' : ''}>Agent user (recommended)</option><option value="root" ${v.runAs === 'root' ? 'selected' : ''}>Root</option></select></div>
+        <div class="field"><label for="sc-limit">Time limit (minutes)</label><input id="sc-limit" type="number" min="1" max="240" value="${v.timeoutMin}"></div></div>
+        <p class="note" id="sc-rootwarn" style="color:var(--flare)" ${v.runAs === 'root' ? '' : 'hidden'}>As root the script can change anything on the box. Only use it for scripts you wrote or read line by line.</p>
+        <div class="field"><label for="sc-script">Script (bash)</label><textarea id="sc-script" class="sc-script mono" rows="12" spellcheck="false" ${review ? 'readonly' : ''}>${esc(v.script)}</textarea></div>
+        ${it && it.runs.length ? `<div class="ka-label">Recent runs</div><div class="list">${it.runs.slice(0, 8).map(r => `<button class="row" data-runlog="${esc(r.run)}"><span class="ico ${r.exit === 0 && !r.timedOut ? 'kelp' : 'flare'}">${icon(r.exit === 0 && !r.timedOut ? 'check' : 'x')}</span><div class="main"><div class="title">${when(r.at)}</div><div class="sub">${r.timedOut ? 'Stopped at the time limit' : r.exit === 0 ? 'OK' : `Exit ${r.exit}`} · ${Math.max(1, Math.round(r.ms / 1000))} s${r.why === 'phone' ? ' · run by you' : ''}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}</div>` : ''}
+        <div class="buttons">${it ? `<button class="danger" data-del>${icon('trash')}Delete</button>` : ''}${it && !review ? `<button data-runnow>${icon('play')}Run now</button>` : ''}<button data-close>Cancel</button><button class="primary" data-save>${review ? `${icon('check')}Approve and switch on` : it ? `${icon('save')}Save` : `${icon('plus')}Create`}</button></div>`);
+    const cron = $('#sc-cron', panel), words = $('#sc-words', panel);
+    const showWords = () => { const w = cronWords(cron.value); words.textContent = w === cron.value.trim() ? 'Box time. Five parts, for example 0 3 * * * is 03:00 every day.' : `${w}, box time.`; $$('#sc-presets [data-cron]', panel).forEach(b => b.classList.toggle('on', b.dataset.cron === cron.value.trim())); };
+    cron.oninput = showWords; showWords();
+    $$('#sc-presets [data-cron]', panel).forEach(b => b.onclick = () => { cron.value = b.dataset.cron; showWords(); });
+    $('#sc-as', panel).onchange = e => { $('#sc-rootwarn', panel).hidden = e.target.value !== 'root'; };
+    const read = () => ({ name: $('#sc-name', panel).value, cron: cron.value, runAs: $('#sc-as', panel).value, timeoutMin: Number($('#sc-limit', panel).value), script: $('#sc-script', panel).value });
+    $('[data-save]', panel).onclick = async () => {
+        const b = read();
+        try {
+            if (review) { await api(`/api/schedules/${id}`, { method: 'PUT', body: { name: b.name, cron: b.cron, timeoutMin: b.timeoutMin } }); await api(`/api/schedules/${id}/approve`, { method: 'POST', body: { hash: it.hash, runAs: b.runAs } }); toast('Approved and switched on'); }
+            else if (it) { await api(`/api/schedules/${id}`, { method: 'PUT', body: { ...b, ...(it.state === 'changed' ? { enabled: true } : {}) } }); toast('Saved'); }
+            else { await api('/api/schedules', { method: 'POST', body: b }); toast('Routine created'); }
+            close(); loadSchedules().catch(() => {});
+        } catch (ex) { toast(ex.message, true); }
+    };
+    const rn = $('[data-runnow]', panel); if (rn) rn.onclick = async () => { rn.disabled = true; try { const r = await api(`/api/schedules/${id}/run`, { method: 'POST' }); toast(r.finished ? (r.finished.exit === 0 ? 'Ran: OK' : `Ran: exit ${r.finished.exit}`) : 'Started; its log appears under Recent runs'); close(); setTimeout(() => scheduleDialog(id), r.finished ? 0 : 2500); loadSchedules().catch(() => {}); } catch (ex) { rn.disabled = false; toast(ex.message, true); } };
+    const del = $('[data-del]', panel); if (del) del.onclick = async () => { if (!await confirmDialog({ title: `Delete ${it.name}?`, text: 'The routine, its script file and its run logs are removed. This cannot be undone.', action: 'Delete' })) return scheduleDialog(id); try { await api(`/api/schedules/${id}`, { method: 'DELETE' }); toast('Deleted'); } catch (ex) { toast(ex.message, true); } loadSchedules().catch(() => {}); };
+    $$('[data-runlog]', panel).forEach(b => b.onclick = async () => {
+        try { const r = await api(`/api/schedules/${id}/runs/${b.dataset.runlog}`); const { panel: p2 } = openDialog(`<h2>${icon('logs')}${esc(it.name)} · ${when(it.runs.find(x => x.run === b.dataset.runlog)?.at || Date.now())}</h2><pre class="sc-log">${esc(r.text || '(no output)')}</pre><div class="buttons"><button data-back2>${icon('back')}Back</button></div>`); $('[data-back2]', p2).onclick = () => scheduleDialog(id); }
+        catch (ex) { toast(ex.message, true); }
+    });
+}
+
 function keepAliveDialog(k) {
     const DAY = 86400_000, MAXD = 60;
     const midnight = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };

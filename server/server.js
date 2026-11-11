@@ -43,6 +43,8 @@ import * as addons from './lib/addons.js';
 import * as lab from './lib/lab.js';
 import * as clineLib from './lib/cline.js';
 import * as consult from './lib/consult.js';
+import * as schedules from './lib/schedules.js';
+import { spawn as spawnProc } from 'node:child_process';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
 import * as qa from './lib/researchqa.js';
@@ -89,6 +91,7 @@ const AGENT_ROUTES = [
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
     ['GET', /^\/api\/agent\/consult$/], ['POST', /^\/api\/agent\/consult$/],
+    ['GET', /^\/api\/agent\/schedules$/], ['POST', /^\/api\/agent\/schedules$/],
     ['GET', /^\/api\/agent\/lab\/status$/], ['POST', /^\/api\/agent\/lab\/run$/], ['GET', /^\/api\/agent\/lab\/run\/r\d{3,5}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
@@ -355,6 +358,9 @@ const server = http.createServer(async (req, res) => {
             }
             if ((am = p.match(/^\/api\/agent\/elevate\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, elevate.get(am[1], session.agent));
             // Asking another agent: allowed or not by this shell's session type; the asked agent runs read-only in this folder.
+            // Scheduled routines: agents may see the list and propose one; it stays off until the user approves it.
+            if (p === '/api/agent/schedules' && method === 'GET') return send(res, 200, { folder: schedules.ROOT, items: schedules.list().items.map(({ id, name, cron, state, runAs, next, last }) => ({ id, name, cron, state, runAs, next, last })) });
+            if (p === '/api/agent/schedules' && method === 'POST') { const b = await readJson(req, 96 * 1024); return send(res, 201, schedules.propose({ name: b.name, cron: b.cron, script: b.script, why: b.why, from: session.agent })); }
             if (p === '/api/agent/consult' && method === 'GET') return send(res, 200, await consult.available(sh.session || null));
             if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question, web: !!b.web })); }
             // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
@@ -778,6 +784,33 @@ const server = http.createServer(async (req, res) => {
             }
             return send(res, 200, { ...d, canPowerOff: !!d.stop, agents: st.agents, keepAlive: st.keepAlive, dry: !!b.dry });
         }
+        // Power off now, from the phone. The app only offers it on a device that has the Start button set up (the
+        // control Lambda), so the box can be started again. The box powers itself off; EC2 treats that as a stop.
+        if (p === '/api/power/off' && method === 'POST') {
+            if (String(session.how || '').includes('local token')) return send(res, 403, { error: 'Power off is for the phone.' });
+            const b = await readJson(req, 4096).catch(() => ({}));
+            const can = fs.existsSync('/run/systemd/system');
+            if (b.dry) return send(res, 200, { dry: true, canPowerOff: can, message: can ? 'The box would power off now.' : 'This box cannot power itself off (no systemd here).' });
+            if (!can) return send(res, 409, { error: 'This box cannot power itself off (no systemd here).' });
+            audit.record('activity', 'power-off', { actor: 'phone', via: 'More', what: 'Powered off from the phone' });
+            await alerts.notifyNow('autostop', 'The box is powering off now: you asked from the phone. Start it again from the Start page.').catch(() => {});
+            setTimeout(() => { try { spawnProc('systemctl', ['poweroff'], { detached: true, stdio: 'ignore' }).unref(); } catch { /* reported by the box going away, or not */ } }, 2500);
+            return send(res, 200, { ok: true, message: 'Powering off in a few seconds.' });
+        }
+        // Scheduled routines (More → Schedules).
+        if (p === '/api/schedules' && method === 'GET') return send(res, 200, schedules.list());
+        if (p === '/api/schedules' && method === 'POST') return send(res, 201, schedules.create(await readJson(req, 96 * 1024)));
+        {
+            let sm;
+            if ((sm = p.match(/^\/api\/schedules\/([a-z0-9][a-z0-9-]{0,47})$/))) {
+                if (method === 'GET') return send(res, 200, schedules.get(sm[1]));
+                if (method === 'PUT') return send(res, 200, schedules.update(sm[1], await readJson(req, 96 * 1024)));
+                if (method === 'DELETE') return send(res, 200, schedules.remove(sm[1]));
+            }
+            if ((sm = p.match(/^\/api\/schedules\/([a-z0-9][a-z0-9-]{0,47})\/approve$/)) && method === 'POST') return send(res, 200, schedules.approve(sm[1], await readJson(req, 4096)));
+            if ((sm = p.match(/^\/api\/schedules\/([a-z0-9][a-z0-9-]{0,47})\/run$/)) && method === 'POST') { const id = sm[1]; const r = schedules.run(id, { why: 'phone' }); r.catch(() => {}); const quick = await Promise.race([r, new Promise(ok => setTimeout(() => ok(null), 400))]); return send(res, 202, { started: true, finished: quick, ...schedules.list().items.find(x => x.id === id) }); }
+            if ((sm = p.match(/^\/api\/schedules\/([a-z0-9][a-z0-9-]{0,47})\/runs\/(\d{8}T\d{6}Z)$/)) && method === 'GET') return send(res, 200, schedules.runLog(sm[1], sm[2]));
+        }
         // Limit reached: the overload guard (settings, a dry run of what it would stop, and "do it now").
         if (p === '/api/limit' && method === 'GET') return send(res, 200, limit.settings());
         if (p === '/api/limit' && method === 'PUT') return send(res, 200, limit.configure(await readJson(req, 4096)));
@@ -923,6 +956,7 @@ setInterval(() => alerts.checkServers(services).catch(() => {}), 30_000);
 setInterval(() => limit.check().catch(() => {}), 30_000);
 activity.start();
 setInterval(() => backups.tick().catch(() => {}), 60_000);
+setInterval(() => { try { schedules.tick(); } catch (e) { console.error(e); } }, 10_000);
 setInterval(() => alerts.checkCommits(audit).catch(() => {}), 5 * 60_000);
 for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.stop(); } catch { /* exiting */ } process.exit(0); });
 

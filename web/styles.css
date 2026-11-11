@@ -830,3 +830,14 @@ a.btn { text-decoration: none; color: inherit; }
 .cline-card { margin-top: 10px; } .cl-row { display: flex; gap: 8px; } .cl-row select { flex: 1; min-width: 0; }
 .consult-wrap { margin-bottom: 18px; } .consult-row { cursor: pointer; }
 .cl-row input { flex: 1; min-width: 0; }
+/* Schedules */
+.sched-row { padding: 0 14px 0 0; }
+.sched-open { display: flex; align-items: center; gap: 12px; padding: 12px 0 12px 14px; flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: inherit; font: inherit; }
+.sched-open .main { min-width: 0; }
+.sc-root { margin-left: 6px; vertical-align: 2px; padding: 2px 8px; font-size: 12px; }
+.sc-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 420px) { .sc-two { grid-template-columns: 1fr; } }
+.sc-script { width: 100%; min-height: 220px; font-size: 13px; line-height: 1.5; tab-size: 4; white-space: pre; overflow: auto; }
+.sc-script[readonly] { background: var(--sea-2); }
+.sc-log { max-height: 60vh; overflow: auto; background: var(--sea-2); border: 1px solid var(--rail); border-radius: 12px; padding: 12px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0 0 12px; }
+#offline-card .row[disabled] { opacity: .55; cursor: not-allowed; }

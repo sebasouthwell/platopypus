@@ -52,3 +52,28 @@ export function prepare(home, owner = null) {
     if (owner) { for (const p of [path.join(home, '.cline'), path.join(home, '.cline', 'data'), dir, f]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
     return { model: c.model };
 }
+// The other agents are told "read $PORTHOLE_SECURITY_FILE first"; a small local model rarely goes and reads it. Cline
+// puts every file in $CLINE_DIR/rules into its system prompt, so each Cline shell gets its own config folder whose
+// rules hold this session's brief word for word. Settings, logins and history stay shared (CLINE_DATA_DIR), and the
+// global instructions (~/.agents/AGENTS.md) are still read as before.
+const BRIEF_MAX = 60_000;
+export function sessionRules(home, shell, env = {}, owner = null) {
+    const root = path.join(home, '.cline', 'shells');
+    // Folders of shells that ended long ago.
+    try { for (const d of fs.readdirSync(root)) { const p = path.join(root, d); if (Date.now() - fs.statSync(p).mtimeMs > 14 * 86400_000) fs.rmSync(p, { recursive: true, force: true }); } } catch { /* none yet */ }
+    const safe = String(shell).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'shell';
+    const dir = path.join(root, safe), rules = path.join(dir, 'rules');
+    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(rules, { recursive: true, mode: 0o700 });
+    let brief = '';
+    if (env.PORTHOLE_SECURITY_FILE) { try { brief = fs.readFileSync(env.PORTHOLE_SECURITY_FILE, 'utf8').slice(0, BRIEF_MAX); } catch { /* not there */ } }
+    const facts = [
+        `- Session type: ${env.PORTHOLE_SESSION || 'plain shell'}`,
+        env.PORTHOLE_SECURITY_LEVEL ? `- Security level: ${env.PORTHOLE_SECURITY_LEVEL}` : '',
+        env.PORTHOLE_PROJECT_ROOT ? `- Project root: ${env.PORTHOLE_PROJECT_ROOT}` : '',
+        `- Shell name: ${shell}`,
+    ].filter(Boolean).join('\n');
+    const text = `# This PlatOpypus session\n\nYou are running in a PlatOpypus agent shell. These facts and the brief below apply to everything you do in it; the general instructions about this box (the platopypus block) also apply.\n\n${facts}\n\n${brief ? `## Session brief (the file $PORTHOLE_SECURITY_FILE, included here so you do not need to read it)\n\n${brief.trim()}\n` : 'There is no separate brief for this session.\n'}`;
+    const f = path.join(rules, 'platopypus-session.md'); fs.writeFileSync(f, text, { mode: 0o600 });
+    if (owner) { for (const p of [path.join(home, '.cline'), root, dir, rules, f]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
+    return { CLINE_DIR: dir, CLINE_DATA_DIR: path.join(home, '.cline', 'data') };
+}

@@ -145,7 +145,12 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     }
 
     // Cline: write its Ollama provider settings for the user who runs it.
-    if (kind === 'agent' && agent === 'cline' && !login) { const au = runAs === 'agent' ? agentUser.info() : null; clineLib.prepare(au ? au.home : config.home, au ? { uid: au.uid, gid: au.gid } : null); }
+    // Its session brief goes into its own rules folder, because Cline reads rules into its prompt, not env-named files.
+    if (kind === 'agent' && agent === 'cline' && !login) {
+        const au = runAs === 'agent' ? agentUser.info() : null; const home = au ? au.home : config.home; const owner = au ? { uid: au.uid, gid: au.gid } : null;
+        clineLib.prepare(home, owner);
+        Object.assign(agentEnv, clineLib.sessionRules(home, name, sessionEnv, owner));
+    }
     // Agent user: no root, its own API token, project folder made group-writable.
     let tokenHash = null, shellEnv = {};
     if (runAs === 'agent') {

@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+// schedule: scheduled routines on this box, from inside an agent shell.
+//
+//   schedule list                                       the routines (name, schedule, state, last result)
+//   schedule add <name> "<cron>" <script.sh> [--why "…"]  propose a routine: a small bash script and when to run it
+//   schedule add <name> "<cron>" - [--why "…"]           the script from standard input
+//
+// <cron> is five parts, box time: minute hour day month weekday, for example "0 3 * * *" (03:00 every day),
+// "*/15 * * * *" (every 15 minutes), "30 8 * * mon-fri"; or @hourly, @daily, @weekly.
+//
+// A proposed routine stays OFF until the user reads the script and approves it (More → Schedules). It runs as the
+// agent user, from its own work folder ($PLATO_ROUTINE_DIR), with a time limit, and each run is logged. If its script
+// file changes after approval, it pauses until the user checks it again. Say in --why what it is for.
+const argv = process.argv.slice(2); const cmd = argv[0];
+const die = (m, c = 1) => { console.error(m); process.exit(c); };
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+async function call(p, method = 'GET', body) {
+    const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) die('This shell has no PlatOpypus token (only agent shells started from the app can use schedule).');
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) die('PlatOpypus did not accept this shell\'s token.');
+    const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: body && JSON.stringify(body) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) die(d.error || `HTTP ${r.status}`, r.status === 403 ? 3 : 1); return d;
+}
+const readStdin = () => new Promise(ok => { if (process.stdin.isTTY) return ok(''); let s = ''; process.stdin.on('data', d => { s += d; }); process.stdin.on('end', () => ok(s)); });
+const when = t => t ? new Date(t).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '-';
+try {
+    if (!cmd || cmd === '-h' || cmd === '--help') { const fs = await import('node:fs'); console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n')); }
+    else if (cmd === 'list') {
+        const d = await call('/api/agent/schedules');
+        if (!d.items.length) console.log(`No routines yet. Scripts live in ${d.folder}.`);
+        for (const i of d.items) console.log(`${i.id.padEnd(24)} ${i.cron.padEnd(16)} ${i.state.padEnd(9)} as ${i.runAs.padEnd(6)} next ${when(i.next)}  last ${i.last ? `${when(i.last.at)} exit ${i.last.exit}` : '-'}`);
+    } else if (cmd === 'add') {
+        const rest = argv.slice(1); let why = ''; const wi = rest.indexOf('--why'); if (wi >= 0) { why = rest[wi + 1] || ''; rest.splice(wi, 2); }
+        const [name, cron, src] = rest; if (!name || !cron || !src) die('Usage: schedule add <name> "<cron>" <script.sh|-> [--why "…"]');
+        const fs = await import('node:fs');
+        const script = src === '-' ? await readStdin() : fs.readFileSync(src, 'utf8');
+        const d = await call('/api/agent/schedules', 'POST', { name, cron, script, why });
+        console.log(`${d.message}\nRoutine: ${d.id} (${d.cron}), script saved as ${d.file}`);
+    } else die(`Unknown command "${cmd}". Try: schedule list | schedule add`);
+} catch (e) { die(e.message); }

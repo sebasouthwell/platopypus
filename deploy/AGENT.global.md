@@ -164,3 +164,13 @@ asking is switched on for this kind of session (the user decides; project work i
 them, and its answer is printed for you. Use it when another agent is better placed (searching, a second opinion on
 reasoning or a design, reviewing a change), give it the context it needs in the question, and weigh its answer
 yourself. Each question is logged for the user.
+
+## Scheduled routines
+
+For something that should happen on a timetable (a nightly check, a weekly clean-up, polling a feed), propose a
+routine instead of leaving a loop running: write a small bash script, then
+`schedule add <name> "<cron>" script.sh --why "what it is for"` (cron is five parts in box time, for example
+`"0 3 * * *"` for 03:00 daily). It stays off until the user reads it and approves it in More → Schedules, then runs as
+the agent user in its own work folder (`$PLATO_ROUTINE_DIR`) with a time limit; every run is logged. `schedule list`
+shows the routines. Keep scripts short and self-contained; they get no Vault values and no terminal. Routines only run
+while the box is on.
