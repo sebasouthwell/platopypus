@@ -617,6 +617,8 @@ phone's Update button. Mechanism:
   one-line system prompt; Claude Code still adds the account email and basic environment (folder, OS, date). Cline runs
   with its own temporary home holding only the Ollama connection. Codex and Antigravity cannot be confined that way and
   are refused there. `POST /api/agent/consult` takes `web`. The Cline key field is labelled as the Ollama API key.
+- **2.8.1** — the Cline model is a text field: type any model name (a tag the list does not show, or one not pulled
+  yet); "Load models" fills it with the Ollama server's models as suggestions. No state changes.
 
 ## Release checklist
 

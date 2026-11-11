@@ -829,3 +829,4 @@ a.btn { text-decoration: none; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .run-st.running { animation: none; } }
 .cline-card { margin-top: 10px; } .cl-row { display: flex; gap: 8px; } .cl-row select { flex: 1; min-width: 0; }
 .consult-wrap { margin-bottom: 18px; } .consult-row { cursor: pointer; }
+.cl-row input { flex: 1; min-width: 0; }
