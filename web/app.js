@@ -248,6 +248,7 @@ function push(page) {
     if (page === 'schedules') loadSchedules().catch(e => toast(e.message, true));
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
+    if (page === 'cases') casesUI().then(m => m.loadCases()).catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -598,6 +599,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
 function sessionTypeDialog(folder) {
     return new Promise(resolve => {
         if (/^\/?Research\/[^/]+/.test(folder || '')) return resolve('research');
+        if (/^\/?Cases\/[^/]+/.test(folder || '')) return resolve('case');   // inside a Conspiracy case
         if (/^\/?Lab\/[^/]+/.test(folder || '')) return resolve('lab');   // inside a research topic: that is what it is
         const last = localStorage.getItem('porthole.sessionType') || 'project';
         const { panel, close } = openDialog(`<h2>${icon('claude')}What is this session?</h2>
@@ -3004,7 +3006,7 @@ async function loadAgents() {
 async function consultCard(body) {
     const s = await api('/api/agents/consult');
     const box = document.createElement('div'); box.className = 'consult-wrap';
-    const rows = [['lab', 'Security Lab', 'Zero trust: the one asked sees only the question, once'], ['research', 'Research', 'Papers and questions on a topic'], ['project', 'Project work', 'Coding in a project'], ['control', 'Control sessions', 'Moving files, checking logs']];
+    const rows = [['lab', 'Security Lab', 'Zero trust: the one asked sees only the question, once'], ['case', 'Conspiracy', 'Zero trust: probes see one subject and one question'], ['research', 'Research', 'Papers and questions on a topic'], ['project', 'Project work', 'Coding in a project'], ['control', 'Control sessions', 'Moving files, checking logs']];
     box.innerHTML = `<h2 class="section">Agents asking each other</h2><div class="list">${rows.map(([k, t, sub]) => `<label class="row consult-row"><span class="ico ${s[k] ? 'brass' : ''}">${icon('send')}</span><div class="main"><div class="title">${t}</div><div class="sub">${sub}</div></div><span class="switch"><input type="checkbox" data-consult="${k}" ${s[k] ? 'checked' : ''}><span></span></span></label>`).join('')}</div>
         <p class="note">When on, an agent in that kind of session can run <span class="mono">consult</span> to ask Claude, Codex, Gemini or Cline (whichever are signed in) for a second view. The one asked can read the folder but not change it. Every question is in the audit log.</p>`;
     body.prepend(box);
@@ -3395,7 +3397,7 @@ async function loadApps() {
     </div>`).join('') + '<p class="note app-more">More apps are on the way.</p>';
     for (const a of apps) {
         const card = $(`[data-app="${a.id}"]`, box);
-        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : a.id === 'lab' ? openLab() : null);
+        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : a.id === 'lab' ? openLab() : a.id === 'cases' ? openCases() : null);
         const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/addons/${a.id}/add`, { method: 'POST', body: {} }); toast(`Adding ${a.title}…`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const rm = $('[data-remove]', card); if (rm) rm.onclick = async () => { if (!(await confirmDialog({ title: `Remove ${a.title}?`, text: `${a.title} disappears from PlatOpypus. Your ${a.id === 'research' ? 'topics, papers and sources stay on the box' : 'data stays on the box'}, and so do the installed packages; add it again any time.`, action: 'Remove app' }))) return; try { await api(`/api/addons/${a.id}/remove`, { method: 'POST', body: {} }); toast(`${a.title} removed`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const show = $('[data-showlog]', card); if (show) show.onclick = async () => { const pre = $('[data-log]', card); pre.hidden = false; pre.textContent = (await api(`/api/addons/${a.id}/log`)).log || '(nothing was written)'; };
@@ -3409,6 +3411,13 @@ async function loadApps() {
 // Engagements: a scope you verify, runs (command, output, summary), findings, and agents that test inside the scope.
 const labState = { slug: null, tab: 'scope', tools: {}, poll: null };
 function openLab() { go('apps'); push('lab'); }
+// ---------- Conspiracy (web/cases.js, loaded when first opened) ----------
+let casesMod = null;
+async function casesUI() {
+    if (!casesMod) { casesMod = await import(`/cases.js?v=${ASSET_V}`); casesMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, newShellDialog, openTerminal, agentTitle, enterSubmits, $, $$ }); }
+    return casesMod;
+}
+function openCases() { go('apps'); push('cases'); }
 const mdLite = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`).replace(/^# (.*)$/gm, '<h4>$1</h4>');
 async function loadLab() {
     const d = await api('/api/lab'); labState.tools = d.tools; const box = $('#lab-body');
@@ -3700,6 +3709,9 @@ async function sourceDialog(slug, id) {
 $('#topic-back').addEventListener('click', () => openResearch());
 $('#research-back').addEventListener('click', () => go('apps'));
 $('#lab-back').addEventListener('click', () => go('apps'));
+$('#cases-back').addEventListener('click', () => go('apps'));
+$('#case-back').addEventListener('click', () => openCases());
+$('#case-refresh').addEventListener('click', () => casesUI().then(m => m.loadCase()).catch(e => toast(e.message, true)));
 $('#eng-back').addEventListener('click', () => openLab());
 $('#eng-refresh').addEventListener('click', () => loadEng().catch(e => toast(e.message, true)));
 $('#topic-refresh').addEventListener('click', () => loadTopic().catch(e => toast(e.message, true)));

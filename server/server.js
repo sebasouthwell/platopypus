@@ -44,6 +44,7 @@ import * as lab from './lib/lab.js';
 import * as clineLib from './lib/cline.js';
 import * as consult from './lib/consult.js';
 import * as schedules from './lib/schedules.js';
+import * as cases from './lib/cases.js';
 import { spawn as spawnProc } from 'node:child_process';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
@@ -92,6 +93,7 @@ const AGENT_ROUTES = [
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
     ['GET', /^\/api\/agent\/consult$/], ['POST', /^\/api\/agent\/consult$/],
     ['GET', /^\/api\/agent\/schedules$/], ['POST', /^\/api\/agent\/schedules$/],
+    ['GET', /^\/api\/agent\/case$/], ['POST', /^\/api\/agent\/case\/(source|pin|link|ask|answer|theory|weigh|path|probe)$/], ['GET', /^\/api\/agent\/case\/probes\/p\d{1,5}$/],
     ['GET', /^\/api\/agent\/lab\/status$/], ['POST', /^\/api\/agent\/lab\/run$/], ['GET', /^\/api\/agent\/lab\/run\/r\d{3,5}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
@@ -369,6 +371,24 @@ const server = http.createServer(async (req, res) => {
                 if (p === '/api/agent/lab/status' && method === 'GET') { const d = lab.detail(slug); return send(res, 200, { title: d.title, scope: d.scope, runs: d.runs, tools: Object.fromEntries(Object.entries(lab.TOOLS).map(([k, t]) => [k, { title: t.title, presets: Object.keys(t.presets), local: !!t.local }])) }); }
                 if (p === '/api/agent/lab/run' && method === 'POST') { const b = await readJson(req, 16 * 1024); await caller(b.pid); return send(res, 201, await lab.run(slug, { tool: String(b.tool || ''), preset: b.preset || null, target: b.target || null, args: Array.isArray(b.args) ? b.args : null, by: `agent shell "${session.agent}"` })); }
                 if ((am = p.match(/^\/api\/agent\/lab\/run\/(r\d{3,5})$/)) && method === 'GET') return send(res, 200, lab.getRun(slug, am[1]));
+            }
+            // Conspiracy: the case is the one this shell works in.
+            if (p === '/api/agent/case' || p.startsWith('/api/agent/case/')) {
+                const cslug = cases.caseOf(sh.cwd); if (!cslug) return send(res, 403, { error: 'This shell is not in a Conspiracy case.' });
+                const by = `shell "${session.agent}"`;
+                if (p === '/api/agent/case' && method === 'GET') return send(res, 200, cases.detail(cslug));
+                if ((am = p.match(/^\/api\/agent\/case\/probes\/(p\d{1,5})$/)) && method === 'GET') return send(res, 200, cases.getProbe(cslug, am[1]));
+                const b = await readJson(req, 64 * 1024); await caller(b.pid);
+                const op = p.slice('/api/agent/case/'.length);
+                if (op === 'source') return send(res, 201, await cases.addSource(cslug, b, by));
+                if (op === 'pin') return send(res, 201, await cases.addNode(cslug, b, by));
+                if (op === 'link') return send(res, 201, await cases.addLink(cslug, b, by));
+                if (op === 'ask') return send(res, 201, await cases.addQuestion(cslug, b, by));
+                if (op === 'answer') return send(res, 200, await cases.answerQuestion(cslug, String(b.id || ''), b));
+                if (op === 'theory') return send(res, 201, await cases.addTheory(cslug, b, by));
+                if (op === 'weigh') return send(res, 200, await cases.weigh(cslug, String(b.id || ''), { ref: b.ref, verdict: b.verdict }));
+                if (op === 'path') return send(res, 200, cases.paths(cslug, b.from, b.to));
+                if (op === 'probe') return send(res, 201, await cases.probe(cslug, b, by));
             }
             if (p === '/api/agent/research/ask' && method === 'POST') { const b = await readJson(req, 16 * 1024); const pr = await caller(b.pid); return send(res, 201, research.createAsk(pr.cwd, b)); }
             if ((am = p.match(/^\/api\/agent\/research\/ask\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, research.getAsk(sh.cwd, am[1]));
@@ -699,6 +719,35 @@ const server = http.createServer(async (req, res) => {
                 if ((x = lr.match(/^run\/(r\d{3,5})$/)) && method === 'GET') return send(res, 200, lab.getRun(ls, x[1]));
                 if (lr === 'findings' && method === 'POST') return send(res, 200, lab.setFindings(ls, (await readJson(req, 256 * 1024)).text));
                 if (lr === 'delete' && method === 'POST') return send(res, 200, lab.remove(ls, (await readJson(req, 4096)).confirm));
+            }
+        }
+        // Conspiracy: cases, the pinboard, theories, probes. Needs the app.
+        if (p === '/api/cases' || p.startsWith('/api/cases/')) {
+            if (!(await addons.isAdded('cases'))) return send(res, 409, { error: 'Add Conspiracy first (Apps tab).', needApp: 'cases' });
+            if (p === '/api/cases' && method === 'GET') return send(res, 200, { cases: cases.list(), kinds: cases.KINDS });
+            if (p === '/api/cases' && method === 'POST') return send(res, 201, cases.create(await readJson(req, 8192)));
+            const cm = p.match(/^\/api\/cases\/([\w.-]{1,60})(?:\/(.*))?$/);
+            if (cm) {
+                const cs = cm[1], cr = cm[2] || ''; let x;
+                const body = () => readJson(req, 256 * 1024);
+                if (cr === '' && method === 'GET') return send(res, 200, cases.detail(cs));
+                if (cr === '' && method === 'PUT') return send(res, 200, cases.setMeta(cs, await body()));
+                if (cr === 'notes' && method === 'PUT') return send(res, 200, cases.setNotes(cs, (await body()).text));
+                if (cr === 'delete' && method === 'POST') return send(res, 200, cases.remove(cs, (await body()).confirm));
+                if (cr === 'export' && method === 'GET') { const e = cases.exportMarkdown(cs); res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="${e.name}"`, 'Cache-Control': 'no-store' }); return res.end(e.text); }
+                if (cr === 'nodes' && method === 'POST') return send(res, 201, await cases.addNode(cs, await body()));
+                if ((x = cr.match(/^nodes\/(n[0-9a-f]{6})$/))) { if (method === 'PUT') return send(res, 200, await cases.updateNode(cs, x[1], await body())); if (method === 'DELETE') return send(res, 200, await cases.removeNode(cs, x[1])); }
+                if (cr === 'links' && method === 'POST') return send(res, 201, await cases.addLink(cs, await body()));
+                if ((x = cr.match(/^links\/(l[0-9a-f]{6})$/))) { if (method === 'PUT') return send(res, 200, await cases.updateLink(cs, x[1], await body())); if (method === 'DELETE') return send(res, 200, await cases.removeLink(cs, x[1])); }
+                if (cr === 'sources' && method === 'POST') return send(res, 201, await cases.addSource(cs, await body()));
+                if ((x = cr.match(/^sources\/(S\d{1,5})$/)) && method === 'DELETE') return send(res, 200, await cases.removeSource(cs, x[1]));
+                if (cr === 'questions' && method === 'POST') return send(res, 201, await cases.addQuestion(cs, await body()));
+                if ((x = cr.match(/^questions\/(Q\d{1,5})$/)) && method === 'PUT') return send(res, 200, await cases.answerQuestion(cs, x[1], await body()));
+                if (cr === 'theories' && method === 'POST') return send(res, 201, await cases.addTheory(cs, await body()));
+                if ((x = cr.match(/^theories\/(T\d{1,3})$/))) { if (method === 'PUT') return send(res, 200, await cases.weigh(cs, x[1], await body())); if (method === 'DELETE') return send(res, 200, await cases.removeTheory(cs, x[1])); }
+                if (cr === 'paths' && method === 'POST') { const b = await body(); return send(res, 200, cases.paths(cs, b.from, b.to)); }
+                if (cr === 'probes' && method === 'POST') return send(res, 201, await cases.probe(cs, await body()));
+                if ((x = cr.match(/^probes\/(p\d{1,5})$/)) && method === 'GET') return send(res, 200, cases.getProbe(cs, x[1]));
             }
         }
         // Research screens need the Research app.

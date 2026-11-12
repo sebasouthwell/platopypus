@@ -11,7 +11,7 @@ import * as agents from './agents.js';
 import * as clineLib from './cline.js';
 
 const file = path.join(config.state, 'consult.json');
-const DEFAULTS = { lab: true, research: true, project: false, control: false };
+const DEFAULTS = { lab: true, case: true, research: true, project: false, control: false };
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 export function settings() { let s = {}; try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* defaults */ } return { ...DEFAULTS, ...s }; }
 export function configure(body = {}) {
@@ -43,7 +43,7 @@ function argv(agent, prompt) {
 // instructions or connectors from this box, nothing saying what the work is unless the asker writes it), runs once,
 // and gets no tools unless the asker grants web search. Only agents that can be confined like that may be asked.
 const ZERO_TRUST = ['claude', 'cline'];
-export const isZeroTrust = session => session === 'lab';
+export const isZeroTrust = session => session === 'lab' || session === 'case';
 export async function ask({ from, fromAgent, session, cwd, to, question, web = false }) {
     fromAgent = fromAgent || 'shell';   // a plain agent-user shell, not an agent
     if (!settings()[session]) throw httpError(403, `Asking other agents is off for ${session || 'this kind of'} sessions. The user can switch it on in More → AI agents.`);
@@ -61,31 +61,41 @@ export async function ask({ from, fromAgent, session, cwd, to, question, web = f
     const zero = isZeroTrust(session);
     if (zero && !ZERO_TRUST.includes(target)) throw httpError(403, `${av.title} cannot be confined to zero trust (its sign-in comes with your setup's instructions and tools), so in Security Lab ask ${ZERO_TRUST.join(' or ')}.`);
     if (web && !(zero && target === 'claude')) throw httpError(400, web && zero ? 'Only Claude can be given web search here.' : '--web is for Security Lab questions; outside it the asked agent works as usual.');
-    let bin, args, extra = {}, home = a.home, workdir = cwd, scratch = null;
-    if (zero) {
-        // Zero trust: a fresh empty folder, the question word for word, and only the capability it was given.
-        scratch = fs.mkdtempSync(path.join(a.home, '.consult-')); fs.chownSync(scratch, a.uid, a.gid); fs.chmodSync(scratch, 0o700); workdir = scratch;
-        // web: the two web tools exist AND are pre-approved (print mode refuses anything not approved); nothing else exists.
-        if (target === 'claude') { bin = 'claude'; args = ['-p', q, '--tools', web ? 'WebSearch,WebFetch' : '', ...(web ? ['--allowedTools', 'WebSearch', 'WebFetch'] : []), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--no-session-persistence', '--system-prompt', 'Answer the question you are given directly.']; }
-        else { home = scratch; clineLib.prepare(scratch, { uid: a.uid, gid: a.gid }); bin = 'cline'; args = ['--auto-approve', 'false', q]; extra = { CLINE_DIR: path.join(scratch, '.cline') }; }   // its own home: no instruction files, only the Ollama connection
-    } else {
-        if (target === 'cline') clineLib.prepare(a.home, { uid: a.uid, gid: a.gid });
-        const prompt = `${fromAgent === 'shell' ? 'Someone' : `Another AI agent (${agents.catalog[fromAgent]?.title || fromAgent})`} working in this folder is asking for your view. Answer it directly and concisely. You may read files here to answer, but do not change anything.\n\nQuestion:\n${q}`;
-        [bin, args, extra = {}] = argv(target, prompt);
-    }
-    const runuser = ['/usr/sbin/runuser', '/sbin/runuser', '/usr/bin/runuser'].find(f => fs.existsSync(f)) || 'runuser';
-    const env = ['PATH=' + `${a.home}/.local/bin:/usr/local/bin:/usr/bin:/bin`, `HOME=${home}`, 'TERM=dumb', 'NO_COLOR=1', ...Object.entries(extra).map(([k, v]) => `${k}=${v}`)];
     recent.push(now); running.set(from, (running.get(from) || 0) + 1);
     record('activity', 'agent-consult', { actor: `shell "${from}"`, what: `${fromAgent} asked ${target}${zero ? ` (zero trust${web ? ', web search' : ', no tools'})` : ''}: ${q.slice(0, 200)}`, cwd });
     try {
-        const out = await new Promise((ok, bad) => {
-            const c = spawn(runuser, ['-u', a.user, '--', 'env', '-i', ...env, bin, ...args], { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'] });
-            let o = '', e = ''; c.stdout.on('data', d => { o += d; if (o.length > 400000) o = o.slice(-200000); }); c.stderr.on('data', d => { e += d; if (e.length > 100000) e = e.slice(-50000); });
-            const t = setTimeout(() => { try { c.kill('SIGTERM'); } catch { /* gone */ } bad(httpError(504, `${av.title} did not answer within 5 minutes.`)); }, 300_000);
-            c.on('close', code => { clearTimeout(t); if (code === 0 && o.trim()) ok(o); else bad(httpError(502, `${av.title} could not answer${code ? ` (exit ${code})` : ''}: ${(e || o).trim().split('\n').slice(-3).join(' ').slice(0, 300)}`)); });
-            c.on('error', err => { clearTimeout(t); bad(httpError(500, err.message)); });
-        });
-        const answer = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').trim();
-        return { from: fromAgent, to: target, zeroTrust: zero, web: !!web, answer: answer.slice(-20000) };
-    } finally { running.set(from, Math.max(0, (running.get(from) || 1) - 1)); if (scratch) fs.rmSync(scratch, { recursive: true, force: true }); }
+        if (zero) { const answer = await zeroTrust({ target, question: q, web, title: av.title }); return { from: fromAgent, to: target, zeroTrust: true, web: !!web, answer }; }
+        if (target === 'cline') clineLib.prepare(a.home, { uid: a.uid, gid: a.gid });
+        const prompt = `${fromAgent === 'shell' ? 'Someone' : `Another AI agent (${agents.catalog[fromAgent]?.title || fromAgent})`} working in this folder is asking for your view. Answer it directly and concisely. You may read files here to answer, but do not change anything.\n\nQuestion:\n${q}`;
+        const [bin, args, extra = {}] = argv(target, prompt);
+        const answer = await runAs(a, { bin, args, extra, home: a.home, workdir: cwd, title: av.title });
+        return { from: fromAgent, to: target, zeroTrust: false, web: false, answer };
+    } finally { running.set(from, Math.max(0, (running.get(from) || 1) - 1)); }
+}
+// Run one agent command as the agent user and return its cleaned output (5 minutes at most).
+function runAs(a, { bin, args, extra = {}, home, workdir, title }) {
+    const runuser = ['/usr/sbin/runuser', '/sbin/runuser', '/usr/bin/runuser'].find(f => fs.existsSync(f)) || 'runuser';
+    const env = ['PATH=' + `${a.home}/.local/bin:/usr/local/bin:/usr/bin:/bin`, `HOME=${home}`, 'TERM=dumb', 'NO_COLOR=1', ...Object.entries(extra).map(([k, v]) => `${k}=${v}`)];
+    return new Promise((ok, bad) => {
+        const c = spawn(runuser, ['-u', a.user, '--', 'env', '-i', ...env, bin, ...args], { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'] });
+        let o = '', e = ''; c.stdout.on('data', d => { o += d; if (o.length > 400000) o = o.slice(-200000); }); c.stderr.on('data', d => { e += d; if (e.length > 100000) e = e.slice(-50000); });
+        const t = setTimeout(() => { try { c.kill('SIGTERM'); } catch { /* gone */ } bad(httpError(504, `${title} did not answer within 5 minutes.`)); }, 300_000);
+        c.on('close', code => { clearTimeout(t); if (code === 0 && o.trim()) ok(o.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').trim().slice(-20000)); else bad(httpError(502, `${title} could not answer${code ? ` (exit ${code})` : ''}: ${(e || o).trim().split('\n').slice(-3).join(' ').slice(0, 300)}`)); });
+        c.on('error', err => { clearTimeout(t); bad(httpError(500, err.message)); });
+    });
+}
+// Zero trust: a fresh empty folder, the question word for word, and only the capability it was given (web search or
+// nothing), once. Security Lab consults and Conspiracy probes both use it. `system` replaces Claude's one-line system
+// prompt; Cline keeps its own (it needs it to answer at all), so the instruction goes in front of the question.
+export async function zeroTrust({ target, question, web = false, title = target, system = null }) {
+    if (!ZERO_TRUST.includes(target)) throw httpError(403, `Only ${ZERO_TRUST.join(' or ')} can be asked on zero-trust terms.`);
+    if (web && target !== 'claude') throw httpError(400, 'Only Claude can be given web search here.');
+    const a = agentUser.info(); if (!a || process.getuid?.() !== 0) throw httpError(412, 'Asking other agents needs the agent user.');
+    const scratch = fs.mkdtempSync(path.join(a.home, '.consult-')); fs.chownSync(scratch, a.uid, a.gid); fs.chmodSync(scratch, 0o700);
+    try {
+        // web: the two web tools exist AND are pre-approved (print mode refuses anything not approved); nothing else exists.
+        if (target === 'claude') return await runAs(a, { bin: 'claude', args: ['-p', question, '--tools', web ? 'WebSearch,WebFetch' : '', ...(web ? ['--allowedTools', 'WebSearch', 'WebFetch'] : []), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--no-session-persistence', '--system-prompt', system || 'Answer the question you are given directly.'], home: a.home, workdir: scratch, title });
+        clineLib.prepare(scratch, { uid: a.uid, gid: a.gid });   // its own home: no instruction files, only the Ollama connection
+        return await runAs(a, { bin: 'cline', args: ['--auto-approve', 'false', '--thinking', 'none', system ? `${system}\n\n${question}` : question], extra: { CLINE_DIR: path.join(scratch, '.cline') }, home: scratch, workdir: scratch, title });
+    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 }

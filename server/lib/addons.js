@@ -35,6 +35,15 @@ export const CATALOG = [
         ready: async () => false,                 // never assumed: only added from the Apps tab
         hasData: () => { try { return fs.readdirSync(path.join(config.root, 'Lab')).length > 0; } catch { return false; } },
     },
+    {
+        id: 'cases', title: 'Conspiracy', icon: 'search',
+        blurb: 'Go down rabbit holes on the big questions: who is tied to whom, where the money went, why a deal or a market move happened. A pinboard of people in public roles, companies, assets, wallets and deals joined by sourced strings, a timeline, competing theories, and agents that send zero-trust probes one subject at a time.',
+        installs: ['jq and curl (reading data from public APIs)', 'whois', 'PDF tools (Poppler) for filings and reports', 'Python requests'],
+        size: 'about 40 MB', time: 'about a minute',
+        command: () => ['node', [path.resolve(here, '..', '..', 'bin', 'sleuth'), 'setup']],
+        ready: async () => false,                 // only added from the Apps tab
+        hasData: () => { try { return fs.readdirSync(path.join(config.root, 'Cases')).length > 0; } catch { return false; } },
+    },
 ];
 
 const jobs = new Map();   // id → { running, started, code, finished }

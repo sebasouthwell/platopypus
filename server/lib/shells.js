@@ -15,6 +15,7 @@ import * as agentUser from './agentuser.js';
 import * as research from './research.js';
 import * as labLib from './lab.js';
 import * as clineLib from './cline.js';
+import * as casesLib from './cases.js';
 import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
@@ -76,7 +77,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
-    if (session !== null && !['control', 'project', 'research', 'lab'].includes(session)) throw httpError(400, 'session: control, project, research or lab.');
+    if (session !== null && !['control', 'project', 'research', 'lab', 'case'].includes(session)) throw httpError(400, 'session: control, project, research, lab or case.');
     // Autonomous testing with Claude: allowed, after the user has read the warning (the app asks; this enforces it).
     if (session === 'lab' && kind === 'agent' && (agent || 'claude') === 'claude' && !ackClaude) { const e = httpError(428, 'Using Claude as a Security Lab agent needs your confirmation first.'); e.needAck = 'claude-lab'; throw e; }
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
@@ -130,6 +131,10 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             const lslug = labLib.engagementOf(dir); if (!lslug) throw httpError(400, 'A Security Lab session starts inside an engagement: open one under Apps, Security Lab.');
             const ldir = path.join(labLib.ROOT, lslug);
             security = 'lab'; sessionEnv = { PORTHOLE_SESSION: 'lab', PORTHOLE_SECURITY_LEVEL: 'lab', PORTHOLE_SECURITY_FILE: path.join(ldir, '.platopypus', 'lab.md'), PORTHOLE_PROJECT_ROOT: ldir };
+        } else if (session === 'case') {
+            const cslug = casesLib.caseOf(dir); if (!cslug) throw httpError(400, 'A Conspiracy session starts inside a case: open one under Apps, Conspiracy.');
+            const cdir = path.join(casesLib.ROOT, cslug);
+            security = 'case'; sessionEnv = { PORTHOLE_SESSION: 'case', PORTHOLE_SECURITY_LEVEL: 'case', PORTHOLE_SECURITY_FILE: path.join(cdir, '.platopypus', 'case.md'), PORTHOLE_PROJECT_ROOT: cdir };
         } else if (session === 'research') {
             const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
             const tdir = path.join(research.ROOT, slug);

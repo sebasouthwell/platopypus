@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+// sleuth: work a Conspiracy case (/Cases/<name>) from an agent shell. Everything goes on the case's pinboard, with sources.
+//
+//   sleuth status                                        the question, the board, questions, theories, probes, budget
+//   sleuth source "<title>" <url> [--publisher P] [--date YYYY-MM-DD] [--reliability primary|reputable|other] [--quote "…"]
+//   sleuth pin <type> "<name>" [--note "…"] [--source S1,S2] [--when YYYY-MM-DD] [--status lead|confirmed|disputed|dead-end] [--origin] [--office]
+//        types: person org gov asset wallet money deal document event address claim   (--office: an address nobody lives at)
+//   sleuth link "<card>" "<card>" "<what joins them>" [--strength documented|reported|alleged] [--source S1] [--when …] [--amount N --currency GBP]
+//   sleuth ask "<open question>" [--card "<card>"]         sleuth answer Q2 "<answer>" [--source S4]
+//   sleuth theory "<a possible explanation>"             sleuth weigh T1 <S3|string-id> supports|contradicts|neutral|none
+//   sleuth path "<card>" "<card>"                        chains of strings already joining two cards
+//   sleuth probe "<subject>" "<question>" [--agent claude|cline] [--no-web] [--wait]
+//        a zero-trust sub-agent: it sees only this subject and question, with web search, once
+//   sleuth probes                                        sleuth probe-show <p-id>
+//   sleuth setup                                         install the helpers (root; done by adding the app)
+//
+// Cards are named by their name or id. Strings need a source unless they are "alleged".
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const argv = process.argv.slice(2); const cmd = argv[0];
+const die = (m, c = 1) => { console.error(m); process.exit(c); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function inCase() {
+    let d = process.cwd();
+    for (;;) { if (fs.existsSync(path.join(d, '.platopypus', 'case.json'))) return d; const up = path.dirname(d); if (up === d) break; d = up; }
+    die('Not inside a case. cd to /Cases/<case> first.');
+}
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+let cookie = null;
+async function call(p, method = 'GET', body) {
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    if (!cookie) {
+        const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) die('This shell has no PlatOpypus token (start it from the app as an agent shell).');
+        const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) die('PlatOpypus did not accept this shell\'s token.');
+        cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: method === 'GET' ? undefined : JSON.stringify({ ...(body || {}), pid: process.pid }) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) die(d.error || `HTTP ${r.status}`, r.status === 403 ? 3 : 1); return d;
+}
+// --flag value / --flag (boolean) parsing; the rest are positional.
+function parse(list, bools = []) {
+    const pos = [], opt = {};
+    for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (a.startsWith('--')) { const k = a.slice(2); if (bools.includes(k)) opt[k] = true; else { opt[k] = list[i + 1]; i++; } }
+        else pos.push(a);
+    }
+    return { pos, opt };
+}
+const show = p => `${p.id} [${p.status}] ${p.subject}: ${p.question.slice(0, 100)}`;
+
+try {
+    const rest = argv.slice(1);
+    switch (cmd) {
+        case undefined: case '-h': case '--help': console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n')); break;
+        case 'setup': {
+            if (process.getuid?.() !== 0) die('sleuth setup installs packages: run it as root (adding Conspiracy in the Apps tab does it).');
+            const r = spawnSync('bash', ['-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq whois poppler-utils curl python3-requests'], { stdio: 'inherit' });
+            fs.mkdirSync('/Cases', { recursive: true }); process.exit(r.status ?? 1);
+        }
+        case 'status': {
+            inCase(); const d = await call('/api/agent/case');
+            const nm = new Map(d.board.nodes.map(n => [n.id, n]));
+            console.log(`${d.title} (${d.kind})\nThe question: ${d.question || '(not set)'}\nDepth ${d.depth} links from the start · probes used ${d.probes.length} of ${d.budget}\n`);
+            console.log(`Cards (${d.board.nodes.length}):`); for (const n of d.board.nodes) console.log(`  ${n.id} ${n.type.padEnd(8)} ${n.label}${n.origin ? ' [start]' : ''}${d.depths[n.id] !== undefined ? ` (depth ${d.depths[n.id]})` : ''} · ${n.status}${n.sources.length ? ` · ${n.sources.join(',')}` : ''}`);
+            console.log(`\nStrings (${d.board.links.length}):`); for (const l of d.board.links) console.log(`  ${l.id} ${nm.get(l.from)?.label} → ${l.label} → ${nm.get(l.to)?.label} · ${l.strength}${l.when ? ` · ${l.when}` : ''}${l.amount !== null && l.amount !== undefined ? ` · ${l.amount} ${l.currency || ''}` : ''}${l.sources.length ? ` · ${l.sources.join(',')}` : ''}`);
+            console.log(`\nSources (${d.board.sources.length}):`); for (const s of d.board.sources.slice(-30)) console.log(`  ${s.id} ${s.reliability.padEnd(9)} ${s.title}${s.url ? ` <${s.url}>` : ''}`);
+            const open = d.board.questions.filter(q => q.status === 'open'); if (open.length) { console.log('\nOpen questions:'); for (const q of open) console.log(`  ${q.id} ${q.text}`); }
+            if (d.board.theories.length) { console.log('\nTheories:'); for (const t of d.board.theories) { const v = Object.values(t.evidence); console.log(`  ${t.id} ${t.text} (${v.filter(x => x === 'supports').length} for, ${v.filter(x => x === 'contradicts').length} against)`); } }
+            if (d.probes.length) { console.log('\nRecent probes:'); for (const p of d.probes.slice(0, 10)) console.log(`  ${show(p)}`); }
+            break;
+        }
+        case 'source': { inCase(); const { pos, opt } = parse(rest); if (!pos[0]) die('usage: sleuth source "<title>" <url> [--publisher …] [--date …] [--reliability …] [--quote …]'); const s = await call('/api/agent/case/source', 'POST', { title: pos[0], url: pos[1] || '', publisher: opt.publisher, date: opt.date, reliability: opt.reliability, quote: opt.quote }); console.log(`${s.id} ${s.title}`); break; }
+        case 'pin': { inCase(); const { pos, opt } = parse(rest, ['origin', 'office']); if (pos.length < 2) die('usage: sleuth pin <type> "<name>" [--note …] [--source S1] [--when …]'); const n = await call('/api/agent/case/pin', 'POST', { type: pos[0], label: pos[1], note: opt.note, sources: opt.source, when: opt.when, status: opt.status, origin: !!opt.origin, residential: opt.office ? false : undefined }); console.log(`${n.id} ${n.type} ${n.label}`); break; }
+        case 'link': { inCase(); const { pos, opt } = parse(rest); if (pos.length < 3) die('usage: sleuth link "<card>" "<card>" "<what joins them>" [--strength …] [--source …]'); const l = await call('/api/agent/case/link', 'POST', { from: pos[0], to: pos[1], label: pos[2], strength: opt.strength, sources: opt.source, when: opt.when, amount: opt.amount, currency: opt.currency, note: opt.note }); console.log(`${l.id} ${l.label} (${l.strength})`); break; }
+        case 'ask': { inCase(); const { pos, opt } = parse(rest); if (!pos[0]) die('usage: sleuth ask "<question>" [--card …]'); const q = await call('/api/agent/case/ask', 'POST', { text: pos[0], node: opt.card }); console.log(`${q.id} ${q.text}`); break; }
+        case 'answer': { inCase(); const { pos, opt } = parse(rest); if (pos.length < 2) die('usage: sleuth answer Q2 "<answer>" [--source S4]'); const q = await call('/api/agent/case/answer', 'POST', { id: pos[0], answer: pos[1], sources: opt.source }); console.log(`${q.id} ${q.status}`); break; }
+        case 'theory': { inCase(); if (!rest[0]) die('usage: sleuth theory "<explanation>"'); const t = await call('/api/agent/case/theory', 'POST', { text: rest[0] }); console.log(`${t.id} ${t.text}`); break; }
+        case 'weigh': { inCase(); if (rest.length < 3) die('usage: sleuth weigh T1 <S3|string-id> supports|contradicts|neutral|none'); const t = await call('/api/agent/case/weigh', 'POST', { id: rest[0], ref: rest[1], verdict: rest[2] }); console.log(`${t.id}: ${Object.keys(t.evidence).length} pieces of evidence weighed`); break; }
+        case 'path': {
+            inCase(); if (rest.length < 2) die('usage: sleuth path "<card>" "<card>"');
+            const r = await call('/api/agent/case/path', 'POST', { from: rest[0], to: rest[1] }); const d = await call('/api/agent/case');
+            const nm = new Map(d.board.nodes.map(n => [n.id, n.label])); const lm = new Map(d.board.links.map(l => [l.id, l]));
+            if (!r.paths.length) console.log('No chain of strings joins them yet.');
+            for (const p of r.paths) { let at = r.from; const parts = [nm.get(at)]; for (const id of p) { const l = lm.get(id); at = l.from === at ? l.to : l.from; parts.push(`-[${l.label}, ${l.strength}]-`, nm.get(at)); } console.log(parts.join(' ')); }
+            break;
+        }
+        case 'probe': {
+            inCase(); const { pos, opt } = parse(rest, ['no-web', 'wait']); if (pos.length < 2) die('usage: sleuth probe "<subject>" "<question>" [--agent claude|cline] [--no-web] [--wait]');
+            let p = await call('/api/agent/case/probe', 'POST', { subject: pos[0], question: pos[1], agent: opt.agent || 'claude', web: !opt['no-web'] });
+            console.log(`${p.id} started: ${p.subject}`);
+            if (opt.wait) { while (p.status === 'running') { await sleep(4000); p = await call(`/api/agent/case/probes/${p.id}`); } console.log(`\n${p.status === 'done' ? p.answer : `Failed: ${p.answer}`}`); }
+            else console.log(`See it with: sleuth probe-show ${p.id}`);
+            break;
+        }
+        case 'probes': { inCase(); const d = await call('/api/agent/case'); if (!d.probes.length) console.log('No probes yet.'); for (const p of d.probes) console.log(show(p)); break; }
+        case 'probe-show': { inCase(); if (!rest[0]) die('usage: sleuth probe-show <p-id>'); const p = await call(`/api/agent/case/probes/${rest[0]}`); console.log(`${show(p)}\n\n${p.answer || '(still running)'}`); break; }
+        default: die(`Unknown command "${cmd}". Try: sleuth --help`);
+    }
+} catch (e) { die(e.message); }

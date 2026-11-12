@@ -641,6 +641,32 @@ phone's Update button. Mechanism:
     and `CLINE_DATA_DIR=~/.cline/data` (settings, providers and history stay shared). Folders older than 14 days are
     removed. The global `~/.agents/AGENTS.md` is still loaded.
   - Icons: clock and power added to the sprite.
+- **2.10.0**: Conspiracy, a third app for rabbit-hole investigations (research and journalism).
+  - **Cases** (`server/lib/cases.js`, `/Cases/<name>/`): `.platopypus/case.json` holds the question, kind, depth (default 3)
+    and probe budget (default 40). `board.json` holds cards (person in a public role, org, gov, asset, wallet, money, deal,
+    document, event, address, claim), strings (label, strength documented|reported|alleged, sources, date, amount and
+    currency), sources (with reliability primary|reputable|other and a quote), open questions, and theories (each source or
+    string weighed as supports, contradicts or neutral). The case folder also holds `notes.md`, `probes/pN.json` and
+    `files/`. A documented or reported string needs a source. Writes are serialised per case.
+  - **Probes:** zero-trust sub-agents (`consult.zeroTrust`, factored out of the Security Lab consult). Each probe gets only
+    "Subject: … Question: …" with web search, in a fresh empty folder, once, plus a system prompt that asks for citable
+    sources and forbids private personal details. Up to 4 run at once per case and 120 per hour; the case budget is
+    enforced. Cline probes run without thinking output.
+  - **Addresses:** only from public records. `residential` defaults to true: the board masks it (tap to show) and the
+    Markdown export replaces it with "[residential address]".
+  - **Agents:** session type `case` (brief from `deploy/cases/brief.md` with the case facts appended). The command is
+    `bin/sleuth` (status, source, pin, link, ask, answer, theory, weigh, path, probe, probes, probe-show), served by
+    `/api/agent/case*`; the case is the one the shell works in. Consulting is on by default for case sessions (zero trust).
+  - **Phone API:** `/api/cases*` covers cases, cards, strings, sources, questions, theories, paths, probes, notes, the
+    Markdown export and deletion to trash.
+  - **Screens** (`web/cases.js`, loaded on demand): Briefing (the question, new since your last look, probes out, theories
+    with for and against meters, open questions, all probes with "add its links as sources", the report as Markdown or
+    printable). Board (paper cards on a dark board with red strings: solid documented, dashed reported, dotted alleged;
+    drag, pan and pinch zoom, focus on 1 or 2 links, the follow-the-money and documented-only lenses, a type filter, a
+    path finder, tidy, and a card drawer with ready Dig questions per type). Timeline (gaps highlighted under 60 days).
+    Evidence. Theories (a grid of evidence against each theory). Notes. Agent.
+  - **App:** `cases` in the Apps catalog installs jq, curl, whois, poppler-utils and python3-requests, and links
+    `sleuth` in install.sh. `/Cases` is an agent folder.
 
 ## Release checklist
 
