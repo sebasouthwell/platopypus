@@ -69,16 +69,17 @@ export async function loadCase({ quiet = false } = {}) {
         localStorage.setItem(seenKey(S.slug), String(Date.now()));
     }
     $('#case-title').textContent = d.title;
-    const running = d.probes.filter(p => p.status === 'running').length;
-    const tabs = [['briefing', 'Briefing'], ['board', `Board<em>${d.nodes}</em>`], ['timeline', 'Timeline'], ['evidence', `Evidence${d.sources ? `<em>${d.sources}</em>` : ''}`], ['theories', `Theories${d.board.theories.length ? `<em>${d.board.theories.length}</em>` : ''}`], ['notes', 'Notes'], ['agent', `Agent${running ? '<em>●</em>' : ''}`]];
+    const running = d.probes.filter(p => p.status === 'running').length + (d.asks || []).filter(a => a.status === 'running').length;
+    const moneyN = d.board.links.filter(l => l.amount !== null && l.amount !== undefined).length;
+    const tabs = [['briefing', 'Briefing'], ['board', `Board<em>${d.nodes}</em>`], ['timeline', 'Timeline'], ['money', `Money${moneyN ? `<em>${moneyN}</em>` : ''}`], ['evidence', `Evidence${d.sources ? `<em>${d.sources}</em>` : ''}`], ['theories', `Theories${d.board.theories.length ? `<em>${d.board.theories.length}</em>` : ''}`], ['ask', 'Ask'], ['notes', 'Notes'], ['agent', `Agent${running ? '<em>●</em>' : ''}`]];
     $('#case-seg').innerHTML = tabs.map(([k, l]) => `<button data-ct="${k}" class="${S.tab === k ? 'on' : ''}" role="tab" aria-selected="${S.tab === k}">${l}</button>`).join('');
     $$('#case-seg [data-ct]').forEach(b => b.onclick = () => { S.tab = b.dataset.ct; loadCase().catch(x => C.toast(x.message, true)); });
     document.getElementById('page-case').classList.toggle('case-boardmode', S.tab === 'board');
     const body = $('#case-body');
     // A quiet refresh of the board keeps the view and only redraws what changed.
     if (quiet && S.tab === 'board' && $('.pb-wrap', body)) drawBoard(body, true);
-    else if (quiet && (S.tab === 'notes' || S.tab === 'theories')) { /* do not disturb typing */ }
-    else ({ briefing: renderBriefing, board: renderBoard, timeline: renderTimeline, evidence: renderEvidence, theories: renderTheories, notes: renderNotes, agent: renderAgent })[S.tab](body);
+    else if (quiet && (S.tab === 'notes' || S.tab === 'theories' || (S.tab === 'ask' && document.activeElement?.id === 'ask-q' && document.activeElement.value))) { /* do not disturb typing */ }
+    else ({ briefing: renderBriefing, board: renderBoard, timeline: renderTimeline, money: renderMoney, evidence: renderEvidence, theories: renderTheories, ask: renderAsk, notes: renderNotes, agent: renderAgent })[S.tab](body);
     clearTimeout(S.poll);
     const agentHere = (C.state.shells || []).some(s => String(s.cwd || '').includes(`/Cases/${S.slug}`));
     if (running || agentHere) S.poll = setTimeout(() => { if (!document.getElementById('page-case').hidden && S.slug === d.slug) loadCase({ quiet: true }).catch(() => {}); }, running ? 4000 : 8000);
@@ -183,7 +184,7 @@ function layout(nodes, links, keepSaved = true) {
     const free = nodes.filter(n => !(keepSaved && Number.isFinite(n.x)));
     nodes.forEach((n, i) => { if (keepSaved && Number.isFinite(n.x)) pos.set(n.id, { x: n.x, y: n.y, fixed: true }); else { const a = hash(n.id) * Math.PI * 2, r = 220 + 260 * hash(n.id + 'r') + i * 6; pos.set(n.id, { x: Math.cos(a) * r, y: Math.sin(a) * r, fixed: false }); } });
     if (!free.length) return pos;
-    const E = links.filter(l => pos.has(l.from) && pos.has(l.to)); const K = 200;
+    const seenPair = new Set(); const E = links.filter(l => { const k = [l.from, l.to].sort().join('|'); if (!pos.has(l.from) || !pos.has(l.to) || seenPair.has(k)) return false; seenPair.add(k); return true; }); const K = 220;   // each pair pulls once, however many strings join it
     for (let it = 0; it < 220; it++) {
         const t = 40 * (1 - it / 220) + 2; const disp = new Map(nodes.map(n => [n.id, { x: 0, y: 0 }]));
         for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
@@ -192,6 +193,19 @@ function layout(nodes, links, keepSaved = true) {
         }
         for (const l of E) { const p = pos.get(l.from), r = pos.get(l.to); let dx = p.x - r.x, dy = p.y - r.y; const dd = Math.hypot(dx, dy) || 0.1; const f = (dd * dd) / K; dx /= dd; dy /= dd; const a = disp.get(l.from), b = disp.get(l.to); a.x -= dx * f; a.y -= dy * f; b.x += dx * f; b.y += dy * f; }
         for (const n of nodes) { const p = pos.get(n.id); if (p.fixed) continue; const v = disp.get(n.id); const m = Math.hypot(v.x, v.y) || 1; p.x += (v.x / m) * Math.min(m, t); p.y += (v.y / m) * Math.min(m, t); p.y += (0 - p.y) * 0.004; p.x += (0 - p.x) * 0.002; }
+    }
+    // Cards are boxes, not points: push apart any two that overlap (with room for a string label between them).
+    const GW = CARD_W + 70, GH = CARD_H + 50;
+    for (let pass = 0; pass < 80; pass++) {
+        let moved = false;
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+            const p = pos.get(nodes[i].id), r = pos.get(nodes[j].id); if (p.fixed && r.fixed) continue;
+            const dx = r.x - p.x, dy = r.y - p.y; const ox = GW - Math.abs(dx), oy = GH - Math.abs(dy); if (ox <= 0 || oy <= 0) continue;
+            moved = true; const share = p.fixed || r.fixed ? 1 : 0.5;
+            if (ox / GW < oy / GH) { const m = (ox + 1) * Math.sign(dx || 1) * share; if (!p.fixed) p.x -= m; if (!r.fixed) r.x += m; }
+            else { const m = (oy + 1) * Math.sign(dy || 1) * share; if (!p.fixed) p.y -= m; if (!r.fixed) r.y += m; }
+        }
+        if (!moved) break;
     }
     return pos;
 }
@@ -205,6 +219,15 @@ function visibleSets() {
     const ids = new Set(nodes.map(n => n.id)); links = links.filter(l => ids.has(l.from) && ids.has(l.to));
     return { nodes, links };
 }
+// Strings sharing the same two cards fan out instead of lying on top of each other: a sideways bend per string.
+function bends(links) {
+    const groups = new Map(); for (const l of links) { const k = [l.from, l.to].sort().join('|'); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(l); }
+    // b: the sideways bend; t: where along the string its label sits (staggered, so labels of one pair do not stack).
+    const out = new Map(); for (const g of groups.values()) g.forEach((l, i) => { const o = i - (g.length - 1) / 2; out.set(l.id, { b: g.length === 1 ? 0 : o * 80 * (l.from < l.to ? 1 : -1), t: g.length === 1 ? 0.5 : Math.min(0.8, Math.max(0.2, 0.5 + o * 0.28)) }); });
+    return out;
+}
+const qpt = (a, k, c, t) => ({ x: (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * k.x + t * t * c.x, y: (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * k.y + t * t * c.y });
+function ctrl(a, c, bend) { const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2; const dx = c.x - a.x, dy = c.y - a.y; const len = Math.hypot(dx, dy) || 1; const sag = Math.min(40, len * 0.08); return { x: mx - (dy / len) * bend, y: my + (dx / len) * bend + (bend ? 0 : sag) }; }
 function neighbours(id, hops) { const out = new Set([id]); let edge = [id]; for (let h = 0; h < hops; h++) { const next = []; for (const l of S.data.board.links) { if (edge.includes(l.from) && !out.has(l.to)) { out.add(l.to); next.push(l.to); } if (edge.includes(l.to) && !out.has(l.from)) { out.add(l.from); next.push(l.from); } } edge = next; } return out; }
 function drawBoard(body, keepView) {
     const { esc } = C; const wrap = body.querySelector('.pb-wrap'); if (!wrap) return;
@@ -219,12 +242,12 @@ function drawBoard(body, keepView) {
             <span class="pb-pin"></span><div class="pb-type"><span class="pb-glyph">${esc(t.glyph)}</span>${esc(t.label)}${n.origin ? '<b class="pb-start">Start</b>' : depth[n.id] !== undefined ? `<span class="pb-depth">${depth[n.id]}</span>` : ''}</div>
             <div class="pb-label${masked ? ' masked' : ''}">${esc(nodeName(n))}</div>
             <div class="pb-meta">${n.sources.length ? `${n.sources.length} source${n.sources.length === 1 ? '' : 's'}` : '<span class="pb-nosrc">no source</span>'}${n.when ? ` · ${esc(n.when)}` : ''}${n.status !== 'lead' ? ` · ${esc(n.status)}` : ''}</div></div>`; }).join('');
-    const svg = body.querySelector('.pb-strings');
-    svg.innerHTML = links.map(l => { const a = pos.get(l.from), c = pos.get(l.to); if (!a || !c) return ''; const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2 + Math.min(40, Math.hypot(c.x - a.x, c.y - a.y) * 0.08);   // a little sag, like string
+    const svg = body.querySelector('.pb-strings'); const bd = bends(links); S.bends = bd;
+    svg.innerHTML = links.map(l => { const a = pos.get(l.from), c = pos.get(l.to); if (!a || !c) return ''; const bt = bd.get(l.id) || { b: 0, t: 0.5 }; const k = ctrl(a, c, bt.b); const mx = k.x, my = k.y; const lp = qpt(a, k, c, bt.t);   // a little sag, like string, or a sideways bend for a second string
         const on = pathLinks.has(l.id); const off = S.paths ? !on : focus ? !(focus.has(l.from) && focus.has(l.to)) : false; const money = S.lens === 'money';
         const amt = fmtAmt(l.amount, l.currency);
         return `<g class="pb-s ${l.strength}${on ? ' path' : ''}${off ? ' dim' : ''}${money ? ' money' : ''}" data-l="${l.id}"><path d="M${a.x},${a.y} Q${mx},${my} ${c.x},${c.y}" /><path class="hit" d="M${a.x},${a.y} Q${mx},${my} ${c.x},${c.y}" />
-            <g class="pb-tag" transform="translate(${(a.x + 2 * mx + c.x) / 4},${(a.y + 2 * my + c.y) / 4})"><rect x="-4" y="-11" rx="6" height="20" width="${Math.min(200, (l.label.length + (amt ? amt.length + 3 : 0)) * 6.4 + 10)}" transform="translate(${-Math.min(200, (l.label.length + (amt ? amt.length + 3 : 0)) * 6.4 + 10) / 2 + 4},0)"/><text text-anchor="middle" y="3">${esc(l.label.length > 30 ? l.label.slice(0, 29) + '…' : l.label)}${amt ? ` · ${esc(amt)}` : ''}</text></g></g>`; }).join('');
+            <g class="pb-tag" transform="translate(${lp.x},${lp.y})"><rect x="-4" y="-11" rx="6" height="20" width="${Math.min(200, (l.label.length + (amt ? amt.length + 3 : 0)) * 6.4 + 10)}" transform="translate(${-Math.min(200, (l.label.length + (amt ? amt.length + 3 : 0)) * 6.4 + 10) / 2 + 4},0)"/><text text-anchor="middle" y="3">${esc(l.label.length > 30 ? l.label.slice(0, 29) + '…' : l.label)}${amt ? ` · ${esc(amt)}` : ''}</text></g></g>`; }).join('');
     // cards: tap to open, drag to move
     body.querySelectorAll('.pb-card').forEach(el => bindCard(body, el));
     svg.querySelectorAll('.pb-s').forEach(g => g.onclick = e => { e.stopPropagation(); linkDialog(g.dataset.l); });
@@ -290,7 +313,7 @@ function bindCard(body, el) {
     el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cardTapped(body, id); } });
 }
 function redrawStrings(body) {
-    body.querySelectorAll('.pb-s').forEach(g => { const l = S.data.board.links.find(x => x.id === g.dataset.l); const a = S.pos.get(l.from), c = S.pos.get(l.to); if (!a || !c) return; const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2 + Math.min(40, Math.hypot(c.x - a.x, c.y - a.y) * 0.08); const dd = `M${a.x},${a.y} Q${mx},${my} ${c.x},${c.y}`; g.querySelectorAll('path').forEach(p => p.setAttribute('d', dd)); g.querySelector('.pb-tag')?.setAttribute('transform', `translate(${(a.x + 2 * mx + c.x) / 4},${(a.y + 2 * my + c.y) / 4})`); });
+    body.querySelectorAll('.pb-s').forEach(g => { const l = S.data.board.links.find(x => x.id === g.dataset.l); const a = S.pos.get(l.from), c = S.pos.get(l.to); if (!a || !c) return; const bt = S.bends?.get(l.id) || { b: 0, t: 0.5 }; const k = ctrl(a, c, bt.b); const mx = k.x, my = k.y; const lp = qpt(a, k, c, bt.t); const dd = `M${a.x},${a.y} Q${mx},${my} ${c.x},${c.y}`; g.querySelectorAll('path').forEach(p => p.setAttribute('d', dd)); g.querySelector('.pb-tag')?.setAttribute('transform', `translate(${lp.x},${lp.y})`); });
 }
 async function cardTapped(body, id) {
     if (S.pathPick) {
@@ -470,6 +493,46 @@ function renderTheories(body) {
     const all = $('[data-thall]', body); if (all) all.onclick = () => { S.thAll = !showAll; renderTheories(body); };
 }
 
+// ---------- Money: follow the amounts ----------
+// Every string with an amount, grouped by currency: the biggest flows, and what went in and out of each card.
+function renderMoney(body) {
+    const { esc } = C; const b = S.data.board;
+    const flows = b.links.filter(l => l.amount !== null && l.amount !== undefined && Number.isFinite(+l.amount));
+    const unknown = b.links.filter(l => (l.amount === null || l.amount === undefined) && /paid|pay|fund|loan|donat|bought|sold|invest|transfer|sent|received|fee|bribe|grant/i.test(l.label));
+    const byCur = new Map(); for (const l of flows) { const c = l.currency || '?'; if (!byCur.has(c)) byCur.set(c, []); byCur.get(c).push(l); }
+    let html = `<p class="note">Strings that carry an amount, by currency. Direction follows the string (from → to). Amounts are only as good as their sources: check the strength of each.</p>`;
+    if (!flows.length) html += '<p class="empty">No amounts yet. Give a string an amount and currency (on the Board, tap the string) and it shows here.</p>';
+    for (const [cur, ls] of byCur) {
+        const total = ls.reduce((s, l) => s + Math.abs(+l.amount), 0); const max = Math.max(...ls.map(l => Math.abs(+l.amount)));
+        const per = new Map(); const add = (id, k, v) => { if (!per.has(id)) per.set(id, { in: 0, out: 0 }); per.get(id)[k] += v; };
+        for (const l of ls) { add(l.from, 'out', Math.abs(+l.amount)); add(l.to, 'in', Math.abs(+l.amount)); }
+        const ranked = [...ls].sort((x, y) => Math.abs(+y.amount) - Math.abs(+x.amount));
+        html += `<h2 class="section">${esc(cur)} · ${esc(fmtAmt(total, cur === '?' ? '' : cur))} across ${ls.length} string${ls.length === 1 ? '' : 's'}</h2>
+            <div class="list mn-flows">${ranked.map(l => `<button class="row mn-row" data-ml="${l.id}"><div class="main"><div class="mn-line"><b>${esc(nodeName(nodeById(l.from)))}</b> <span class="muted">${esc(l.label)} →</span> <b>${esc(nodeName(nodeById(l.to)))}</b></div><div class="mn-bar"><span class="${l.strength}" style="width:${Math.max(2, (Math.abs(+l.amount) / max) * 100)}%"></span></div><div class="sub">${esc(fmtAmt(+l.amount, cur === '?' ? '' : cur))} · <span class="cs-str ${l.strength}">${l.strength}</span>${l.when ? ` · ${esc(l.when)}` : ''}${l.sources.length ? ` · ${esc(l.sources.join(', '))}` : ''}</div></div></button>`).join('')}</div>
+            <div class="mn-table"><div class="mn-th"><span>Card</span><span>In</span><span>Out</span></div>${[...per].sort((x, y) => (y[1].in + y[1].out) - (x[1].in + x[1].out)).map(([id, v]) => `<div class="mn-tr"><span>${esc(nodeName(nodeById(id)))}</span><span>${v.in ? esc(fmtAmt(v.in, cur === '?' ? '' : cur)) : '–'}</span><span>${v.out ? esc(fmtAmt(v.out, cur === '?' ? '' : cur)) : '–'}</span></div>`).join('')}</div>`;
+    }
+    if (unknown.length) html += `<h2 class="section">Money strings without an amount · ${unknown.length}</h2><div class="list">${unknown.map(l => `<button class="row" data-ml="${l.id}"><div class="main"><div class="title" style="white-space:normal">${esc(nodeName(nodeById(l.from)))} → ${esc(l.label)} → ${esc(nodeName(nodeById(l.to)))}</div><div class="sub">${l.strength}${l.sources.length ? ` · ${esc(l.sources.join(', '))}` : ' · no source'}</div></div></button>`).join('')}</div>`;
+    body.innerHTML = html;
+    body.querySelectorAll('[data-ml]').forEach(x => x.onclick = () => linkDialog(x.dataset.ml));
+}
+
+// ---------- Ask: questions answered from the case file ----------
+const ASK_IDEAS = ['What is the strongest evidence so far, and what is it evidence of?', 'Which strings are only alleged, and how could each one be checked?', 'What would most change the picture if it turned out to be true or false?', 'What is the innocent explanation, and what in the file supports it?', 'Summarise the money flows and which are documented.'];
+function renderAsk(body) {
+    const { esc, icon, $, $$ } = C; const enc = encodeURIComponent(S.slug); const list = S.data.asks || [];
+    const cite = t => esc(t).replace(/\[([Sl][0-9a-f]{1,6}(?:,\s*[Sl][0-9a-f]{1,6})*)\]/g, (m, ids) => `<span class="ask-cite">[${ids}]</span>`)
+        .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} (.*)$/gm, '<b class="ask-h">$1</b>').replace(/^\s*[-*] (.*)$/gm, '<span class="ask-li">$1</span>').replace(/^\s*(\d+)\. (.*)$/gm, '<span class="ask-li n" data-n="$1">$2</span>');
+    body.innerHTML = `<p class="note">Ask about the case. The answer comes only from what is on the board, the sources, theories and notes, with the ids it relies on, and says when the board cannot answer. Homes stay masked. To find something new, send a probe from a card.</p>
+        <div class="ask-box"><textarea id="ask-q" rows="2" maxlength="2000" placeholder="Who connects the councillor to Northwind, and how solid is each link?"></textarea><button class="btn pri" data-ask>${icon('send')}Ask</button></div>
+        <div class="ask-ideas">${ASK_IDEAS.map((q, i) => `<button data-idea="${i}">${esc(q)}</button>`).join('')}</div>
+        ${list.map(a => `<div class="card ask-item"><div class="ask-q"><span class="cs-pst ${a.status}"></span>${esc(a.question)}</div>${a.status === 'running' ? '<p class="muted">Reading the case file…</p>' : `<div class="ask-a">${cite(a.answer).replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>').replace(/<br>(<span class="ask-li)/g, '$1').replace(/(<\/span>)<br>/g, '$1')}</div>`}<div class="sub">${a.agent === 'claude' ? 'Claude' : 'Cline'} · ${new Date(a.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div></div>`).join('') || ''}`;
+    const go = async q => { if (!q.trim()) return; try { await C.api(`/api/cases/${enc}/asks`, { method: 'POST', body: { question: q } }); loadCase(); } catch (ex) { C.toast(ex.message, true); } };
+    $('[data-ask]', body).onclick = () => go($('#ask-q', body).value);
+    $('#ask-q', body).onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(e.target.value); };
+    $$('[data-idea]', body).forEach(x => x.onclick = () => go(ASK_IDEAS[Number(x.dataset.idea)]));
+    $$('.ask-cite', body).forEach(x => { x.title = x.textContent.slice(1, -1).split(/,\s*/).map(id => { const s = srcById(id); if (s) return `${id}: ${s.title}`; const l = S.data.board.links.find(y => y.id === id); return l ? `${nodeName(nodeById(l.from))} → ${l.label} → ${nodeName(nodeById(l.to))}` : id; }).join('\n'); });
+}
+
 // ---------- Notes and Agent ----------
 function renderNotes(body) {
     const { esc, icon, $ } = C; const enc = encodeURIComponent(S.slug);
@@ -493,10 +556,24 @@ function renderAgent(body) {
 }
 
 // ---------- printable report ----------
+// A static picture of the board for the report: cards where they are on the board (or laid out), strings by strength.
+function boardSnapshot() {
+    const { esc } = C; const b = S.data.board; if (!b.nodes.length) return '';
+    const pos = layout(b.nodes, b.links); const ps = [...pos.values()];
+    const minx = Math.min(...ps.map(p => p.x)) - 100, maxx = Math.max(...ps.map(p => p.x)) + 100, miny = Math.min(...ps.map(p => p.y)) - 60, maxy = Math.max(...ps.map(p => p.y)) + 60;
+    const dash = { documented: '', reported: '9 6', alleged: '2 6' };
+    const bd = bends(b.links);
+    const strings = b.links.map(l => { const a = pos.get(l.from), c = pos.get(l.to); if (!a || !c) return ''; const bt = bd.get(l.id) || { b: 0, t: 0.5 }; const k = ctrl(a, c, bt.b); const lp = qpt(a, k, c, bt.t); const tx = lp.x, ty = lp.y; return `<path d="M${a.x},${a.y} Q${k.x},${k.y} ${c.x},${c.y}" fill="none" stroke="#C0392B" stroke-width="${l.strength === 'documented' ? 2.4 : 1.8}" stroke-dasharray="${dash[l.strength]}"/><text x="${tx}" y="${ty - 4}" font-size="10" text-anchor="middle" fill="#7a2a20" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(l.label.slice(0, 28))}</text>`; }).join('');
+    const wrap2 = t => { const w = t.split(/\s+/); let a = ''; while (w.length && (a + ' ' + w[0]).trim().length <= 22) a = (a + ' ' + w.shift()).trim(); if (!a) a = w.shift().slice(0, 22); let r = w.join(' '); if (r.length > 22) r = r.slice(0, 21) + '…'; return [a, r]; };
+    const cards = b.nodes.map(n => { const p = pos.get(n.id); const t = TYPE[n.type] || TYPE.claim; const name = n.type === 'address' && n.residential ? 'Residential address' : n.label; const [l1, l2] = wrap2(name);
+        return `<g><rect x="${p.x - 80}" y="${p.y - 28}" width="160" height="56" rx="3" fill="#F6F1E6" stroke="#bbb"/><rect x="${p.x - 80}" y="${p.y - 28}" width="160" height="5" fill="${t.color}"/><text x="${p.x - 72}" y="${p.y - 10}" font-size="9" fill="#666">${esc(t.label)}${n.origin ? ' · start' : ''}</text><text x="${p.x - 72}" y="${p.y + 6}" font-size="12" font-weight="600" fill="#1f2430">${esc(l1)}</text><text x="${p.x - 72}" y="${p.y + 20}" font-size="12" font-weight="600" fill="#1f2430">${esc(l2)}</text></g>`; }).join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minx} ${miny} ${maxx - minx} ${maxy - miny}" style="width:100%;height:auto;border:1px solid #ddd;background:#fff">${strings}${cards}</svg>`;
+}
 async function printReport() {
     const { esc } = C; let md = ''; try { const r = await fetch(`/api/cases/${encodeURIComponent(S.slug)}/export`, { headers: { 'X-Plato': '1' }, credentials: 'same-origin' }); md = await r.text(); } catch (ex) { return C.toast(ex.message, true); }
     const html = esc(md).replace(/^### (.*)$/gm, '<h3>$1</h3>').replace(/^## (.*)$/gm, '<h2>$1</h2>').replace(/^# (.*)$/gm, '<h1>$1</h1>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/&lt;(https?:\/\/[^&]+)&gt;/g, '<a href="$1">$1</a>').replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`).replace(/^---$/gm, '<hr>').replace(/\n{2,}/g, '\n<p>');
     const w = window.open('', '_blank'); if (!w) return C.toast('Allow pop-ups to open the report', true);
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(S.data.title)}</title><style>body{font:15px/1.55 Georgia,serif;max-width:760px;margin:40px auto;padding:0 20px;color:#16181d}h1{font-size:28px}h2{margin-top:32px;border-bottom:1px solid #ccc;padding-bottom:4px}h3{margin-top:22px}li{margin:4px 0}a{color:#1d4ed8;word-break:break-all}.foot{margin-top:40px;font-size:12px;color:#666}</style></head><body>${html}<p class="foot">Prepared with PlatOpypus Conspiracy · ${new Date().toLocaleDateString()} · Residential addresses are redacted. Strings marked alleged are unverified.</p></body></html>`);
+    const snap = boardSnapshot();
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(S.data.title)}</title><style>body{font:15px/1.55 Georgia,serif;max-width:760px;margin:40px auto;padding:0 20px;color:#16181d}h1{font-size:28px}h2{margin-top:32px;border-bottom:1px solid #ccc;padding-bottom:4px}h3{margin-top:22px}li{margin:4px 0}a{color:#1d4ed8;word-break:break-all}.foot{margin-top:40px;font-size:12px;color:#666}</style></head><body>${snap ? html.replace(/<\/h1>/, `</h1><figure style="margin:0 0 24px">${snap}<figcaption style="font-size:12px;color:#666">The board: solid string documented, dashed reported, dotted alleged.</figcaption></figure>`) : html}<p class="foot">Prepared with PlatOpypus Conspiracy · ${new Date().toLocaleDateString()} · Residential addresses are redacted. Strings marked alleged are unverified.</p></body></html>`);
     w.document.close(); setTimeout(() => w.print(), 400);
 }

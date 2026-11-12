@@ -88,7 +88,7 @@ export function list() {
 export function detail(slug) {
     const dir = casePath(slug); let notes = ''; try { notes = fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').slice(0, 200000); } catch { /* none */ }
     const bd = board(slug);
-    return { ...summary(slug), board: bd, depths: depths(bd), notes, probes: probes(slug), types: NODE_TYPES, kinds: KINDS };
+    return { ...summary(slug), board: bd, depths: depths(bd), notes, probes: probes(slug), asks: asks(slug), types: NODE_TYPES, kinds: KINDS };
 }
 export function setMeta(slug, { title, question, kind, depth, budget }) {
     const f = path.join(casePath(slug), '.platopypus', 'case.json'); const m = readJson(f, {});
@@ -303,6 +303,48 @@ export async function probe(slug, { subject, question, agent = 'claude', web = t
         .finally(() => { p.finished = Date.now(); try { if (exists(dir)) writeJson(f, p); } catch { /* case deleted */ } probeRunning.set(slug, Math.max(0, (probeRunning.get(slug) || 1) - 1)); });
     done.catch(() => {});
     return p;
+}
+
+// ---------- Ask: questions answered from the case file only ----------
+// The case file (cards, strings, sources, theories, questions, notes) goes to one agent with no tools and nothing
+// else, which answers only from it, citing source and string ids, and says what the board cannot answer. Residential
+// addresses are left out. Unlike a probe it sees the case, because the case is the question.
+const ASK_SYSTEM = 'You answer questions about an investigation using ONLY the case file you are given: its cards, strings (connections), sources, theories, open questions and notes. Cite the ids you rely on in square brackets, like [S3] or [l1a2b3c]. Keep fact and allegation apart: strings marked alleged are unverified. If the case file does not answer the question, say so plainly and suggest one to three narrow probes (a subject and a question each) that could. Do not speculate beyond the file and do not add outside knowledge as fact. Never suggest probes that seek private individuals’ personal details: no electoral rolls, people-search sites, home addresses, co-residence or family relationships, unless a public register of interests, a company filing or a court record states them; suggest those official records instead. Be concise.';
+function caseFile(slug) {
+    const d = detail(slug); const b = d.board; const nm = new Map(b.nodes.map(n => [n.id, n]));
+    const name = n => (n ? (n.type === 'address' && n.residential ? '[residential address]' : n.label) : '?');
+    const lines = [`CASE: ${d.title}`, `QUESTION: ${d.question || '(none)'}`, '', 'CARDS:'];
+    for (const n of b.nodes) lines.push(`- ${n.id} [${n.type}] ${name(n)} (${n.status}${n.origin ? ', start' : ''}${n.when ? `, ${n.when}` : ''})${n.note && !(n.type === 'address' && n.residential) ? `: ${n.note}` : ''}${n.sources.length ? ` {${n.sources.join(',')}}` : ''}`);
+    lines.push('', 'STRINGS:');
+    for (const l of b.links) lines.push(`- ${l.id}: ${name(nm.get(l.from))} -> ${l.label} -> ${name(nm.get(l.to))} (${l.strength}${l.when ? `, ${l.when}` : ''}${l.amount !== null && l.amount !== undefined ? `, ${l.amount} ${l.currency || ''}` : ''})${l.sources.length ? ` {${l.sources.join(',')}}` : ''}`);
+    lines.push('', 'SOURCES:');
+    for (const s of b.sources) lines.push(`- ${s.id} (${s.reliability}) ${s.title}${s.publisher ? `, ${s.publisher}` : ''}${s.date ? `, ${s.date}` : ''}${s.quote ? ` | quote: "${s.quote}"` : ''}`);
+    if (b.theories.length) { lines.push('', 'THEORIES:'); for (const t of b.theories) lines.push(`- ${t.id} ${t.text} | ${Object.entries(t.evidence).map(([k, v]) => `${k}:${v}`).join(', ') || 'not weighed'}`); }
+    if (b.questions.length) { lines.push('', 'QUESTIONS:'); for (const q of b.questions) lines.push(`- ${q.id} [${q.status}] ${q.text}${q.answer ? ` | answer: ${q.answer}` : ''}`); }
+    lines.push('', 'NOTES:', d.notes.slice(0, 8000));
+    return lines.join('\n').slice(0, 90000);
+}
+const askDir = slug => path.join(casePath(slug), 'asks');
+const askRunning = new Map();
+export function asks(slug) {
+    try { return fs.readdirSync(askDir(slug)).filter(f => /^a\d+\.json$/.test(f)).map(f => readJson(path.join(askDir(slug), f))).filter(Boolean).sort((a, b) => b.at - a.at); } catch { return []; }
+}
+export async function ask(slug, { question, agent = null }, by = 'phone') {
+    const q = String(question || '').trim().slice(0, 2000); if (q.length < 4) throw httpError(400, 'Ask a question.');
+    if ((askRunning.get(slug) || 0) >= 2) throw httpError(429, 'Two questions are already being answered on this case.');
+    const st = await consult.available('case'); const ready = k => st.agents.find(a => a.key === k && a.installed && a.signedIn);
+    const pick = agent && ready(agent) ? agent : ready('claude') ? 'claude' : ready('cline') ? 'cline' : null;
+    if (!pick) throw httpError(409, 'Neither Claude nor Cline is ready on this box to answer.');
+    const dir = askDir(slug); fs.mkdirSync(dir, { recursive: true }); share(dir);
+    const n = asks(slug).reduce((m, a) => Math.max(m, Number(String(a.id).slice(1)) || 0), 0) + 1;
+    const a = { id: `a${n}`, question: q, agent: pick, status: 'running', answer: '', by, at: Date.now() };
+    const f = path.join(dir, `${a.id}.json`); writeJson(f, a);
+    askRunning.set(slug, (askRunning.get(slug) || 0) + 1);
+    record('activity', 'case-ask', { actor: by, what: `${slug}: ${q.slice(0, 160)}` });
+    consult.zeroTrust({ target: pick, question: `${caseFile(slug)}\n\n---\nQUESTION ABOUT THIS CASE: ${q}`, web: false, title: pick, system: ASK_SYSTEM })
+        .then(t => { a.status = 'done'; a.answer = t; }).catch(e => { a.status = 'failed'; a.answer = e.message; })
+        .finally(() => { a.finished = Date.now(); try { if (exists(dir)) writeJson(f, a); } catch { /* case deleted */ } askRunning.set(slug, Math.max(0, (askRunning.get(slug) || 1) - 1)); });
+    return a;
 }
 
 // ---------- export ----------

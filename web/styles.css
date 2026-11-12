@@ -957,6 +957,33 @@ a.btn { text-decoration: none; color: inherit; }
   .pb-lens button { flex: none; }
 }
 
+/* Money */
+.mn-row { align-items: stretch; }
+.mn-line { line-height: 1.4; }
+.mn-bar { height: 8px; border-radius: 4px; background: var(--hull-2); margin: 8px 0 6px; overflow: hidden; }
+.mn-bar span { display: block; height: 100%; border-radius: 4px; background: #F28C38; }
+.mn-bar span.reported { background: repeating-linear-gradient(90deg, #F28C38 0 10px, rgba(242,140,56,.35) 10px 14px); }
+.mn-bar span.alleged { background: repeating-linear-gradient(90deg, rgba(242,140,56,.7) 0 3px, transparent 3px 7px); }
+.mn-table { margin: 12px 0 4px; border: 1px solid var(--rail); border-radius: 14px; overflow: hidden; font-size: 14px; }
+.mn-th, .mn-tr { display: grid; grid-template-columns: 1fr 96px 96px; gap: 8px; padding: 9px 14px; }
+.mn-th { background: var(--hull); color: var(--mist); font-size: 12.5px; font-weight: 600; }
+.mn-tr { border-top: 1px solid var(--rail); } .mn-tr span:not(:first-child), .mn-th span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Ask */
+.ask-box { display: flex; gap: 8px; align-items: flex-end; }
+.ask-box textarea { flex: 1; min-width: 0; resize: vertical; }
+.ask-ideas { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
+.ask-ideas button { padding: 7px 11px; border-radius: 12px; border: 1px solid var(--rail); background: var(--sea-2); color: var(--mist); font-size: 13px; text-align: left; }
+.ask-ideas button:hover { color: var(--foam); border-color: var(--brass); }
+.ask-item { margin-bottom: 10px; }
+.ask-q { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.ask-a { line-height: 1.55; font-size: 14.5px; margin-bottom: 8px; }
+.ask-cite { color: var(--brass); font-family: var(--mono); font-size: 12.5px; cursor: help; }
+.ask-h { display: block; margin: 10px 0 2px; color: var(--foam); }
+.ask-li { display: block; position: relative; padding-left: 16px; margin: 3px 0; }
+.ask-li::before { content: '•'; position: absolute; left: 3px; color: var(--brass); }
+.ask-li.n::before { content: attr(data-n) '.'; left: 0; font-size: 12.5px; }
+
 /* Timeline */
 .tl { position: relative; padding-left: 4px; }
 .tl-year { font: 700 22px var(--font); margin: 18px 0 6px; color: var(--foam); }

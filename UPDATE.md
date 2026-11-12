@@ -670,6 +670,16 @@ phone's Update button. Mechanism:
 - **2.10.1** — shares on your domain follow the box's address. Every 5 minutes (and `POST /api/zoned/repoint`), each
   direct share's A record (ids in `state/zoned.json`; nothing else in the zone) is set to the address the PlatOpypus
   hostname's own A record points at, so a new Elastic IP needs no manual DNS work. No state changes.
+- **2.11.0**: Conspiracy gains Ask, a Money view and a board snapshot in the report.
+  - **Ask** (`cases.ask`, `POST /api/cases/:slug/asks`, stored in `asks/aN.json`): a question about the case goes to one
+    agent (Claude if signed in, else Cline) with no tools. It gets the case file only: cards, strings, sources, theories,
+    questions and notes, with residential addresses replaced. It must cite the ids it relies on, say when the board
+    cannot answer, and suggest narrow probes, never ones that seek private individuals' details. Two at a time per case.
+  - **Money:** strings with amounts, by currency, ranked and shown as bars styled by strength, with in and out per card
+    and money-like strings that have no amount.
+  - **Board:** strings joining the same two cards fan out, with labels staggered along them. The layout pulls each pair
+    once and pushes overlapping cards apart.
+  - **Printable report:** after the title, a static SVG of the board (homes masked, strings dashed by strength).
 
 ## Release checklist
 

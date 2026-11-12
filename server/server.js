@@ -748,6 +748,7 @@ const server = http.createServer(async (req, res) => {
                 if ((x = cr.match(/^theories\/(T\d{1,3})$/))) { if (method === 'PUT') return send(res, 200, await cases.weigh(cs, x[1], await body())); if (method === 'DELETE') return send(res, 200, await cases.removeTheory(cs, x[1])); }
                 if (cr === 'paths' && method === 'POST') { const b = await body(); return send(res, 200, cases.paths(cs, b.from, b.to)); }
                 if (cr === 'probes' && method === 'POST') return send(res, 201, await cases.probe(cs, await body()));
+                if (cr === 'asks' && method === 'POST') return send(res, 201, await cases.ask(cs, await body()));
                 if ((x = cr.match(/^probes\/(p\d{1,5})$/)) && method === 'GET') return send(res, 200, cases.getProbe(cs, x[1]));
             }
         }
