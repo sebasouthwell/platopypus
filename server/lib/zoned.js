@@ -321,8 +321,42 @@ async function migrateNginxNames() {
     if (moved) { log('zoned', `renamed ${moved} nginx block${moved === 1 ? '' : 's'} to platopypus-zoned-*`); await nginxReloadQuiet(); }
 }
 
+// When the box gets a new public address (a new Elastic IP), the PlatOpypus hostname's own A record moves with it
+// (Terraform), but the share records this box made still point at the old one. Every few minutes, and on demand, each
+// direct share's A record is set to the address PlatOpypus itself is served from. Only records this box created
+// (their ids are in state/zoned.json) are touched.
+let lastRepoint = 0;
+export async function repoint({ force = false } = {}) {
+    if (!force && Date.now() - lastRepoint < 5 * 60_000) return { skipped: true };
+    lastRepoint = Date.now();
+    const items = Object.values(load().items).filter(it => it.mode === 'direct' && it.dnsRecordId && it.zoneId);
+    const out = { checked: 0, moved: [], failed: [] };
+    if (!items.length) return out;
+    const token = cfToken(); if (!token) return { ...out, error: 'No Cloudflare token in the Vault.' };
+    const addrByZone = new Map();
+    for (const it of items) {
+        try {
+            if (!addrByZone.has(it.zoneId)) {
+                // The PlatOpypus hostname may live in another zone than the share: look it up in its own zone.
+                const own = await findZone(token, porthole());
+                addrByZone.set(it.zoneId, await boxAddress(token, own));
+            }
+            const addr = addrByZone.get(it.zoneId);
+            const rec = await cf(token, 'GET', `/zones/${it.zoneId}/dns_records/${it.dnsRecordId}`);
+            out.checked++;
+            if (rec.type === 'A' && rec.content !== addr.ip) {
+                await cf(token, 'PATCH', `/zones/${it.zoneId}/dns_records/${it.dnsRecordId}`, { content: addr.ip });
+                out.moved.push({ hostname: it.hostname, from: rec.content, to: addr.ip });
+                log('zoned', `${it.hostname}: A record ${rec.content} → ${addr.ip} (the box's address changed)`);
+            }
+        } catch (e) { out.failed.push({ hostname: it.hostname, error: e.message }); }
+    }
+    return out;
+}
+
 export async function ensure() {
     await migrateNginxNames().catch(() => {});
+    repoint().catch(e => log('zoned', `re-point: ${e.message}`));
     for (const it of Object.values(load().items)) {
         if (it.mode !== 'tunnel' || (await hasSession(SESSION_PREFIX + it.slug))) continue;
         try { await startSession(it, decrypt(it.token)); log('zoned', `restarted cloudflared for ${it.hostname}`); } catch (e) { log('zoned', `cannot restart ${it.hostname}: ${e.message}`); }

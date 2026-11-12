@@ -522,6 +522,7 @@ const server = http.createServer(async (req, res) => {
         // Share on your own domain (named Cloudflare tunnel + DNS + nginx block)
         if (p === '/api/zoned' && method === 'GET') return send(res, 200, await zoned.list());
         if (p === '/api/zoned/prereq' && method === 'GET') return send(res, 200, await zoned.prereq());
+        if (p === '/api/zoned/repoint' && method === 'POST') return send(res, 200, await zoned.repoint({ force: true }));
         if (p === '/api/zoned' && method === 'POST') { const b = await readJson(req); return send(res, 201, await zoned.create({ port: b.port, hostname: b.hostname, name: b.name })); }
         if ((m = p.match(/^\/api\/zoned\/([a-z0-9-]{1,50})$/)) && method === 'DELETE') { await zoned.remove(m[1]); return send(res, 200, { ok: true }); }
         if (p === '/api/tunnels' && method === 'GET') {

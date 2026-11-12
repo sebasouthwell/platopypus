@@ -667,6 +667,9 @@ phone's Update button. Mechanism:
     Evidence. Theories (a grid of evidence against each theory). Notes. Agent.
   - **App:** `cases` in the Apps catalog installs jq, curl, whois, poppler-utils and python3-requests, and links
     `sleuth` in install.sh. `/Cases` is an agent folder.
+- **2.10.1** — shares on your domain follow the box's address. Every 5 minutes (and `POST /api/zoned/repoint`), each
+  direct share's A record (ids in `state/zoned.json`; nothing else in the zone) is set to the address the PlatOpypus
+  hostname's own A record points at, so a new Elastic IP needs no manual DNS work. No state changes.
 
 ## Release checklist
 
