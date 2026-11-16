@@ -2133,7 +2133,61 @@ function runImageDialog(prefill = '') {
 
 // ---------- files ----------
 
-let showHidden = localStorage.getItem('porthole.hidden') === '1';
+// Hidden items in Files, kept on the box so every device shows the same: 'hide' names starting with a dot, 'some'
+// shows them except the clutter list (.git, .terraform, node_modules…), 'all' shows everything.
+let filePrefs = null;
+async function loadFilePrefs() {
+    if (filePrefs) return filePrefs;
+    try {
+        const p = await api('/api/prefs'); filePrefs = p.files;
+        // The old per-device switch: carry it over once.
+        if (!p.set && localStorage.getItem('porthole.hidden') === '1') { filePrefs = (await api('/api/prefs', { method: 'PUT', body: { files: { hidden: 'all' } } })).files; }
+    } catch { filePrefs = { hidden: localStorage.getItem('porthole.hidden') === '1' ? 'all' : 'hide', clutter: [] }; }
+    return filePrefs;
+}
+function fileVisible(i) {
+    if (i.name === '.platorun' || i.name === '.portholerun') return true;
+    const f = filePrefs || { hidden: 'hide', clutter: [] };
+    if (f.hidden === 'all') return true;
+    if (f.hidden === 'some') return !f.clutter.includes(i.name);
+    return !i.hidden;
+}
+const HIDDEN_LABEL = { hide: 'hidden items: off', some: 'hidden items: on', all: 'showing everything' };
+function filesSettingsDialog() {
+    const f = filePrefs || { hidden: 'hide', clutter: [] };
+    const { panel, close } = openDialog(`<h2>${icon('settings')}Files</h2>
+        <div class="ka-label">Hidden items (names starting with a dot)</div>
+        <div class="fs-modes">${[['hide', 'Hide them', 'The usual view. .platorun files still show.'], ['some', 'Show them, except clutter', 'Dot files and folders show; the names below stay out of the way.'], ['all', 'Show everything', 'Every file and folder, clutter included.']].map(([k, t, sub]) => `<label class="fs-mode ${f.hidden === k ? 'on' : ''}"><input type="radio" name="fs-h" value="${k}" ${f.hidden === k ? 'checked' : ''}><span><b>${t}</b><small>${sub}</small></span></label>`).join('')}</div>
+        <div class="field"><label for="fs-clutter">Clutter (one name per line, or commas)</label><textarea id="fs-clutter" rows="4" spellcheck="false" class="mono">${esc((f.clutter || []).join('\n'))}</textarea></div>
+        <p class="note">Kept on the box, so your phone and computer show the same. Agents see every file whatever this says.</p>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>${icon('check')}Save</button></div>`);
+    $$('input[name="fs-h"]', panel).forEach(r => r.onchange = () => $$('.fs-mode', panel).forEach(l => l.classList.toggle('on', l.contains(r) ? r.checked : false)));
+    $('[data-ok]', panel).onclick = async () => {
+        const hidden = $('input[name="fs-h"]:checked', panel)?.value || 'hide';
+        try { filePrefs = (await api('/api/prefs', { method: 'PUT', body: { files: { hidden, clutter: $('#fs-clutter', panel).value } } })).files; close(); toast('Saved'); loadFiles(state.filesPath).catch(() => {}); } catch (ex) { toast(ex.message, true); }
+    };
+}
+const fmtSize = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${Math.round(b / 1024)} KB` : `${b} bytes`;
+// Save a folder as a zip: say what goes in and what is left out, then download it (made on the fly on the box).
+async function zipDialog(rel, name) {
+    const { panel, close } = openDialog(`<h2>${icon('download')}Save “${esc(name)}” as a zip</h2><div data-zbody><p class="muted">Counting what is in it…</p></div>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok disabled>${icon('download')}Download zip</button></div>`, { size: 'small' });
+    const body = $('[data-zbody]', panel), ok = $('[data-ok]', panel);
+    let all = false;
+    const show = async () => {
+        body.innerHTML = '<p class="muted">Counting what is in it…</p>'; ok.disabled = true;
+        let p; try { p = await api(`/api/files/zip/plan?path=${encodeURIComponent(rel)}${all ? '&all=1' : ''}`); } catch (ex) { body.innerHTML = `<p class="note" style="color:var(--flare)">${esc(ex.message)}</p>`; return; }
+        const skipped = Object.entries(p.skipped);
+        body.innerHTML = `<p class="zip-sum"><b>${p.files}</b> file${p.files === 1 ? '' : 's'} in <b>${p.folders}</b> folder${p.folders === 1 ? '' : 's'} · <b>${fmtSize(p.bytes)}</b> before compression</p>
+            ${skipped.length ? `<p class="note">Left out: ${skipped.map(([n, c]) => `<span class="mono">${esc(n)}</span>${c > 1 ? ` (${c})` : ''}`).join(', ')}.</p>` : ''}${p.links ? `<p class="note">${p.links} link${p.links === 1 ? ' is' : 's are'} skipped (links are not followed).</p>` : ''}
+            <label class="chk-row"><input type="checkbox" data-all ${all ? 'checked' : ''}> Include everything (${p.skipList.map(esc).join(', ')})</label>
+            ${p.tooBig ? '<p class="note" style="color:var(--flare)">Too big for one zip (over 65 535 items or 4 GB). Zip a smaller folder, or use a shell.</p>' : p.bytes > 2147483648 ? '<p class="note" style="color:var(--brass)">That is a big download; it can take a while on a phone.</p>' : ''}`;
+        $('[data-all]', body).onchange = e => { all = e.target.checked; show(); };
+        ok.disabled = !!p.tooBig || (!p.files && !p.folders);
+    };
+    ok.onclick = () => { window.open(`/api/files/zip?path=${encodeURIComponent(rel)}${all ? '&all=1' : ''}`, '_blank', 'noopener'); close(); toast('Zipping on the box; the download starts in a moment'); };
+    show();
+}
 let fsRoot = '/', homeRel = '';
 // Shortcuts above the list: the home folder, and the two folders agents work in.
 $$('#files-places [data-place]').forEach(b => b.addEventListener('click', () => loadFiles(b.dataset.place === 'home' ? homeRel : b.dataset.place).catch(ex => toast(ex.status === 404 ? `There is no ${b.dataset.place} folder yet.` : ex.message, true))));
@@ -2151,12 +2205,13 @@ async function loadFiles(path = null) {
     if (path === null) path = localStorage.getItem('porthole.path');
     if (path === null) { const probe = await api('/api/files?path=.'); path = probe.home || ''; }
     const data = await api(`/api/files?path=${encodeURIComponent(path || '.')}`);
+    await loadFilePrefs();   // before the path bar, which shows the hidden-items mode
     if (data.running?.length || data.items.some(i => i.running?.length)) await loadCreds();
     fsRoot = data.root || '/'; homeRel = data.home || '';
     state.filesPath = data.path; localStorage.setItem('porthole.path', data.path);
     renderCrumbs(data.path);
     $$('#files-places [data-place]').forEach(b => { const p = b.dataset.place === 'home' ? homeRel : b.dataset.place; b.classList.toggle('on', data.path === p || (b.dataset.place !== 'home' && data.path.startsWith(p + '/'))); });
-    const items = data.items.filter(i => !i.hidden || showHidden || i.name === '.platorun' || i.name === '.portholerun');
+    const items = data.items.filter(fileVisible);
     const runFile = data.items.find(i => (i.name === '.platorun' || i.name === '.portholerun') && i.type === 'file');
     $('#files-empty').hidden = items.length > 0;
     $('#files-title').textContent = data.path ? basename(data.path) : (fsRoot === '/' ? 'Root' : 'Files');
@@ -2355,7 +2410,7 @@ function expandRow(rel, name, type, size) {
     return `<div class="expand" data-for="${esc(rel)}">
         ${type === 'dir' ? `<button data-x="open">${icon('folder-open')}Open</button>` : text ? `<button data-x="edit">${icon('pencil')}Edit</button>` : `<button data-x="preview">${icon('eye')}Preview</button>`}
         <button data-x="rename">${icon('edit')}Rename</button>
-        ${type === 'dir' ? `<button data-x="shell">${icon('terminal')}Shell</button>` : `<button data-x="download">${icon('download')}Save</button>`}
+        ${type === 'dir' ? `<button data-x="shell">${icon('terminal')}Shell</button><button data-x="zip">${icon('download')}Save zip</button>` : `<button data-x="download">${icon('download')}Save</button>`}
         <button data-x="claude" class="brass">${icon('claude')}Claude</button>
         ${type === 'dir' && parentOf(rel) === projectsRel() ? `<button data-x="upgrade">${icon('rocket')}Upgrade</button>` : ''}
         <button data-x="trash" class="flare">${icon('trash')}Trash</button>
@@ -2370,6 +2425,7 @@ function bindExpand() {
             if (x === 'edit') return openEditor(rel, name);
             if (x === 'preview') return previewFile(rel, name);
             if (x === 'download') return window.open(`/api/files/download?path=${encodeURIComponent(rel)}`, '_blank', 'noopener');
+            if (x === 'zip') return zipDialog(rel, name);
             if (x === 'rename') return renameDialog(rel, name);
             if (x === 'upgrade') return upgradeRepoDialog(rel, name);
             if (x === 'shell') return newShellDialog(rel, 'shell');
@@ -2387,10 +2443,10 @@ function renderCrumbs(path) {
     const crumbs = [`<button data-path="" class="${parts.length ? '' : 'current'}">${rootLabel()}</button>`];
     if (homeRel && path !== homeRel && !path.startsWith(homeRel + '/')) crumbs.push(`<button data-path="${esc(homeRel)}">~ home</button>`);
     parts.forEach((p, i) => { acc = join(acc, p); crumbs.push(`<span class="sep">›</span><button data-path="${esc(acc)}" class="${i === parts.length - 1 ? 'current' : ''}">${esc(p)}</button>`); });
-    crumbs.push(`<span class="sep">·</span><button data-hidden>${showHidden ? 'hide dotfiles' : 'dotfiles'}</button>`);
+    crumbs.push(`<span class="sep">·</span><button data-hidden>${HIDDEN_LABEL[filePrefs?.hidden || 'hide']}</button>`);
     const nav = $('#crumbs'); nav.innerHTML = crumbs.join('');
     $$('button[data-path]', nav).forEach(b => b.onclick = () => loadFiles(b.dataset.path).catch(ex => toast(ex.message, true)));
-    $('[data-hidden]', nav).onclick = () => { showHidden = !showHidden; localStorage.setItem('porthole.hidden', showHidden ? '1' : '0'); loadFiles(state.filesPath); };
+    $('[data-hidden]', nav).onclick = () => filesSettingsDialog();
     nav.scrollLeft = nav.scrollWidth;
 }
 function renameDialog(rel, name) {
@@ -3710,6 +3766,7 @@ $('#topic-back').addEventListener('click', () => openResearch());
 $('#research-back').addEventListener('click', () => go('apps'));
 $('#lab-back').addEventListener('click', () => go('apps'));
 $('#cases-back').addEventListener('click', () => go('apps'));
+$('#files-settings').addEventListener('click', async () => { await loadFilePrefs(); filesSettingsDialog(); });
 $('#case-back').addEventListener('click', () => openCases());
 $('#case-refresh').addEventListener('click', () => casesUI().then(m => m.loadCase()).catch(e => toast(e.message, true)));
 $('#eng-back').addEventListener('click', () => openLab());

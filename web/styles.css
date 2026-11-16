@@ -830,6 +830,18 @@ a.btn { text-decoration: none; color: inherit; }
 .cline-card { margin-top: 10px; } .cl-row { display: flex; gap: 8px; } .cl-row select { flex: 1; min-width: 0; }
 .consult-wrap { margin-bottom: 18px; } .consult-row { cursor: pointer; }
 .cl-row input { flex: 1; min-width: 0; }
+/* Files settings and zip */
+/* Choice and checkbox labels inside dialogs read as sentences, not as small field captions. */
+.dialog-panel label.fs-mode, .dialog-panel label.chk-row { display: flex; font-size: 14px; color: var(--foam); text-transform: none; letter-spacing: 0; font-weight: 400; margin: 10px 0; }
+.dialog-panel label.fs-mode { margin: 0; }
+.fs-modes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.fs-mode { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--rail); border-radius: 14px; background: var(--sea-2); cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--foam); }
+.fs-mode.on { border-color: var(--brass); background: rgba(240,184,64,.08); }
+.fs-mode input { margin-top: 3px; accent-color: var(--brass); width: 18px; height: 18px; flex: none; }
+.fs-mode b { display: block; font-size: 15px; } .fs-mode small { display: block; color: var(--mist); font-size: 13px; margin-top: 2px; line-height: 1.4; }
+.zip-sum { font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
+#tab-files .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
 /* Schedules */
 .sched-row { padding: 0 14px 0 0; }
 .sched-open { display: flex; align-items: center; gap: 12px; padding: 12px 0 12px 14px; flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: inherit; font: inherit; }

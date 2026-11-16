@@ -45,6 +45,8 @@ import * as clineLib from './lib/cline.js';
 import * as consult from './lib/consult.js';
 import * as schedules from './lib/schedules.js';
 import * as cases from './lib/cases.js';
+import * as zipstream from './lib/zipstream.js';
+import * as prefs from './lib/prefs.js';
 import { spawn as spawnProc } from 'node:child_process';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
@@ -469,6 +471,24 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Cache-Control': 'private, max-age=300', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'" });
             return fs.createReadStream(abs).pipe(res);
         }
+        // Save a folder as a zip: first what it would hold (and what is skipped), then the zip itself, streamed.
+        if ((p === '/api/files/zip/plan' || p === '/api/files/zip') && method === 'GET') {
+            const rel = url.searchParams.get('path') || '';
+            const { abs, stat } = await files.stat(rel);
+            if (!stat.isDirectory()) return send(res, 400, { error: 'Not a folder.' });
+            const skip = url.searchParams.get('all') === '1' ? [] : zipstream.DEFAULT_SKIP;
+            const plan = await zipstream.plan(abs, { skip });
+            if (p === '/api/files/zip/plan') return send(res, 200, { files: plan.files, folders: plan.folders, bytes: plan.bytes, links: plan.links, skipped: plan.skipped, tooBig: plan.tooBig, skipList: zipstream.DEFAULT_SKIP });
+            if (plan.tooBig) return send(res, 413, { error: 'Too big for one zip (over 65 535 items or 4 GB). Zip a smaller folder, or use a shell.' });
+            const name = `${path.basename(abs) || 'root'}.zip`;
+            res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+            audit.record('activity', 'files-zip', { actor: 'phone', via: 'Files', what: `${rel || '/'} as ${name}: ${plan.files} files, ${Math.round(plan.bytes / 1048576)} MB${skip.length ? '' : ' (everything)'}`, cwd: abs });
+            try { await zipstream.write(abs, plan, res); res.end(); } catch (e) { log('files', `zip of ${rel} stopped: ${e.message}`); res.destroy(); }
+            return;
+        }
+        // Interface preferences (Files: hidden items), the same on every device.
+        if (p === '/api/prefs' && method === 'GET') return send(res, 200, prefs.get());
+        if (p === '/api/prefs' && method === 'PUT') return send(res, 200, prefs.set(await readJson(req, 8192)));
         if (p === '/api/files/download' && method === 'GET') {
             const { abs, stat } = await files.stat(url.searchParams.get('path') || '');
             if (!stat.isFile()) return send(res, 400, { error: 'Not a file.' });

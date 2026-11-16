@@ -680,6 +680,17 @@ phone's Update button. Mechanism:
   - **Board:** strings joining the same two cards fan out, with labels staggered along them. The layout pulls each pair
     once and pushes overlapping cards apart.
   - **Printable report:** after the title, a static SVG of the board (homes masked, strings dashed by strength).
+- **2.12.0**: Save a folder as a zip, and a setting for hidden items in Files.
+  - **Save zip:** a folder's options in Files have Save zip. `GET /api/files/zip/plan?path=` counts files, folders, size,
+    skipped names and links. `GET /api/files/zip?path=[&all=1]` streams the zip (`server/lib/zipstream.js`: deflate,
+    UTF-8 names, data descriptors, no temporary file; no zip64, so at most 65 535 entries and 4 GB, refused with 413).
+    `node_modules`, `.git`, `.platopypus`, `__pycache__`, `.venv` and `.terraform` are skipped unless you include
+    everything. Symlinks are never followed. Each zip is recorded in the audit log (`files-zip`). Not available to agent
+    shells.
+  - **Hidden items:** `state/prefs.json` (new, created on first save) is served by `GET` and `PUT /api/prefs`. The
+    `files.hidden` mode is hide (dot names hidden, the default), some (shown, except the `files.clutter` names) or all.
+    It is set from the gear on the Files page or the path bar's hidden-items link, and every device follows it. The old
+    per-device dotfiles switch is carried over once.
 
 ## Release checklist
 
