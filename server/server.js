@@ -47,6 +47,7 @@ import * as schedules from './lib/schedules.js';
 import * as cases from './lib/cases.js';
 import * as zipstream from './lib/zipstream.js';
 import * as prefs from './lib/prefs.js';
+import * as transfers from './lib/transfers.js';
 import { spawn as spawnProc } from 'node:child_process';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
@@ -226,7 +227,7 @@ const server = http.createServer(async (req, res) => {
             }
         }
         if (method === 'GET' && vendor[p]) return serveFile(res, vendor[p], true);
-        if (method === 'GET' && !p.startsWith('/api/')) {
+        if (method === 'GET' && !p.startsWith('/api/') && !p.startsWith('/dl/')) {   // /dl/: transfer links, further down
             if (p === '/' || p === '/index.html') return serveIndex(res);
             const file = path.normalize(path.join(webDir, p));
             if (!file.startsWith(webDir)) return send(res, 404, 'Not found');
@@ -295,6 +296,33 @@ const server = http.createServer(async (req, res) => {
         }
         if (p === '/api/logout' && method === 'POST') {
             return send(res, 200, { ok: true }, { 'Set-Cookie': auth.logout(req) });
+        }
+
+        // Transfer links: /dl/<token>/<name> fetches one file, or a folder as a zip, without signing in. The token is the
+        // credential: random, 2 minutes, one download by default. Wrong tokens count towards the sign-in lockout.
+        if (p.startsWith('/dl/') && method === 'GET') {
+            const plain = (status, text) => { res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders() }); res.end(text + '\n'); };
+            if (auth.lockedOut(req)) return plain(429, 'Too many attempts. Try again in a few minutes.');
+            const t = transfers.take(p.split('/')[2] || '');
+            if (!t) { auth.recordFailure(req, 'transfer link'); return plain(404, 'No such transfer link.'); }
+            if (t.gone) return plain(410, t.gone);
+            const { link } = t; const who = String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '?'); const ua = String(req.headers['user-agent'] || '').slice(0, 80);
+            audit.record('activity', 'transfer-used', { actor: `transfer link ${link.id}`, via: 'transfer link', what: `${link.rel || '/'} as ${link.name} to ${who}${ua ? ` (${ua})` : ''}`, cwd: link.abs });
+            try {
+                const st = await fs.promises.stat(link.abs).catch(() => null);
+                if (!st || (link.kind === 'zip') !== st.isDirectory()) return plain(410, 'What this link pointed to is no longer there.');
+                const head = { 'Content-Disposition': `attachment; filename="${link.name}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+                if (link.kind === 'file') {
+                    res.writeHead(200, { ...head, 'Content-Type': 'application/octet-stream', 'Content-Length': st.size });
+                    await new Promise(ok => { const rs = fs.createReadStream(link.abs); rs.on('error', () => { res.destroy(); ok(); }); res.on('close', ok); rs.pipe(res); });
+                } else {
+                    const plan = await zipstream.plan(link.abs, { skip: link.all ? [] : zipstream.DEFAULT_SKIP });
+                    if (plan.tooBig) return plain(413, 'Too big for one zip (over 65 535 items or 4 GB).');
+                    res.writeHead(200, { ...head, 'Content-Type': 'application/zip' });
+                    try { await zipstream.write(link.abs, plan, res); res.end(); } catch (e) { log('files', `transfer ${link.id} stopped: ${e.message}`); res.destroy(); }
+                }
+            } finally { t.done(); }
+            return;
         }
 
         // Everything below requires a session.
@@ -486,6 +514,18 @@ const server = http.createServer(async (req, res) => {
             try { await zipstream.write(abs, plan, res); res.end(); } catch (e) { log('files', `zip of ${rel} stopped: ${e.message}`); res.destroy(); }
             return;
         }
+        // Transfer links (see /dl above): made from the phone only; listed and revocable while they last.
+        if (p === '/api/files/transfer' && method === 'POST') {
+            if (String(session.how || '').includes('local token')) return send(res, 403, { error: 'Transfer links are made from the phone.' });
+            const b = await readJson(req, 4096); const rel = String(b.path || '');
+            const { abs, stat } = await files.stat(rel);
+            const kind = stat.isDirectory() ? 'zip' : stat.isFile() ? 'file' : null; if (!kind) return send(res, 400, { error: 'Only a file or a folder can be sent.' });
+            const l = transfers.create({ rel, abs, kind, all: !!b.all, once: b.once !== false });
+            audit.record('activity', 'transfer-created', { actor: 'phone', via: 'Files', what: `${rel || '/'} as ${l.name}: ${l.once ? 'one download' : 'any number of downloads'}, 2 minutes (link ${l.id})`, cwd: abs });
+            return send(res, 201, { ...l, path: `/dl/${l.token}/${encodeURIComponent(l.name)}`, token: undefined });
+        }
+        if (p === '/api/files/transfers' && method === 'GET') return send(res, 200, { links: transfers.list() });
+        { const tm = p.match(/^\/api\/files\/transfers\/([0-9a-f]{10})$/); if (tm && method === 'DELETE') { const r = transfers.revoke(tm[1]); audit.record('activity', 'transfer-revoked', { actor: 'phone', via: 'Files', what: `link ${tm[1]}` }); return send(res, 200, r); } }
         // Interface preferences (Files: hidden items), the same on every device.
         if (p === '/api/prefs' && method === 'GET') return send(res, 200, prefs.get());
         if (p === '/api/prefs' && method === 'PUT') return send(res, 200, prefs.set(await readJson(req, 8192)));

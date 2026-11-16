@@ -691,6 +691,14 @@ phone's Update button. Mechanism:
     `files.hidden` mode is hide (dot names hidden, the default), some (shown, except the `files.clutter` names) or all.
     It is set from the gear on the Files page or the path bar's hidden-items link, and every device follows it. The old
     per-device dotfiles switch is carried over once.
+- **2.13.0**: Transfer links. In Files, a file's or folder's Transfer option makes a link that another machine can fetch
+  without signing in: `/dl/<token>/<name>`, with a 192-bit token kept in memory only. It expires 2 minutes after creation
+  (a download already running finishes) and allows one download unless unticked. A folder comes as a zip with the same
+  skip rules as Save zip. Wrong tokens count towards the sign-in lockout. `/dl/` is excluded from static file serving and
+  is answered before the session check. Making a link takes a phone session (`POST /api/files/transfer`, list
+  `GET /api/files/transfers`, revoke `DELETE /api/files/transfers/:id`). The dialog shows ready commands for curl, wget,
+  PowerShell (`Invoke-WebRequest`), Windows `curl.exe` and unzip, with a countdown. Audit kinds `transfer-created`,
+  `transfer-used` (with address and user agent) and `transfer-revoked`.
 
 ## Release checklist
 

@@ -2168,6 +2168,42 @@ function filesSettingsDialog() {
     };
 }
 const fmtSize = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${Math.round(b / 1024)} KB` : `${b} bytes`;
+// Transfer link: fetch a file (or a folder as a zip) on another machine with curl, wget or PowerShell, no sign-in.
+// The link itself is the credential: 2 minutes, one download unless you untick it. The commands are ready to paste.
+let transferTimer = null;
+function transferDialog(rel, name, isDir) {
+    const { panel, close } = openDialog(`<h2>${icon('link')}Transfer “${esc(name)}”</h2>
+        <p class="muted">Makes a link you can fetch from another computer with curl, wget or PowerShell, without signing in. It works for 2 minutes${isDir ? ', and the folder comes as a zip' : ''}.</p>
+        ${isDir ? `<label class="chk-row"><input type="checkbox" data-all> Include everything (node_modules, .git, .terraform…)</label>` : ''}
+        <label class="chk-row"><input type="checkbox" data-once checked> One download only</label>
+        <p class="note">Anyone who has the link can download it until it expires or is used: treat it like a password. Making it and using it are in the audit log.</p>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>${icon('link')}Create link</button></div>`, { size: 'small' });
+    $('[data-ok]', panel).onclick = async () => {
+        let r; try { r = await api('/api/files/transfer', { method: 'POST', body: { path: rel, all: !!$('[data-all]', panel)?.checked, once: $('[data-once]', panel).checked } }); } catch (ex) { return toast(ex.message, true); }
+        close(); transferReady(r);
+    };
+}
+function transferReady(r) {
+    const url = location.origin + r.path, n = r.name, zip = r.kind === 'zip', base = n.replace(/\.zip$/, '');
+    const cmds = [
+        ['curl (macOS, Linux)', `curl -fL -o '${n}' '${url}'`],
+        ['wget', `wget -O '${n}' '${url}'`],
+        ['PowerShell (Windows)', `Invoke-WebRequest -UseBasicParsing -Uri '${url}' -OutFile '${n}'`],
+        ['Command Prompt (Windows 10 and later)', `curl.exe -fL -o "${n}" "${url}"`],
+        ...(zip ? [['Unzip (macOS, Linux)', `unzip '${n}' -d '${base}'`], ['Unzip (PowerShell)', `Expand-Archive '${n}' -DestinationPath '${base}'`]] : []),
+        ['Just the link', url],
+    ];
+    const { panel, close } = openDialog(`<h2>${icon('link')}${esc(n)}</h2>
+        <p class="tr-left" aria-live="polite"></p>
+        <div class="tr-cmds">${cmds.map(([l, c], i) => `<div class="tr-cmd"><div class="tr-label">${esc(l)}</div><div class="tr-row"><code>${esc(c)}</code><button class="icon-btn" data-c="${i}" aria-label="Copy ${esc(l)}">${icon('copy')}</button></div></div>`).join('')}</div>
+        <p class="note">${r.once ? 'It stops working after one download. ' : ''}Run the command within the time; a download that has started finishes even after that.</p>
+        <div class="buttons"><button class="danger" data-revoke>${icon('x')}Revoke now</button><button class="primary" data-close>Done</button></div>`);
+    $$('[data-c]', panel).forEach(b => b.onclick = () => copyText(cmds[Number(b.dataset.c)][1], 'Command copied'));
+    const left = $('.tr-left', panel);
+    const tick = () => { const s = Math.max(0, Math.round((r.expires - Date.now()) / 1000)); if (!left.isConnected) return clearInterval(transferTimer); left.textContent = s ? `Works for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} more` : 'Expired: make a new link if you still need it.'; left.classList.toggle('gone', !s); if (!s) clearInterval(transferTimer); };
+    clearInterval(transferTimer); tick(); transferTimer = setInterval(tick, 1000);
+    $('[data-revoke]', panel).onclick = async () => { try { await api(`/api/files/transfers/${r.id}`, { method: 'DELETE' }); toast('Link revoked'); } catch (ex) { toast(ex.message, true); } clearInterval(transferTimer); close(); };
+}
 // Save a folder as a zip: say what goes in and what is left out, then download it (made on the fly on the box).
 async function zipDialog(rel, name) {
     const { panel, close } = openDialog(`<h2>${icon('download')}Save “${esc(name)}” as a zip</h2><div data-zbody><p class="muted">Counting what is in it…</p></div>
@@ -2411,6 +2447,7 @@ function expandRow(rel, name, type, size) {
         ${type === 'dir' ? `<button data-x="open">${icon('folder-open')}Open</button>` : text ? `<button data-x="edit">${icon('pencil')}Edit</button>` : `<button data-x="preview">${icon('eye')}Preview</button>`}
         <button data-x="rename">${icon('edit')}Rename</button>
         ${type === 'dir' ? `<button data-x="shell">${icon('terminal')}Shell</button><button data-x="zip">${icon('download')}Save zip</button>` : `<button data-x="download">${icon('download')}Save</button>`}
+        <button data-x="transfer">${icon('link')}Transfer</button>
         <button data-x="claude" class="brass">${icon('claude')}Claude</button>
         ${type === 'dir' && parentOf(rel) === projectsRel() ? `<button data-x="upgrade">${icon('rocket')}Upgrade</button>` : ''}
         <button data-x="trash" class="flare">${icon('trash')}Trash</button>
@@ -2426,6 +2463,7 @@ function bindExpand() {
             if (x === 'preview') return previewFile(rel, name);
             if (x === 'download') return window.open(`/api/files/download?path=${encodeURIComponent(rel)}`, '_blank', 'noopener');
             if (x === 'zip') return zipDialog(rel, name);
+            if (x === 'transfer') return transferDialog(rel, name, ex.previousElementSibling?.dataset.type === 'dir');
             if (x === 'rename') return renameDialog(rel, name);
             if (x === 'upgrade') return upgradeRepoDialog(rel, name);
             if (x === 'shell') return newShellDialog(rel, 'shell');
