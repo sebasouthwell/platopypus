@@ -71,7 +71,7 @@ export async function loadCase({ quiet = false } = {}) {
     $('#case-title').textContent = d.title;
     const running = d.probes.filter(p => p.status === 'running').length + (d.asks || []).filter(a => a.status === 'running').length;
     const moneyN = d.board.links.filter(l => l.amount !== null && l.amount !== undefined).length;
-    const tabs = [['briefing', 'Briefing'], ['board', `Board<em>${d.nodes}</em>`], ['timeline', 'Timeline'], ['money', `Money${moneyN ? `<em>${moneyN}</em>` : ''}`], ['evidence', `Evidence${d.sources ? `<em>${d.sources}</em>` : ''}`], ['theories', `Theories${d.board.theories.length ? `<em>${d.board.theories.length}</em>` : ''}`], ['ask', 'Ask'], ['notes', 'Notes'], ['agent', `Agent${running ? '<em>●</em>' : ''}`]];
+    const tabs = [['briefing', 'Briefing'], ['board', `Board<em>${d.nodes}</em>`], ['timeline', 'Timeline'], ['money', `Money${moneyN ? `<em>${moneyN}</em>` : ''}`], ['evidence', `Evidence${d.sources ? `<em>${d.sources}</em>` : ''}`], ['theories', `Theories${d.board.theories.length ? `<em>${d.board.theories.length}</em>` : ''}`], ['ask', 'Ask'], ['notes', 'Notes'], ['log', 'Log'], ['agent', `Agent${running ? '<em>●</em>' : ''}`]];
     $('#case-seg').innerHTML = tabs.map(([k, l]) => `<button data-ct="${k}" class="${S.tab === k ? 'on' : ''}" role="tab" aria-selected="${S.tab === k}">${l}</button>`).join('');
     $$('#case-seg [data-ct]').forEach(b => b.onclick = () => { S.tab = b.dataset.ct; loadCase().catch(x => C.toast(x.message, true)); });
     document.getElementById('page-case').classList.toggle('case-boardmode', S.tab === 'board');
@@ -79,7 +79,7 @@ export async function loadCase({ quiet = false } = {}) {
     // A quiet refresh of the board keeps the view and only redraws what changed.
     if (quiet && S.tab === 'board' && $('.pb-wrap', body)) drawBoard(body, true);
     else if (quiet && (S.tab === 'notes' || S.tab === 'theories' || (S.tab === 'ask' && document.activeElement?.id === 'ask-q' && document.activeElement.value))) { /* do not disturb typing */ }
-    else ({ briefing: renderBriefing, board: renderBoard, timeline: renderTimeline, money: renderMoney, evidence: renderEvidence, theories: renderTheories, ask: renderAsk, notes: renderNotes, agent: renderAgent })[S.tab](body);
+    else ({ briefing: renderBriefing, board: renderBoard, timeline: renderTimeline, money: renderMoney, evidence: renderEvidence, theories: renderTheories, ask: renderAsk, notes: renderNotes, log: renderLog, agent: renderAgent })[S.tab](body);
     clearTimeout(S.poll);
     const agentHere = (C.state.shells || []).some(s => String(s.cwd || '').includes(`/Cases/${S.slug}`));
     if (running || agentHere) S.poll = setTimeout(() => { if (!document.getElementById('page-case').hidden && S.slug === d.slug) loadCase({ quiet: true }).catch(() => {}); }, running ? 4000 : 8000);
@@ -133,14 +133,24 @@ function editMeta() {
         <div class="field"><label for="cm-q">The big question</label><textarea id="cm-q" rows="3" maxlength="600">${esc(d.question)}</textarea></div>
         <div class="sc-two"><div class="field"><label for="cm-d">Depth (links from the start)</label><input id="cm-d" type="number" min="1" max="8" value="${d.depth}"></div><div class="field"><label for="cm-b">Probe budget</label><input id="cm-b" type="number" min="0" max="1000" value="${d.budget}"></div></div>
         <p class="note">Agents stay within the depth and stop asking new probes when the budget is used (${d.probes.length} so far).</p>
+        <div class="ka-label">Who answers</div>
+        <div class="sc-two"><div class="field"><label for="cm-pa">Probes</label><select id="cm-pa">${agentOptions(d.probeAgent, false)}</select></div><div class="field"><label for="cm-pm">Probe model</label><input id="cm-pm" type="text" list="cm-models" spellcheck="false" autocomplete="off" placeholder="the agent's default" value="${esc(d.probeModel || '')}"></div></div>
+        <div class="sc-two"><div class="field"><label for="cm-aa">Ask</label><select id="cm-aa">${agentOptions(d.askAgent, true)}</select></div><div class="field"><label for="cm-am">Ask model</label><input id="cm-am" type="text" list="cm-models" spellcheck="false" autocomplete="off" placeholder="the agent's default" value="${esc(d.askModel || '')}"></div></div>
+        <datalist id="cm-models"></datalist>
+        <p class="note">Any agent signed in on the box, each confined the same way: an empty home with only its sign-in, the one question, nothing else. Claude, Codex and Gemini can search the web. Cline runs on your Ollama server; as a probe it has no web, so it suits reasoning over what other probes found. For Cline, any model your server has. For Codex on your Ollama server instead of OpenAI, write the model as oss:<name>, for example oss:qwen3-coder-uncensored-32k:latest.</p>
         <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>${icon('check')}Save</button></div>`);
-    $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/cases/${enc}`, { method: 'PUT', body: { title: $('#cm-t', panel).value, question: $('#cm-q', panel).value, depth: $('#cm-d', panel).value, budget: $('#cm-b', panel).value } }); close(); loadCase(); } catch (ex) { C.toast(ex.message, true); } };
+    // Model suggestions: the Ollama server's models (for Cline); other agents take any name they accept.
+    C.api('/api/agents/cline/models').then(r => { $('#cm-models', panel).innerHTML = (r.models || []).map(m => `<option value="${esc(m.name)}">`).join(''); }).catch(() => {});
+    $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/cases/${enc}`, { method: 'PUT', body: { title: $('#cm-t', panel).value, question: $('#cm-q', panel).value, depth: $('#cm-d', panel).value, budget: $('#cm-b', panel).value, probeAgent: $('#cm-pa', panel).value, probeModel: $('#cm-pm', panel).value, askAgent: $('#cm-aa', panel).value, askModel: $('#cm-am', panel).value } }); close(); loadCase(); } catch (ex) { C.toast(ex.message, true); } };
 }
+const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Gemini (Antigravity)', cline: 'Cline (your Ollama)' };
+function agentOptions(cur, auto) { return (auto ? `<option value="" ${!cur ? 'selected' : ''}>Automatic (first signed in)</option>` : '') + Object.entries(AGENT_NAMES).map(([k, v]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${v}</option>`).join(''); }
+const agentLabel = (k, m) => `${AGENT_NAMES[k] || k}${m ? ` · ${m}` : ''}`;
 function probeDialog(pid) {
     const { esc, icon, $, $$ } = C; const p = S.data.probes.find(x => x.id === pid); const enc = encodeURIComponent(S.slug); if (!p) return;
     const urls = [...new Set((p.answer || '').match(/https?:\/\/[^\s)\]>"'`]+/g) || [])].map(u => u.replace(/[.,;:]+$/, '')).filter(u => !S.data.board.sources.some(s => s.url === u)).slice(0, 25);
     const { panel, close } = C.openDialog(`<h2>${icon('search')}${esc(p.subject)}</h2>
-        <p class="note">${esc(p.question)}<br>${p.agent === 'claude' ? 'Claude' : 'Cline'}${p.web ? ' with web search' : ''}, zero trust: it saw only this subject and question. ${p.status === 'running' ? 'Still running.' : ''}</p>
+        <p class="note">${esc(p.question)}<br>${esc(agentLabel(p.agent, p.model))}${p.web ? ' with web search' : ''}, zero trust: it saw only this subject and question. ${p.status === 'running' ? 'Still running.' : ''}</p>
         <pre class="sc-log cs-answer">${esc(p.answer || '…')}</pre>
         ${urls.length ? `<div class="ka-label">Add its links as sources</div><div class="cs-urls">${urls.map((u, i) => `<label class="chk-row"><input type="checkbox" data-u="${i}" checked> <span class="mono">${esc(u)}</span></label>`).join('')}</div>
             <div class="field"><label for="pr-rel">Reliability</label><select id="pr-rel"><option value="other">Other (check them)</option><option value="reputable">Reputable reporting</option><option value="primary">Primary records</option></select></div>` : ''}
@@ -525,12 +535,37 @@ function renderAsk(body) {
     body.innerHTML = `<p class="note">Ask about the case. The answer comes only from what is on the board, the sources, theories and notes, with the ids it relies on, and says when the board cannot answer. Homes stay masked. To find something new, send a probe from a card.</p>
         <div class="ask-box"><textarea id="ask-q" rows="2" maxlength="2000" placeholder="Who connects the councillor to Northwind, and how solid is each link?"></textarea><button class="btn pri" data-ask>${icon('send')}Ask</button></div>
         <div class="ask-ideas">${ASK_IDEAS.map((q, i) => `<button data-idea="${i}">${esc(q)}</button>`).join('')}</div>
-        ${list.map(a => `<div class="card ask-item"><div class="ask-q"><span class="cs-pst ${a.status}"></span>${esc(a.question)}</div>${a.status === 'running' ? '<p class="muted">Reading the case file…</p>' : `<div class="ask-a">${cite(a.answer).replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>').replace(/<br>(<span class="ask-li)/g, '$1').replace(/(<\/span>)<br>/g, '$1')}</div>`}<div class="sub">${a.agent === 'claude' ? 'Claude' : 'Cline'} · ${new Date(a.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div></div>`).join('') || ''}`;
+        ${list.map(a => `<div class="card ask-item"><div class="ask-q"><span class="cs-pst ${a.status}"></span>${esc(a.question)}</div>${a.status === 'running' ? '<p class="muted">Reading the case file…</p>' : `<div class="ask-a">${cite(a.answer).replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>').replace(/<br>(<span class="ask-li)/g, '$1').replace(/(<\/span>)<br>/g, '$1')}</div>`}<div class="sub">${esc(agentLabel(a.agent, a.model))} · ${new Date(a.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div></div>`).join('') || ''}`;
     const go = async q => { if (!q.trim()) return; try { await C.api(`/api/cases/${enc}/asks`, { method: 'POST', body: { question: q } }); loadCase(); } catch (ex) { C.toast(ex.message, true); } };
     $('[data-ask]', body).onclick = () => go($('#ask-q', body).value);
     $('#ask-q', body).onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(e.target.value); };
     $$('[data-idea]', body).forEach(x => x.onclick = () => go(ASK_IDEAS[Number(x.dataset.idea)]));
     $$('.ask-cite', body).forEach(x => { x.title = x.textContent.slice(1, -1).split(/,\s*/).map(id => { const s = srcById(id); if (s) return `${id}: ${s.title}`; const l = S.data.board.links.find(y => y.id === id); return l ? `${nodeName(nodeById(l.from))} → ${l.label} → ${nodeName(nodeById(l.to))}` : id; }).join('\n'); });
+}
+
+// ---------- Log: oversight of what agents and probes did, and how long it took ----------
+const LOG_KIND = { 'agent-start': ['Agent', 'brass'], 'agent-end': ['Agent', 'brass'], 'probe-start': ['Probe', 'dock'], 'probe-end': ['Probe', 'kelp'], 'probe-fail': ['Probe', 'flare'], 'ask-start': ['Ask', 'dock'], 'ask-end': ['Ask', 'kelp'], 'ask-fail': ['Ask', 'flare'], source: ['Source', 'mist'], pin: ['Card', 'mist'], link: ['String', 'mist'], question: ['Question', 'mist'], theory: ['Theory', 'mist'], note: ['Note', 'mist'], case: ['Case', 'brass'] };
+const dur = ms => ms < 1000 ? `${ms} ms` : ms < 60000 ? `${Math.round(ms / 1000)} s` : ms < 3600000 ? `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s` : `${Math.floor(ms / 3600000)} h ${Math.round((ms % 3600000) / 60000)} min`;
+async function renderLog(body) {
+    const { esc, $$ } = C; const enc = encodeURIComponent(S.slug);
+    let L; try { L = await C.api(`/api/cases/${enc}/log`); } catch (ex) { body.innerHTML = `<p class="empty">${esc(ex.message)}</p>`; return; }
+    const f = S.logFilter || 'all';
+    const ev = L.events.filter(e => f === 'all' || (f === 'probes' && /^probe/.test(e.kind)) || (f === 'agents' && /^agent/.test(e.kind)) || (f === 'fails' && /-fail$/.test(e.kind)) || (f === 'board' && ['source', 'pin', 'link', 'question', 'theory', 'note'].includes(e.kind)));
+    const probeEnds = L.events.filter(e => e.kind === 'probe-end' || e.kind === 'probe-fail');
+    const agentEnds = L.events.filter(e => e.kind === 'agent-end');
+    const fails = L.events.filter(e => /-fail$/.test(e.kind)).length;
+    const who = b => String(b || '').replace(/^shell "(.*)"$/, 'agent $1');
+    const day = t => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    let lastDay = '';
+    body.innerHTML = `<p class="note">For you: what happened on this case, who did it and how long it took. Agents do not read this.</p>
+        <div class="lg-totals"><div><b>${probeEnds.length}</b><span>probes back · ${dur(probeEnds.reduce((s, e) => s + (e.ms || 0), 0))} in all</span></div><div><b>${agentEnds.length + L.agents.length}</b><span>agent runs · ${dur(agentEnds.reduce((s, e) => s + (e.ms || 0), 0) + L.agents.reduce((s, a) => s + (Date.now() - a.at), 0))}</span></div><div class="${fails ? 'bad' : ''}"><b>${fails}</b><span>failed</span></div></div>
+        ${L.agents.length || L.probesRunning.length ? `<h2 class="section">Running now</h2><div class="list">${L.agents.map(a => `<div class="row"><span class="dotlive" style="margin:0 6px"></span><div class="main"><div class="title">${esc(a.label)}</div><div class="sub">shell ${esc(a.name)} · <span class="lg-timer" data-since="${a.at}"></span></div></div></div>`).join('')}${L.probesRunning.map(p => `<div class="row"><span class="dotlive" style="margin:0 6px"></span><div class="main"><div class="title">Probe ${esc(p.id)} on ${esc(p.subject)}</div><div class="sub">${esc(agentLabel(p.agent, p.model))} · <span class="lg-timer" data-since="${p.at}"></span></div></div></div>`).join('')}</div>` : ''}
+        <div class="pb-lens lg-filter">${[['all', 'All'], ['probes', 'Probes'], ['agents', 'Agents'], ['board', 'Board changes'], ['fails', 'Failures']].map(([k, l]) => `<button data-lf="${k}" class="${f === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+        ${ev.length ? `<div class="lg-list">${ev.map(e => { const d = day(e.t); const head = d !== lastDay ? `<div class="lg-day">${esc(d)}</div>` : ''; lastDay = d; const [k, c] = LOG_KIND[e.kind] || ['Event', 'mist'];
+            return `${head}<div class="lg-row"><span class="lg-time">${new Date(e.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span><span class="lg-kind ${c}">${esc(k)}</span><div class="lg-main"><div>${esc(e.what)}</div><div class="sub">${esc(who(e.by))}${e.agent ? ` · ${esc(agentLabel(e.agent, e.model))}` : ''}${e.ms ? ` · <b>${dur(e.ms)}</b>` : ''}</div></div></div>`; }).join('')}</div>` : '<p class="empty">Nothing yet. Starting an agent, sending a probe or pinning a card shows here.</p>'}`;
+    $$('[data-lf]', body).forEach(b => b.onclick = () => { S.logFilter = b.dataset.lf; renderLog(body); });
+    const tick = () => { const t = body.querySelectorAll('.lg-timer'); if (!t.length || !document.body.contains(body) || S.tab !== 'log') return clearInterval(S.logTick); t.forEach(x => { x.textContent = `running ${dur(Date.now() - Number(x.dataset.since))}`; }); };
+    clearInterval(S.logTick); tick(); S.logTick = setInterval(tick, 1000);
 }
 
 // ---------- Notes and Agent ----------
@@ -547,7 +582,7 @@ function renderAgent(body) {
         <div class="r-actions"><button class="btn pri" data-start>${icon('claude')}Start an agent on this case</button></div>
         <div class="r-danger"><div><b>Delete this case</b><span>Moves it to the box's trash, with its board, sources and probes.</span></div><button class="btn danger-btn" data-del>${icon('trash')}Delete…</button></div>`;
     $$('[data-sh]', body).forEach(b => b.onclick = () => C.openTerminal(b.dataset.sh, 'Conspiracy'));
-    $('[data-start]', body).onclick = () => C.newShellDialog(`Cases/${S.slug}`, 'agent', null, { firstPrompt: `Conspiracy case: ${d.title}. The question: ${d.question || '(ask me)'}. Read .platopypus/case.md and notes.md, run \`sleuth status\`, then work the case: pin what the public record shows with sources, send narrow probes, weigh theories, and keep notes.md current.` });
+    $('[data-start]', body).onclick = () => C.newShellDialog(`Cases/${S.slug}`, 'agent', null, { firstPrompt: `Conspiracy case: ${d.title}. The question: ${d.question || '(ask me)'}. Follow the Quick start at the top of .platopypus/case.md, using only the sleuth command (no curl or wget): 1. sleuth status. 2. Send narrow probes about the starting card (sleuth probe). 3. When each is done: sleuth probe-show, sleuth adopt, then pin what holds up and link it, citing sources. 4. sleuth note what the evidence shows. Repeat until the To-do list is empty or the probe budget is used, then summarise.` });
     $('[data-del]', body).onclick = () => {
         const { panel, close } = C.openDialog(`<h2>${icon('trash')}Delete this case?</h2><p class="muted">“${esc(d.title)}” moves to the box's trash.</p><div class="field"><label for="dc-name">Type the name to confirm</label><input id="dc-name" type="text" autocomplete="off" placeholder="${esc(d.title)}"></div><div class="buttons"><button data-close>Cancel</button><button class="danger" data-ok disabled>${icon('trash')}Delete</button></div>`);
         const inp = $('#dc-name', panel), ok = $('[data-ok]', panel); inp.oninput = () => { ok.disabled = inp.value.trim() !== d.title; };

@@ -70,10 +70,12 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (kind !== 'agent' || !['claude', 'codex', 'cline'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code, Codex or Cline.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
         // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
-        if (session !== 'research') scratch = true;
+        // A Conspiracy run works its case (as the agent user only: it is auto-approved; checked below).
+        if (session !== 'research' && session !== 'case') scratch = true;
     }
     // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
     if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
+    if (oneshot && session === 'case' && runAs !== 'agent') throw httpError(400, 'A Conspiracy one-shot runs as the agent user (it is auto-approved, so never as root).');
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
@@ -111,7 +113,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
-            const mf = agents.modelArgs(agent, model).join(' ');
+            const mf = agents.modelArgs(agent, model).map(a => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
             const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
@@ -125,7 +127,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     }
 
     // Session type and security brief (agents read $PORTHOLE_SECURITY_FILE first; see deploy/AGENT.global.md).
-    let sessionEnv = {}, security = null;
+    let sessionEnv = {}, security = null, caseStart = null;
     if (kind === 'agent' && session) {
         if (session === 'lab') {
             const lslug = labLib.engagementOf(dir); if (!lslug) throw httpError(400, 'A Security Lab session starts inside an engagement: open one under Apps, Security Lab.');
@@ -135,6 +137,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             const cslug = casesLib.caseOf(dir); if (!cslug) throw httpError(400, 'A Conspiracy session starts inside a case: open one under Apps, Conspiracy.');
             const cdir = path.join(casesLib.ROOT, cslug);
             security = 'case'; sessionEnv = { PORTHOLE_SESSION: 'case', PORTHOLE_SECURITY_LEVEL: 'case', PORTHOLE_SECURITY_FILE: path.join(cdir, '.platopypus', 'case.md'), PORTHOLE_PROJECT_ROOT: cdir };
+            caseStart = { slug: cslug, label: `${agents.catalog[agent]?.title || agent}${model ? ` (${model})` : ''}${oneshot ? ', one run' : ''}` };
         } else if (session === 'research') {
             const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
             const tdir = path.join(research.ROOT, slug);
@@ -149,6 +152,8 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         }
     }
 
+    // Codex on your Ollama server (model "oss:<name>"): it talks to the same server Cline is set up with.
+    if (kind === 'agent' && agents.ossModel(agent, model)) { const ep = clineLib.settings().endpoint; if (!ep) throw httpError(412, 'Set your Ollama server first (More → AI agents → Cline); Codex uses the same one for local models.'); agentEnv.CODEX_OSS_BASE_URL = `${ep}/v1`; }
     // Cline: write its Ollama provider settings for the user who runs it.
     // Its session brief goes into its own rules folder, because Cline reads rules into its prompt, not env-named files.
     if (kind === 'agent' && agent === 'cline' && !login) {
@@ -177,6 +182,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
     // needed (`vault run NAME -- cmd`, `vault get NAME`), and each fetch is logged with the command it was for.
     const secrets = await envFor(dir, { project: 'none', shells: true });
     await newSession(name, dir, command, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PORTHOLE_SHELL_NAME: name, ...secrets, ...agentEnv, ...sessionEnv, ...shellEnv });
+    if (caseStart) casesLib.agentStarted(caseStart.slug, name, caseStart.label);   // the case's oversight log
     if (Object.keys(secrets).length) { log('vault', `exported ${Object.keys(secrets).join(', ')} into shell "${name}"`); record('credential', 'shell-export', { actor: `shell "${name}"`, via: `${kind}${runAs === 'agent' ? ' (agent user)' : ''}`, cwd: dir, names: Object.keys(secrets) }); }
     if (agent === 'antigravity' && agentEnv.PORTHOLE_FIRST_PROMPT) {
         const text = agentEnv.PORTHOLE_FIRST_PROMPT;

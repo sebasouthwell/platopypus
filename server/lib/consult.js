@@ -42,9 +42,10 @@ function argv(agent, prompt) {
 // Security Lab asks on zero-trust terms: the asked agent sees only the question it is given (no folder, no files, no
 // instructions or connectors from this box, nothing saying what the work is unless the asker writes it), runs once,
 // and gets no tools unless the asker grants web search. Only agents that can be confined like that may be asked.
-const ZERO_TRUST = ['claude', 'cline'];
+// Every agent can be confined: each runs from a fresh empty home holding copies of its sign-in files and nothing else.
+const ZERO_TRUST = ['claude', 'cline', 'codex', 'antigravity'];
 export const isZeroTrust = session => session === 'lab' || session === 'case';
-export async function ask({ from, fromAgent, session, cwd, to, question, web = false }) {
+export async function ask({ from, fromAgent, session, cwd, to, question, web = false, model = '' }) {
     fromAgent = fromAgent || 'shell';   // a plain agent-user shell, not an agent
     if (!settings()[session]) throw httpError(403, `Asking other agents is off for ${session || 'this kind of'} sessions. The user can switch it on in More → AI agents.`);
     const target = String(to || '').toLowerCase(); const q = String(question || '').trim();
@@ -60,11 +61,11 @@ export async function ask({ from, fromAgent, session, cwd, to, question, web = f
     if (!agentUser.allowedFolder(cwd)) throw httpError(403, 'This folder is not one agents work in.');
     const zero = isZeroTrust(session);
     if (zero && !ZERO_TRUST.includes(target)) throw httpError(403, `${av.title} cannot be confined to zero trust (its sign-in comes with your setup's instructions and tools), so in Security Lab ask ${ZERO_TRUST.join(' or ')}.`);
-    if (web && !(zero && target === 'claude')) throw httpError(400, web && zero ? 'Only Claude can be given web search here.' : '--web is for Security Lab questions; outside it the asked agent works as usual.');
+    if (web && !(zero && WEB_AGENTS.includes(target))) throw httpError(400, web && zero ? `${av.title} has no web search; ask ${WEB_AGENTS.join(', ')} for that.` : '--web is for zero-trust questions; outside them the asked agent works as usual.');
     recent.push(now); running.set(from, (running.get(from) || 0) + 1);
     record('activity', 'agent-consult', { actor: `shell "${from}"`, what: `${fromAgent} asked ${target}${zero ? ` (zero trust${web ? ', web search' : ', no tools'})` : ''}: ${q.slice(0, 200)}`, cwd });
     try {
-        if (zero) { const answer = await zeroTrust({ target, question: q, web, title: av.title }); return { from: fromAgent, to: target, zeroTrust: true, web: !!web, answer }; }
+        if (zero) { const answer = await zeroTrust({ target, question: q, web, title: av.title, model }); return { from: fromAgent, to: target, zeroTrust: true, web: !!web, model: model || null, answer }; }
         if (target === 'cline') clineLib.prepare(a.home, { uid: a.uid, gid: a.gid });
         const prompt = `${fromAgent === 'shell' ? 'Someone' : `Another AI agent (${agents.catalog[fromAgent]?.title || fromAgent})`} working in this folder is asking for your view. Answer it directly and concisely. You may read files here to answer, but do not change anything.\n\nQuestion:\n${q}`;
         const [bin, args, extra = {}] = argv(target, prompt);
@@ -87,15 +88,40 @@ function runAs(a, { bin, args, extra = {}, home, workdir, title }) {
 // Zero trust: a fresh empty folder, the question word for word, and only the capability it was given (web search or
 // nothing), once. Security Lab consults and Conspiracy probes both use it. `system` replaces Claude's one-line system
 // prompt; Cline keeps its own (it needs it to answer at all), so the instruction goes in front of the question.
-export async function zeroTrust({ target, question, web = false, title = target, system = null }) {
-    if (!ZERO_TRUST.includes(target)) throw httpError(403, `Only ${ZERO_TRUST.join(' or ')} can be asked on zero-trust terms.`);
-    if (web && target !== 'claude') throw httpError(400, 'Only Claude can be given web search here.');
+export const WEB_AGENTS = ['claude', 'codex', 'antigravity'];   // Cline has no web search of its own
+const MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\/\[\]@-]{0,99}$/;
+// Copy an agent's sign-in files (only those) into a fresh home, owned by the agent user.
+function signIn(a, home, files) {
+    let n = 0;
+    for (const rel of files) { const src = path.join(a.home, rel); if (!fs.existsSync(src)) continue; const dst = path.join(home, rel); fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 }); fs.copyFileSync(src, dst); fs.chmodSync(dst, 0o600); n++; }
+    for (const d of new Set(files.map(f => f.split('/')[0]))) { try { const dir = path.join(home, d); if (fs.existsSync(dir)) { fs.chownSync(dir, a.uid, a.gid); for (const f of fs.readdirSync(dir)) fs.chownSync(path.join(dir, f), a.uid, a.gid); } } catch { /* best effort */ } }
+    return n;
+}
+export async function zeroTrust({ target, question, web = false, title = target, system = null, model = '' }) {
+    if (!ZERO_TRUST.includes(target)) throw httpError(403, `Only ${ZERO_TRUST.join(', ')} can be asked on zero-trust terms.`);
+    if (web && !WEB_AGENTS.includes(target)) throw httpError(400, `${title} has no web search; ask ${WEB_AGENTS.join(', ')} for that.`);
+    model = String(model || '').trim(); if (model && !MODEL_OK.test(model)) throw httpError(400, 'That model name is not valid.');
     const a = agentUser.info(); if (!a || process.getuid?.() !== 0) throw httpError(412, 'Asking other agents needs the agent user.');
     const scratch = fs.mkdtempSync(path.join(a.home, '.consult-')); fs.chownSync(scratch, a.uid, a.gid); fs.chmodSync(scratch, 0o700);
     try {
         // web: the two web tools exist AND are pre-approved (print mode refuses anything not approved); nothing else exists.
-        if (target === 'claude') return await runAs(a, { bin: 'claude', args: ['-p', question, '--tools', web ? 'WebSearch,WebFetch' : '', ...(web ? ['--allowedTools', 'WebSearch', 'WebFetch'] : []), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--no-session-persistence', '--system-prompt', system || 'Answer the question you are given directly.'], home: a.home, workdir: scratch, title });
+        if (target === 'claude') return await runAs(a, { bin: 'claude', args: ['-p', question, '--tools', web ? 'WebSearch,WebFetch' : '', ...(web ? ['--allowedTools', 'WebSearch', 'WebFetch'] : []), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--no-session-persistence', ...(model ? ['--model', model] : []), '--system-prompt', system || 'Answer the question you are given directly.'], home: a.home, workdir: scratch, title });
+        const prompt = system ? `${system}\n\n${question}` : question;
+        if (target === 'codex') {
+            // A home of its own with only auth.json: no AGENTS.md, no config, no MCP servers. Read-only sandbox, no session kept.
+            if (!signIn(a, scratch, ['.codex/auth.json']) && !/^oss:/.test(model)) throw httpError(409, 'Codex is not signed in for the agent user.');   // a local model needs no OpenAI sign-in
+            const oss = /^oss:/.test(model) ? model.slice(4) : null; const ep = oss ? clineLib.settings().endpoint : null; if (oss && !ep) throw httpError(412, 'Set your Ollama server first (More → AI agents → Cline).');
+            return await runAs(a, { bin: 'codex', args: [...(web && !oss ? ['--search'] : []), 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--color', 'never', '-C', scratch, ...(oss ? ['--oss', '--local-provider', 'ollama', '-c', 'model_provider=ollama', '-m', oss] : model ? ['-m', model] : []), prompt], extra: { CODEX_HOME: path.join(scratch, '.codex'), ...(oss ? { CODEX_OSS_BASE_URL: `${ep}/v1` } : {}) }, home: scratch, workdir: scratch, title });
+        }
+        if (target === 'antigravity') {
+            // Gemini through Antigravity: a home with only its sign-in files (no GEMINI.md, settings or MCP servers), plan mode.
+            if (!signIn(a, scratch, ['.gemini/oauth_creds.json', '.gemini/google_accounts.json', '.gemini/installation_id', '.antigravity/oauth_creds.json'])) throw httpError(409, 'Antigravity is not signed in for the agent user.');
+            return await runAs(a, { bin: 'script', args: ['-qec', `agy -p "$CONSULT_PROMPT" --mode plan --disable-slash-commands --print-timeout 280s${model ? ' --model "$CONSULT_MODEL"' : ''}`, '/dev/null'], extra: { CONSULT_PROMPT: prompt, ...(model ? { CONSULT_MODEL: model } : {}) }, home: scratch, workdir: scratch, title });
+        }
         clineLib.prepare(scratch, { uid: a.uid, gid: a.gid });   // its own home: no instruction files, only the Ollama connection
-        return await runAs(a, { bin: 'cline', args: ['--auto-approve', 'false', '--thinking', 'none', system ? `${system}\n\n${question}` : question], extra: { CLINE_DIR: path.join(scratch, '.cline') }, home: scratch, workdir: scratch, title });
+        // Its own hub on its own port (never another shell's), stopped before the folder is removed.
+        const port = String(26000 + Math.floor(Math.random() * 3999));
+        try { return await runAs(a, { bin: 'cline', args: ['--auto-approve', 'false', '--thinking', 'none', ...(model ? ['-m', model] : []), prompt], extra: { CLINE_DIR: path.join(scratch, '.cline'), CLINE_DATA_DIR: path.join(scratch, '.cline', 'data'), CLINE_HUB_PORT: port }, home: scratch, workdir: scratch, title }); }
+        finally { clineLib.stopHub(path.join(scratch, '.cline', 'data')); }
     } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 }

@@ -246,6 +246,7 @@ function push(page) {
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
     if (page === 'schedules') loadSchedules().catch(e => toast(e.message, true));
+    if (page === 'prompts') promptsUI().then(m => m.loadPrompts()).catch(e => toast(e.message, true));
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
     if (page === 'cases') casesUI().then(m => m.loadCases()).catch(e => toast(e.message, true));
@@ -3512,6 +3513,9 @@ async function casesUI() {
     return casesMod;
 }
 function openCases() { go('apps'); push('cases'); }
+// ---------- AI prompts (web/prompts.js, loaded when first opened) ----------
+let promptsMod = null;
+async function promptsUI() { if (!promptsMod) { promptsMod = await import(`/prompts.js?v=${ASSET_V}`); promptsMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, $, $$ }); } return promptsMod; }
 const mdLite = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`).replace(/^# (.*)$/gm, '<h4>$1</h4>');
 async function loadLab() {
     const d = await api('/api/lab'); labState.tools = d.tools; const box = $('#lab-body');

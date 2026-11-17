@@ -2,6 +2,7 @@
 // and hold the "asks": things an agent will not do without the user's Allow (downloads, frames, images to the model).
 // The heavy file work and the agent's tools are in researchtools.js and bin/research; this file is the app's side.
 import fs from 'node:fs';
+import * as prompts from './prompts.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
@@ -46,7 +47,7 @@ export async function create({ title, brief = '', blank = false }) {
     fs.writeFileSync(path.join(dir, 'paper', 'refs.bib'), '');
     fs.writeFileSync(path.join(dir, 'notes', 'outline.md'), `# ${t}\n\n${String(brief || '').trim() || '(what this research should find out)'}\n`);
     fs.writeFileSync(path.join(dir, 'notes', 'claims.md'), '# Claims and their evidence\n\n');
-    let doc = ''; try { doc = fs.readFileSync(briefFile, 'utf8'); } catch { doc = '# Research session\n\nUse the `research` tools; never paste a whole source into the chat.\n'; }
+    let doc = prompts.text('research-brief') || '# Research session\n\nUse the `research` tools; never paste a whole source into the chat.\n';
     fs.writeFileSync(path.join(dir, '.platopypus', 'research.md'), doc);
     T.writeJson(path.join(dir, '.platopypus', 'research.json'), { title: t, created: Date.now(), brief: String(brief || '').slice(0, 2000), ...(blank ? { blank: true } : {}) });
     try { await agentUser.prepareFolder(dir); } catch (e) { log('research', `${slug}: agent folder access not set (${e.message})`); }

@@ -48,6 +48,7 @@ import * as cases from './lib/cases.js';
 import * as zipstream from './lib/zipstream.js';
 import * as prefs from './lib/prefs.js';
 import * as transfers from './lib/transfers.js';
+import * as promptsLib from './lib/prompts.js';
 import { spawn as spawnProc } from 'node:child_process';
 import * as editor from './lib/researcheditor.js';
 import * as repo from './lib/researchrepo.js';
@@ -96,7 +97,7 @@ const AGENT_ROUTES = [
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
     ['GET', /^\/api\/agent\/consult$/], ['POST', /^\/api\/agent\/consult$/],
     ['GET', /^\/api\/agent\/schedules$/], ['POST', /^\/api\/agent\/schedules$/],
-    ['GET', /^\/api\/agent\/case$/], ['POST', /^\/api\/agent\/case\/(source|pin|link|ask|answer|theory|weigh|path|probe)$/], ['GET', /^\/api\/agent\/case\/probes\/p\d{1,5}$/],
+    ['GET', /^\/api\/agent\/case$/], ['POST', /^\/api\/agent\/case\/(source|pin|link|ask|answer|theory|weigh|path|probe|note|adopt)$/], ['GET', /^\/api\/agent\/case\/probes\/p\d{1,5}$/],
     ['GET', /^\/api\/agent\/lab\/status$/], ['POST', /^\/api\/agent\/lab\/run$/], ['GET', /^\/api\/agent\/lab\/run\/r\d{3,5}$/],
     ['POST', /^\/api\/creds\/share$/],
     ['GET', /^\/api\/servers$/], ['POST', /^\/api\/servers(\/run)?$/], ['POST', /^\/api\/servers\/[a-z0-9-]{1,40}\/(stop|start|restart)$/], ['GET', /^\/api\/servers\/[a-z0-9-]{1,40}\/logs$/], ['DELETE', /^\/api\/servers\/[a-z0-9-]{1,40}$/],
@@ -394,7 +395,7 @@ const server = http.createServer(async (req, res) => {
             if (p === '/api/agent/schedules' && method === 'GET') return send(res, 200, { folder: schedules.ROOT, items: schedules.list().items.map(({ id, name, cron, state, runAs, next, last }) => ({ id, name, cron, state, runAs, next, last })) });
             if (p === '/api/agent/schedules' && method === 'POST') { const b = await readJson(req, 96 * 1024); return send(res, 201, schedules.propose({ name: b.name, cron: b.cron, script: b.script, why: b.why, from: session.agent })); }
             if (p === '/api/agent/consult' && method === 'GET') return send(res, 200, await consult.available(sh.session || null));
-            if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question, web: !!b.web })); }
+            if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question, web: !!b.web, model: b.model })); }
             // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
             if (p.startsWith('/api/agent/lab/')) {
                 const slug = lab.engagementOf(sh.cwd); if (!slug) return send(res, 403, { error: 'This shell is not in a Security Lab engagement.' });
@@ -406,7 +407,7 @@ const server = http.createServer(async (req, res) => {
             if (p === '/api/agent/case' || p.startsWith('/api/agent/case/')) {
                 const cslug = cases.caseOf(sh.cwd); if (!cslug) return send(res, 403, { error: 'This shell is not in a Conspiracy case.' });
                 const by = `shell "${session.agent}"`;
-                if (p === '/api/agent/case' && method === 'GET') return send(res, 200, cases.detail(cslug));
+                if (p === '/api/agent/case' && method === 'GET') return send(res, 200, { ...cases.detail(cslug), todo: cases.todo(cslug) });
                 if ((am = p.match(/^\/api\/agent\/case\/probes\/(p\d{1,5})$/)) && method === 'GET') return send(res, 200, cases.getProbe(cslug, am[1]));
                 const b = await readJson(req, 64 * 1024); await caller(b.pid);
                 const op = p.slice('/api/agent/case/'.length);
@@ -419,6 +420,8 @@ const server = http.createServer(async (req, res) => {
                 if (op === 'weigh') return send(res, 200, await cases.weigh(cslug, String(b.id || ''), { ref: b.ref, verdict: b.verdict }));
                 if (op === 'path') return send(res, 200, cases.paths(cslug, b.from, b.to));
                 if (op === 'probe') return send(res, 201, await cases.probe(cslug, b, by));
+                if (op === 'note') return send(res, 200, cases.appendNote(cslug, b.text, by));
+                if (op === 'adopt') return send(res, 201, await cases.adopt(cslug, String(b.id || ''), { reliability: b.reliability }, by));
             }
             if (p === '/api/agent/research/ask' && method === 'POST') { const b = await readJson(req, 16 * 1024); const pr = await caller(b.pid); return send(res, 201, research.createAsk(pr.cwd, b)); }
             if ((am = p.match(/^\/api\/agent\/research\/ask\/([a-f0-9]{12})$/)) && method === 'GET') return send(res, 200, research.getAsk(sh.cwd, am[1]));
@@ -526,6 +529,16 @@ const server = http.createServer(async (req, res) => {
         }
         if (p === '/api/files/transfers' && method === 'GET') return send(res, 200, { links: transfers.list() });
         { const tm = p.match(/^\/api\/files\/transfers\/([0-9a-f]{10})$/); if (tm && method === 'DELETE') { const r = transfers.revoke(tm[1]); audit.record('activity', 'transfer-revoked', { actor: 'phone', via: 'Files', what: `link ${tm[1]}` }); return send(res, 200, r); } }
+        // AI prompts: the master prompts, your versions, and what an update changed.
+        if (p === '/api/prompts' && method === 'GET') return send(res, 200, promptsLib.list());
+        { const pm = p.match(/^\/api\/prompts\/([a-z0-9-]{2,40})(?:\/(reset|keep|restore))?$/);
+          if (pm) {
+            if (!pm[2] && method === 'GET') return send(res, 200, promptsLib.get(pm[1]));
+            if (!pm[2] && method === 'PUT') return send(res, 200, promptsLib.save(pm[1], await readJson(req, 256 * 1024)));
+            if (pm[2] === 'reset' && method === 'POST') return send(res, 200, promptsLib.reset(pm[1]));
+            if (pm[2] === 'keep' && method === 'POST') return send(res, 200, promptsLib.acknowledge(pm[1]));
+            if (pm[2] === 'restore' && method === 'POST') return send(res, 200, promptsLib.restore(pm[1], (await readJson(req, 4096)).i));
+          } }
         // Interface preferences (Files: hidden items), the same on every device.
         if (p === '/api/prefs' && method === 'GET') return send(res, 200, prefs.get());
         if (p === '/api/prefs' && method === 'PUT') return send(res, 200, prefs.set(await readJson(req, 8192)));
@@ -793,7 +806,9 @@ const server = http.createServer(async (req, res) => {
                 const body = () => readJson(req, 256 * 1024);
                 if (cr === '' && method === 'GET') return send(res, 200, cases.detail(cs));
                 if (cr === '' && method === 'PUT') return send(res, 200, cases.setMeta(cs, await body()));
-                if (cr === 'notes' && method === 'PUT') return send(res, 200, cases.setNotes(cs, (await body()).text));
+                if (cr === 'notes' && method === 'PUT') { const r = cases.setNotes(cs, (await body()).text); cases.logEvent(cs, { kind: 'note', by: 'phone', what: 'Notes edited' }); return send(res, 200, r); }
+                if (cr === 'log' && method === 'GET') return send(res, 200, cases.readLog(cs));
+                if (cr === 'todo' && method === 'GET') return send(res, 200, { todo: cases.todo(cs) });
                 if (cr === 'delete' && method === 'POST') return send(res, 200, cases.remove(cs, (await body()).confirm));
                 if (cr === 'export' && method === 'GET') { const e = cases.exportMarkdown(cs); res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="${e.name}"`, 'Cache-Control': 'no-store' }); return res.end(e.text); }
                 if (cr === 'nodes' && method === 'POST') return send(res, 201, await cases.addNode(cs, await body()));
@@ -1057,6 +1072,9 @@ wss.on('connection', ws => { ws.isAlive = true; ws.on('pong', () => { ws.isAlive
 setInterval(() => tunnels.sweep().catch(e => console.error(e)), 10_000);
 zoned.ensure().catch(e => console.error(e));
 setInterval(() => shells.reapOneshots().catch(e => console.error(e)), 15_000);
+try { promptsLib.startup(); } catch (e) { console.error(e); }   // your prompt versions: readable copies and the agents' instruction block
+// Conspiracy log: an agent working a case is logged as finished once its shell is gone.
+setInterval(() => shells.list().then(l => { const live = new Set(l.map(s => s.name)); cases.sweepAgents(live); const au = agentUser.info(); if (au) clineLib.sweepHubs(au.home, live, au.uid); clineLib.sweepHubs(config.home, live, 0); }).catch(() => {}), 10_000);
 setInterval(() => zoned.ensure().catch(e => console.error(e)), 60_000);
 
 // Alerts: audit lines (root requests, links, credential use, new connections), sign-ins, crashed servers, commits.

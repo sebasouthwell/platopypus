@@ -3,6 +3,7 @@
 // PlatOpypus keeps the address, the model and an optional Ollama API key (sent as a bearer token; encrypted),
 // and writes Cline's provider settings for whichever user runs it, just before it starts.
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { config } from './config.js';
 import { record } from './audit.js';
@@ -54,8 +55,12 @@ export function prepare(home, owner = null) {
 }
 // The other agents are told "read $PORTHOLE_SECURITY_FILE first"; a small local model rarely goes and reads it. Cline
 // puts every file in $CLINE_DIR/rules into its system prompt, so each Cline shell gets its own config folder whose
-// rules hold this session's brief word for word. Settings, logins and history stay shared (CLINE_DATA_DIR), and the
-// global instructions (~/.agents/AGENTS.md) are still read as before.
+// rules hold this session's brief word for word. The global instructions (~/.agents/AGENTS.md) are still read.
+//
+// Each Cline shell also gets its own data folder and its own hub port. Cline runs commands through a background "hub"
+// that it starts once and then reuses; with a shared data folder and the fixed default port, a second Cline shell ran
+// its commands inside the first shell's hub, with that shell's environment (its PlatOpypus token and session type).
+// Separate folders and ports keep every shell's commands its own; the hub is stopped when its shell ends (sweepHubs).
 const BRIEF_MAX = 60_000;
 export function sessionRules(home, shell, env = {}, owner = null) {
     const root = path.join(home, '.cline', 'shells');
@@ -74,6 +79,52 @@ export function sessionRules(home, shell, env = {}, owner = null) {
     ].filter(Boolean).join('\n');
     const text = `# This PlatOpypus session\n\nYou are running in a PlatOpypus agent shell. These facts and the brief below apply to everything you do in it; the general instructions about this box (the platopypus block) also apply.\n\n${facts}\n\n${brief ? `## Session brief (the file $PORTHOLE_SECURITY_FILE, included here so you do not need to read it)\n\n${brief.trim()}\n` : 'There is no separate brief for this session.\n'}`;
     const f = path.join(rules, 'platopypus-session.md'); fs.writeFileSync(f, text, { mode: 0o600 });
+    const data = isolate(home, dir, owner);
     if (owner) { for (const p of [path.join(home, '.cline'), root, dir, rules, f]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
-    return { CLINE_DIR: dir, CLINE_DATA_DIR: path.join(home, '.cline', 'data') };
+    return { CLINE_DIR: dir, ...data };
+}
+// A data folder of its own (with the provider settings copied in) and a hub port no other shell uses.
+const HUB_PORTS = [26000, 29999];
+export function isolate(home, dir, owner = null) {
+    const data = path.join(dir, 'data'), settings = path.join(data, 'settings');
+    fs.mkdirSync(settings, { recursive: true, mode: 0o700 });
+    for (const n of ['providers.json', 'global-settings.json']) { const src = path.join(home, '.cline', 'data', 'settings', n); try { if (fs.existsSync(src)) { fs.copyFileSync(src, path.join(settings, n)); fs.chmodSync(path.join(settings, n), 0o600); } } catch { /* not there */ } }
+    const taken = new Set(); try { for (const d of fs.readdirSync(path.join(home, '.cline', 'shells'))) { const pf = path.join(home, '.cline', 'shells', d, 'hub.port'); if (path.join(home, '.cline', 'shells', d) !== dir && fs.existsSync(pf)) taken.add(Number(fs.readFileSync(pf, 'utf8'))); } } catch { /* none */ }
+    let port; do { port = HUB_PORTS[0] + Math.floor(Math.random() * (HUB_PORTS[1] - HUB_PORTS[0])); } while (taken.has(port));
+    fs.writeFileSync(path.join(dir, 'hub.port'), String(port));
+    if (owner) { for (const p of [data, settings, ...fs.readdirSync(settings).map(n => path.join(settings, n)), path.join(dir, 'hub.port')]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
+    return { CLINE_DATA_DIR: data, CLINE_HUB_PORT: String(port) };
+}
+// Stop the hub that a Cline data folder started (its pid is in the hub's discovery file).
+export function stopHub(dataDir) {
+    try { const d = JSON.parse(fs.readFileSync(path.join(dataDir, 'locks', 'hub', 'production.json'), 'utf8')); if (Number.isInteger(d.pid) && d.pid > 1) { process.kill(d.pid, 'SIGTERM'); return d.pid; } } catch { /* no hub, or already gone */ }
+    return null;
+}
+// Cline keeps running after its shell is closed (it outlives the terminal). Find the Cline processes that still carry
+// the ended shell's name in their environment and stop them. Their environment is read as their own user when root
+// may not (containers without ptrace rights).
+function shellProcs(name, uid) {
+    const want = `PORTHOLE_SHELL_NAME=${name}\0`; const out = [];
+    let pids = []; try { pids = fs.readdirSync('/proc').filter(p => /^\d+$/.test(p)); } catch { return out; }
+    for (const pid of pids) {
+        try {
+            const st = fs.readFileSync(`/proc/${pid}/status`, 'utf8'); if (uid !== undefined && !new RegExp(`^Uid:\\s+${uid}\\b`, 'm').test(st)) continue;
+            if (!/cline/.test(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'))) continue;
+            let env = ''; try { env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { const user = st.match(/^Uid:\s+(\d+)/m)?.[1]; const r = spawnSync('/usr/sbin/runuser', ['-u', uidName(user), '--', 'cat', `/proc/${pid}/environ`], { encoding: 'utf8' }); env = r.stdout || ''; }
+            if (env.includes(want)) out.push(Number(pid));
+        } catch { /* gone */ }
+    }
+    return out;
+}
+const uidName = uid => { try { return fs.readFileSync('/etc/passwd', 'utf8').split('\n').find(l => l.split(':')[2] === String(uid))?.split(':')[0] || 'nobody'; } catch { return 'nobody'; } };
+// Shells that have ended: stop their Cline and its hub. Called every few seconds with the names of the shells still running.
+export function sweepHubs(home, liveNames, uid) {
+    const root = path.join(home, '.cline', 'shells'); let names = []; try { names = fs.readdirSync(root); } catch { return; }
+    for (const n of names) {
+        if (liveNames.has(n)) continue; const dir = path.join(root, n);
+        if (!fs.existsSync(path.join(dir, 'hub.port'))) continue;
+        stopHub(path.join(dir, 'data'));
+        for (const pid of shellProcs(n, uid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+        fs.rmSync(path.join(dir, 'hub.port'), { force: true });
+    }
 }

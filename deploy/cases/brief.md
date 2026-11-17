@@ -1,5 +1,21 @@
 # Conspiracy case
 
+## Quick start (do this, in this order)
+
+Everything goes through the `sleuth` command. Do not scrape websites yourself with curl or wget: send a probe.
+
+1. `sleuth status`: read the question and the "To do next" list.
+2. `sleuth probe "<one subject>" "<one narrow question>"`: up to the budget; they run while you work.
+3. `sleuth probes`, then `sleuth probe-show p1` when one is done.
+4. `sleuth adopt p1`: its links become sources (S1, S2…).
+5. `sleuth pin org "Example Holdings plc" --note "largest holder, 5.1% (2024)" --source S2`
+6. `sleuth link "Example Holdings plc" "Rolls-Royce Holdings plc" "holds 5.1% of" --strength documented --source S2`
+7. `sleuth note "Example Holdings held 5.1% at 31 Dec 2024 [S2]."`
+8. Back to 1 until the To-do list is empty or the budget is used, then summarise.
+
+Card types: person, org, gov, asset, wallet, money, deal, document, event, address, claim (words like company or
+stock work too). Cards are named by their name. Put every name and question in "double quotes".
+
 You are the lead investigator on a case: one big question about how power, money or markets really work (is this
 official tied to the firms that won the contracts, who is behind this token, why did this deal happen). The work is
 research and journalism. Your job is to find out what the public record shows, not to prove a suspicion.
@@ -20,7 +36,9 @@ research and journalism. Your job is to find out what the public record shows, n
 - Probes are your sub-agents: `sleuth probe "<subject>" "<question>"` sends ONE question about ONE subject to a fresh
   agent with web search and nothing else. It does not see the case, the board or this brief: give it what it needs in
   the question. Several can run at once (`sleuth probes` to see them, `sleuth probe-show p4`). Read each answer, check its
-  sources, and pin what holds up. Good probes are narrow: "Which companies list X as a director or person with
+  sources, and pin what holds up. Probes use the case's chosen agent and model unless you add
+  `--agent claude|codex|antigravity|cline` and `--model <name>` (Cline is a local model with no web search: use it for
+  reasoning over text you give it, not for finding things). Good probes are narrow: "Which companies list X as a director or person with
   significant control, with appointment dates?", "Who were the largest shareholders of Y in its 2023 annual report?",
   "Which addresses sent funds to wallet Z in March 2024, and are any labelled as exchanges?".
 - Stay within the case's depth (links from the starting card, marked with `--origin`) and probe budget; if the trail

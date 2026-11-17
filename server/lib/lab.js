@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { config } from './config.js';
 import { record } from './audit.js';
 import * as agentUser from './agentuser.js';
+import * as prompts from './prompts.js';
 
 export const ROOT = path.join(config.root, 'Lab');
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
@@ -46,7 +47,7 @@ export function create({ title }) {
     writeJson(path.join(dir, '.platopypus', 'lab.json'), { title: t, created: Date.now() });
     writeJson(path.join(dir, '.platopypus', 'scope.json'), { targets: [] });
     fs.writeFileSync(path.join(dir, 'findings.md'), `# Findings: ${t}\n\n`);
-    let brief = ''; try { brief = fs.readFileSync(path.resolve(here, '..', '..', 'deploy', 'lab', 'brief.md'), 'utf8'); } catch { brief = '# Security Lab session\n\nUse `lab run`; only targets in scope.\n'; }
+    let brief = prompts.text('lab-brief') || '# Security Lab session\n\nUse `lab run`; only targets in scope.\n';
     fs.writeFileSync(path.join(dir, '.platopypus', 'lab.md'), brief);
     agentUser.prepareFolder(dir).catch(() => {});
     record('activity', 'lab-new', { actor: 'phone', what: `${t} (/Lab/${slug})`, cwd: dir });

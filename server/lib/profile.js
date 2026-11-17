@@ -5,6 +5,7 @@
 // Agents are told (global instructions) to read $PORTHOLE_SECURITY_FILE at the start of every session.
 
 import fs from 'node:fs';
+import * as prompts from './prompts.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
@@ -37,7 +38,8 @@ export function docKey(p) {
     if (p.level === 'professional') return `professional-${['internal', 'public', 'regulated'].includes(p.tier) ? p.tier : 'internal'}`;
     return null;
 }
-export const docPath = key => path.join(docsDir, `${key}.md`);
+// Your own version of a security brief (More → AI prompts) if you saved one, else the default.
+export const docPath = key => { try { return prompts.filePath(`security-${key}`); } catch { return path.join(docsDir, `${key}.md`); } };
 export const controlDoc = () => docPath('control');
 
 export function get(dir) {

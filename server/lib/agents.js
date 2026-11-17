@@ -141,11 +141,14 @@ function refreshSignIn(list) {
 
 // Build the command + env for a shell that runs an agent.
 // A model name is passed to the agent's own --model flag; it is checked to be a plain name, never free shell text.
-export const MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
+export const MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\/\[\]@-]{0,99}$/;
+// Codex can drive a model on your Ollama server instead of OpenAI's: write the model as "oss:<name>".
+export const ossModel = (agent, model) => (agent === 'codex' && /^oss:/.test(String(model || '').trim()) ? String(model).trim().slice(4) : null);
 export function modelArgs(agent, model) {
     const m = String(model || '').trim(); if (!m) return [];
     if (!MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes).');
     if (agent === 'cline') return ['-m', m];
+    const oss = ossModel(agent, m); if (oss) return ['--oss', '--local-provider', 'ollama', '-c', 'model_provider=ollama', '-m', oss];   // Codex on your Ollama server (CODEX_OSS_BASE_URL is set by the shell)
     return agent === 'claude' || agent === 'codex' ? ['--model', m] : [];     // Antigravity picks its model in its own settings
 }
 export function command({ agent = 'claude', yolo = false, resume = false, profile = 'default', login = false, model = '' }) {

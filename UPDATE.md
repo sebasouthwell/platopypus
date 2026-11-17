@@ -699,6 +699,44 @@ phone's Update button. Mechanism:
   `GET /api/files/transfers`, revoke `DELETE /api/files/transfers/:id`). The dialog shows ready commands for curl, wget,
   PowerShell (`Invoke-WebRequest`), Windows `curl.exe` and unzip, with a countdown. Audit kinds `transfer-created`,
   `transfer-used` (with address and user agent) and `transfer-revoked`.
+- **2.14.0**: Any agent and any model for Conspiracy; agents that drive cases well; a case log; editable AI prompts.
+  - **Any agent, zero trust:** `consult.zeroTrust` confines Claude, Cline, Codex and Gemini (Antigravity) alike. Each
+    runs from an empty home holding copies of only its sign-in files (Codex `auth.json`; Antigravity's oauth files), so
+    no instruction files, settings or MCP servers come along. Codex runs `exec --sandbox read-only --ephemeral`; web
+    search for Claude, Codex (`--search`) and Gemini. A model can be chosen for each (`model`); `consult --model`.
+    Security Lab's brief is updated: all four can be asked.
+  - **Codex on your Ollama server:** a model written `oss:<name>` runs Codex with `--oss --local-provider ollama -c
+    model_provider=ollama` against the Cline server (`CODEX_OSS_BASE_URL`). It needs no OpenAI sign-in.
+  - **Case settings:** `probeAgent`, `probeModel`, `askAgent` and `askModel` in case.json, set from "Edit question and
+    limits". `sleuth probe --agent … --model …` overrides them per probe.
+  - **Cline isolation fix:** Cline runs commands through a background hub it starts once. With a shared data folder and
+    the fixed default port (25463), a second Cline shell ran its commands inside the first shell's hub, with that
+    shell's environment (token, session type), and the hub outlived its shell. Each Cline shell now gets its own data
+    folder (provider settings copied in) and its own hub port (26000–29999, `hub.port`). A sweep every 10 s stops the
+    hub and any Cline process still carrying an ended shell's name. Zero-trust Cline runs get their own port and their
+    hub is stopped afterwards.
+  - **Conspiracy one-shots** run in the case folder (as the agent user only).
+  - **sleuth for local models:**
+    - The brief starts with an eight-step Quick start, and the starting prompt is step by step.
+    - `sleuth adopt <p>` turns a probe's links into sources. Reliability is guessed from the website: official
+      registers, filings, courts, regulators, exchanges, chain data and investor pages are primary; major news is
+      reputable.
+    - `sleuth note` appends to notes.md.
+    - Card types accept everyday words (company, stock, contract…).
+    - Card names match loosely (suffixes and brackets ignored), so near-duplicates merge.
+    - Every command prints a next step, and `status` starts with a To-do list (`cases.todo`).
+    - Strength rules are strict: documented needs a primary source, reported a reputable or primary one.
+    - `link` echoes the sentence it made, so a backwards string is visible.
+  - **Case log** (`/Cases/<name>/log.jsonl`, the Log tab, `GET /api/cases/:slug/log`): agents started and finished
+    (with time), probes started, finished or failed (with time and agent/model), Ask, and every card, string, source,
+    theory, question and note, with who did it. Totals, live timers, filters. For the user; agents do not read it.
+  - **AI prompts** (More → AI prompts, `server/lib/prompts.js`, `/api/prompts`): the agent instructions, the control and
+    six security-level briefs, the Research, Security Lab and Conspiracy briefs, and the probe and Ask instructions.
+    Your version is kept in `state/prompts/<id>.json` with the default it was based on. When an update changes that
+    default, it is marked for review: compare (side by side, word-level, unchanged lines folded), switch to the new
+    default (yours kept as deprecated, last five), migrate, or keep yours. Briefs read from a path get a readable copy
+    in `/usr/local/share/platopypus/prompts`. Your agent instructions replace the platopypus block in every agent's
+    instruction file, and are re-applied at start.
 
 ## Release checklist
 

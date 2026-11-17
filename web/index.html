@@ -155,6 +155,7 @@
       <button class="row" data-page="security"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Security</div><div class="sub" id="more-security-sub">Two-step codes, signed-in devices</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="backups"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-cloud-up"/></svg></span><div class="main"><div class="title">Backups</div><div class="sub" id="more-backups-sub">Project data to your private S3 bucket</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="schedules"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-clock"/></svg></span><div class="main"><div class="title">Schedules</div><div class="sub" id="more-schedules-sub">Routines the box runs on a timetable</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="prompts"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg></span><div class="main"><div class="title">AI prompts</div><div class="sub" id="more-prompts-sub">The instructions agents get</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="alerts"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-bell"/></svg></span><div class="main"><div class="title">Alerts</div><div class="sub" id="more-alerts-sub">Telegram messages when something needs you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="audit"><span class="ico flare"><svg class="i"><use href="/sprite.svg#i-history"/></svg></span><div class="main"><div class="title">Audit log</div><div class="sub" id="more-audit-sub">Root use, credentials and what agents did, by project</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <div class="row"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-claude"/></svg></span><div class="main"><div class="title">Remote Control</div><div class="sub" id="more-remote-sub">Drive this box from the Claude app</div></div><button class="switch" id="remote-switch" role="switch" aria-checked="false" aria-label="Remote Control"><span></span></button></div>
@@ -273,6 +274,14 @@
     <div id="sched-body"></div>
   </section>
 
+  <section id="page-prompts" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>AI prompts</h1><span class="spacer"></span>
+    </header>
+    <div id="prompts-body"></div>
+  </section>
+
   <section id="page-alerts" class="tab page" hidden>
     <header class="topbar compact">
       <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
@@ -336,6 +345,7 @@
       <button data-nav-page="creds" title="Shared credentials"><svg class="i"><use href="/sprite.svg#i-link"/></svg><span>Shared credentials</span></button>
       <button data-nav-page="backups" title="Backups"><svg class="i"><use href="/sprite.svg#i-cloud-up"/></svg><span>Backups</span></button>
       <button data-nav-page="schedules" title="Schedules"><svg class="i"><use href="/sprite.svg#i-clock"/></svg><span>Schedules</span></button>
+      <button data-nav-page="prompts" title="AI prompts"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg><span>AI prompts</span></button>
       <button data-nav-page="alerts" title="Alerts"><svg class="i"><use href="/sprite.svg#i-bell"/></svg><span>Alerts</span></button>
       <button data-nav-page="audit" title="Audit log"><svg class="i"><use href="/sprite.svg#i-history"/></svg><span>Audit log</span></button>
       <button data-nav-page="security" title="Security"><svg class="i"><use href="/sprite.svg#i-shield"/></svg><span>Security</span></button>
