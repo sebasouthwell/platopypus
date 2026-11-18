@@ -884,6 +884,15 @@ phone's Update button. Mechanism:
   - Me: actions in a compact grid, list view by default on narrow screens. Touch targets of 40–48 px, 16 px inputs on
     phones (no zoom on focus), and date, URL and untyped inputs now get the app's input style everywhere.
 
+- **2.18.3**: Job Hunt never ingests the same job twice. Each job carries fingerprints (`keys` in board.json): a hash
+  of its canonical URL (host without www, no fragment, tracking parameters such as utm_*, ref, gclid removed, sorted
+  query), of company + title + city (company suffixes like Ltd, Limited, PLC, Group dropped; "(Remote)", "Hybrid",
+  "Permanent" and similar dropped from titles; Jr/Sr expanded), and of the advert text with the company. A job matching
+  any key is merged: your board copy keeps its fields, only missing ones are filled, the longer advert text wins, and
+  the extra source is listed in `sources`. Hunts report how many were already on the board. On first use after
+  updating, duplicates already on the board are merged once (`dedupeBoard`): the copy with an application, a further
+  status, a score or notes is kept, and the others' applications, drafts, advice, assessments and reviews move to it.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

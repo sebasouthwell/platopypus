@@ -808,6 +808,7 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/jobs' || p.startsWith('/api/jobs/')) {
             if (!(await addons.isAdded('jobs'))) return send(res, 409, { error: 'Add Job Hunt first (Apps tab).', needApp: 'jobs' });
             if (!jobs.ready()) jobs.setup();
+            jobs.dedupeOnce();
             const fileOut = (file, type, name, inline = true) => { const st = fs.statSync(file); res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'Cache-Control': 'no-store', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'" }); fs.createReadStream(file).pipe(res); };
             const typeOf = f => ({ '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.doc': 'application/msword', '.tex': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8' }[path.extname(f).toLowerCase()] || 'application/octet-stream');
             const rest = p.slice('/api/jobs'.length).replace(/^\//, ''); let jm;

@@ -34,6 +34,8 @@ export function inJobs(dir) { const rel = path.relative(ROOT, path.resolve(Strin
 
 // ---------- set up and settings ----------
 const DEFAULTS = { keywords: '', locations: '', countries: 'gb', nationality: '', remote: true, salaryMin: null, currency: 'GBP', exclude: '', sources: ['remotive', 'arbeitnow', 'adzuna', 'reed'], money: { region: 'England', studentLoan: 'plan2', pension: 5, notes: '' }, home: '', created: null };
+let deduped = false;
+export function dedupeOnce() { if (deduped || !ready()) return; deduped = true; try { dedupeBoard(); } catch (e) { log({ kind: 'job', by: 'box', what: `Duplicate check failed: ${e.message}` }); } }
 export function setup() {
     for (const d of ['.platopypus', 'cvs', 'applications', 'files']) fs.mkdirSync(P(d), { recursive: true });
     if (!ready()) writeJson(P('.platopypus', 'jobs.json'), { ...DEFAULTS, created: Date.now() });
@@ -131,20 +133,78 @@ export function candidates(requirements, { per = 4 } = {}) {
 // ---------- the board ----------
 const boardFile = () => P('board.json');
 export function board() { const b = readJson(boardFile(), { jobs: [] }) || { jobs: [] }; b.jobs ||= []; return b; }
-const saveBoard = b => writeJson(boardFile(), b);
+const saveBoard = b => { const { _ix, ...rest } = b; void _ix; writeJson(boardFile(), rest); };
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export const STATUSES = ['new', 'shortlisted', 'applying', 'applied', 'hidden'];
+// Fingerprints, so the same job is never on the board twice (another job site, tracking parameters, "Ltd" or not,
+// a reposted advert): a hash of the cleaned URL, of company + title + city, and of the advert text. A match on any merges.
+const TRACKING = /^(utm_|ref$|refid|source$|src$|from$|fbclid|gclid|mc_|trk|tracking|campaign|cid$|sid$|clickid|_ga|adid|se$|v$|tm$|jobsource|partner)/i;
+const sha = x => crypto.createHash('sha1').update(x).digest('hex').slice(0, 16);
+export function canonicalUrl(u) {
+    try {
+        const x = new URL(String(u || '').trim()); if (!/^https?:$/.test(x.protocol)) return '';
+        x.hash = ''; x.hostname = x.hostname.toLowerCase().replace(/^(www|m|uk|en)\./, '');
+        for (const k of [...x.searchParams.keys()]) if (TRACKING.test(k)) x.searchParams.delete(k);
+        x.searchParams.sort(); return `${x.hostname}${x.pathname.replace(/\/+$/, '')}${x.searchParams.toString() ? `?${x.searchParams}` : ''}`.toLowerCase();
+    } catch { return ''; }
+}
+const CO_SUFFIX = /\b(ltd|limited|plc|llp|llc|inc|incorporated|corp|corporation|gmbh|ag|sa|bv|nv|co|company|group|holdings|uk|the)\b/g;
+const normCo = c => norm(c).replace(CO_SUFFIX, ' ').replace(/\s+/g, ' ').trim();
+const normTitle = t => norm(String(t || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')).replace(/\b(remote|hybrid|on ?site|full ?time|part ?time|permanent|contract|temp|fixed term|ftc|uk|urgent|new)\b/g, ' ').replace(/\b(jr)\b/g, 'junior').replace(/\b(sr)\b/g, 'senior').replace(/\s+/g, ' ').trim();
+const normCity = l => norm(String(l || '').split(/[,/|(-]/)[0]).replace(/\b(remote|hybrid|uk|united kingdom|england|greater)\b/g, ' ').trim();
+export function fingerprints(j) {
+    const keys = []; const cu = canonicalUrl(j.url); if (cu) keys.push(`u:${sha(cu)}`);
+    const co = normCo(j.company), ti = normTitle(j.title); if (co && ti) keys.push(`c:${sha(`${co}|${ti}|${normCity(j.location)}`)}`);
+    const d = norm(String(j.description || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' '); if (d.length > 300 && co) keys.push(`d:${sha(`${co}|${d.slice(0, 600)}`)}`);
+    return keys;
+}
+function indexOf(b) { const ix = new Map(); for (const x of b.jobs) for (const k of (x.keys || fingerprints(x))) if (!ix.has(k)) ix.set(k, x); return ix; }
 function upsertJob(b, j, by) {
-    const url = clip(j.url, 800); const key = url || `${norm(j.title)}|${norm(j.company)}`;
-    let it = b.jobs.find(x => (url && x.url === url) || `${norm(x.title)}|${norm(x.company)}` === `${norm(j.title)}|${norm(j.company)}`);
-    const fresh = !it; if (!it) { it = { id: id6('j'), status: 'new', found: Date.now(), by }; b.jobs.push(it); }
-    for (const k of ['title', 'company', 'location', 'salary', 'deadline', 'source', 'contract', 'posted']) if (j[k]) it[k] = clip(j[k], k === 'title' ? 200 : 160);
-    if (url) it.url = url; if (j.description) it.description = String(j.description).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000);
-    if (Number.isFinite(+j.salaryMin)) it.salaryMin = Math.round(+j.salaryMin); if (Number.isFinite(+j.salaryMax)) it.salaryMax = Math.round(+j.salaryMax);
-    if (Array.isArray(j.requirements)) it.requirements = j.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
-    if (j.category) it.category = clip(j.category, 60);
-    it.key = key; it.updated = Date.now();
+    const url = clip(j.url, 800); const keys = fingerprints({ ...j, url });
+    b._ix ||= indexOf(b); let it = null; for (const k of keys) { if (b._ix.has(k)) { it = b._ix.get(k); break; } }
+    const fresh = !it;
+    if (fresh) { it = { id: id6('j'), status: 'new', found: Date.now(), by }; b.jobs.push(it); }
+    // A new job takes everything; a duplicate only fills what is missing (your board copy wins) and records the source.
+    const set = (k, v) => { if (v === undefined || v === null || v === '') return; if (fresh || !it[k]) it[k] = v; };
+    for (const k of ['title', 'company', 'location', 'salary', 'deadline', 'source', 'contract', 'posted']) set(k, j[k] ? clip(j[k], k === 'title' ? 200 : 160) : '');
+    set('url', url);
+    if (j.description) { const d = String(j.description).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000); if (fresh || d.length > (it.description || '').length) it.description = d; }
+    if (Number.isFinite(+j.salaryMin) && j.salaryMin !== null && j.salaryMin !== '') set('salaryMin', Math.round(+j.salaryMin));
+    if (Number.isFinite(+j.salaryMax) && j.salaryMax !== null && j.salaryMax !== '') set('salaryMax', Math.round(+j.salaryMax));
+    if (Array.isArray(j.requirements) && j.requirements.length && (fresh || !(it.requirements || []).length)) it.requirements = j.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
+    set('category', j.category ? clip(j.category, 60) : '');
+    if (url || j.source) { it.sources ||= []; if (!it.sources.some(x => (url && x.url === url) || (!url && x.source === j.source))) it.sources.push({ source: clip(j.source || by, 60), url, at: Date.now() }); it.sources = it.sources.slice(-12); }
+    it.keys = [...new Set([...(it.keys || []), ...keys, ...fingerprints(it)])].slice(0, 24); for (const k of it.keys) b._ix.set(k, it);
+    if (!fresh) it.seenAgain = Date.now();
+    delete it.key; it.updated = Date.now();
     return { it, fresh };
+}
+// Merge duplicates already on the board (from before fingerprints): the copy you have done most with is kept; the
+// others' sources, files and applications move to it.
+export function dedupeBoard() {
+    const b = board(); const apps = applications(); const rank = x => (apps.some(a => a.job === x.id) ? 1000 : 0) + ({ applied: 50, applying: 40, shortlisted: 30, new: 10, hidden: 0 }[x.status] || 0) + (x.match ? 5 : 0) + (x.assess?.length ? 5 : 0) + (x.plan ? 3 : 0) + (x.notes ? 2 : 0);
+    const groups = []; const owner = new Map();
+    for (const x of b.jobs) { x.keys = [...new Set([...(x.keys || []), ...fingerprints(x)])]; let g = null; for (const k of x.keys) if (owner.has(k)) { g = owner.get(k); break; } if (!g) { g = []; groups.push(g); } g.push(x); for (const k of x.keys) owner.set(k, g); }
+    let merged = 0; const keep = [];
+    for (const g of groups) {
+        if (g.length === 1) { keep.push(g[0]); continue; }
+        g.sort((x, y) => rank(y) - rank(x) || x.found - y.found); const w = g[0];
+        for (const l of g.slice(1)) {
+            for (const k of ['company', 'location', 'salary', 'deadline', 'url', 'category', 'salaryMin', 'salaryMax', 'match', 'money', 'plan', 'notes']) if (!w[k] && l[k]) w[k] = l[k];
+            if ((l.description || '').length > (w.description || '').length) w.description = l.description;
+            if (!(w.requirements || []).length && (l.requirements || []).length) w.requirements = l.requirements;
+            w.assess = [...(w.assess || []), ...(l.assess || []).filter(a => !(w.assess || []).some(x => x.framework === a.framework))];
+            w.sources = [...(w.sources || []), ...(l.sources || []), ...(l.url ? [{ source: l.source || 'merged', url: l.url, at: l.found }] : [])].slice(-12);
+            w.keys = [...new Set([...w.keys, ...l.keys])];
+            for (const a of apps) if (a.job === l.id) a.job = w.id;
+            for (const dir of ['drafts', 'advice', 'assess', 'reviews']) { const from = P(dir, l.id), to = P(dir, w.id); try { if (fs.existsSync(from)) { if (!fs.existsSync(to)) fs.renameSync(from, to); else for (const f of fs.readdirSync(from)) if (!fs.existsSync(path.join(to, f))) fs.renameSync(path.join(from, f), path.join(to, f)); } } catch { /* leave it */ } }
+            merged++;
+        }
+        keep.push(w);
+    }
+    if (merged) { b.jobs = keep; saveBoard(b); saveApps(apps); log({ kind: 'job', by: 'box', what: `Merged ${merged} duplicate job${merged === 1 ? '' : 's'}` }); }
+    else saveBoard(b);
+    return { merged, jobs: keep.length };
 }
 export function addJob(body, by = 'phone') {
     const b = board(); if (!clip(body.title, 10)) throw httpError(400, 'A job needs a title.');
@@ -217,14 +277,14 @@ export async function hunt(by = 'phone') {
                     const list = await FETCH[src]({ keywords: s.keywords, location, salaryMin: s.salaryMin, country }, kv);
                     for (const j of list) {
                         if (!j.title) continue; if (want.length && !want.some(w => `${j.title} ${j.category || ''}`.toLowerCase().includes(w))) continue; if (exclude.some(w => `${j.title} ${j.company || ''}`.toLowerCase().includes(w))) continue;
-                        out.found++; const { it: nj, fresh } = upsertJob(b, j, `hunt (${src})`); if (fresh) { fresh_ids.push(nj.id); out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
+                        out.found++; const { it: nj, fresh } = upsertJob(b, j, `hunt (${src})`); if (!fresh) out.duplicates = (out.duplicates || 0) + 1; if (fresh) { fresh_ids.push(nj.id); out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
                     }
                 } catch (e) { out.errors[src] = e.message; }
                 if (src === 'arbeitnow' || src === 'remotive') break;   // these do not take a location
             }
         }
         saveBoard(b); for (const fid of fresh_ids) queueAssess(fid);
-        log({ kind: 'hunt', by, what: `Hunt: ${out.found} seen, ${out.added} new${Object.keys(out.errors).length ? `; errors: ${Object.entries(out.errors).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`, ms: Date.now() - hunting.started });
+        log({ kind: 'hunt', by, what: `Hunt: ${out.found} seen, ${out.added} new, ${out.duplicates || 0} already on the board${Object.keys(out.errors).length ? `; errors: ${Object.entries(out.errors).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`, ms: Date.now() - hunting.started });
         record('activity', 'jobs-hunt', { actor: by, what: `${out.added} new jobs (${out.found} seen)` });
         return out;
     } finally { hunting = null; }
@@ -597,7 +657,7 @@ kit.registerApp('jobs', {
             run: (c, a) => board().jobs.filter(j => (a.status ? j.status === a.status : j.status !== 'hidden') && (!a.unscored || !j.match)).sort((x, y) => y.found - x.found).slice(0, a.limit || 40).map(jobLine).join('\n') || 'No jobs.' },
         { name: 'show_job', description: 'One job in full (description, requirements, match, money).', inputSchema: kit.obj({ id: kit.str('Job id') }, ['id']), run: (c, a) => getJob(a.id) },
         { name: 'add_job', description: 'Add a job you found (the same url or title and company updates it).', inputSchema: kit.obj({ title: kit.str('Job title'), company: kit.str('Employer'), location: kit.str('Where'), salary: kit.str('As advertised'), salaryMin: kit.num('Yearly, low end'), salaryMax: kit.num('Yearly, high end'), deadline: kit.str('YYYY-MM-DD'), url: kit.str('Link to the advert'), description: kit.str('The advert text'), requirements: kit.arr('Each requirement, one per item'), category: kit.str('A short category, e.g. "Data", "Security"') }, ['title']),
-            run: (c, a, by) => jobLine(addJob({ ...a, source: a.source || 'agent' }, by)) },
+            run: (c, a, by) => { const n = board().jobs.length; const it = addJob({ ...a, source: a.source || 'agent' }, by); return `${board().jobs.length === n ? 'Already on the board (merged): ' : ''}${jobLine(it)}`; } },
         { name: 'set_requirements', description: 'Store the requirements you read from a job advert (one per item).', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements') }, ['id', 'requirements']), run: (c, a, by) => jobLine(updateJob(a.id, { requirements: a.requirements }, by)) },
         { name: 'compatibility', description: 'For each requirement of a job, the Me items most likely to be evidence (by shared words). Judge each yourself, open items with me_item, and ask the person for an example when nothing fits.', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements to check, if the job has none stored') }, ['id']),
             run: (c, a) => { const j = getJob(a.id); const reqs = a.requirements?.length ? a.requirements : j.requirements || []; if (!reqs.length) return 'This job has no requirements stored: read the advert (show_job) and call set_requirements first.'; return candidates(reqs).map(r => `• ${r.requirement}\n${r.candidates.length ? r.candidates.map(x => `    ${x.id} ${x.title}${x.level ? ` (${x.level})` : ''} — shares: ${x.hits.join(', ')}`).join('\n') : '    (nothing in Me: a gap, or ask the person)'}`).join('\n'); } },

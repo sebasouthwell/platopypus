@@ -73,7 +73,7 @@ async function renderBoard(box) {
     $$('[data-watch]', box).forEach(x => x.onclick = () => C.openTerminal(x.dataset.watch, 'Job Hunt').catch(e => C.toast(e.message, true)));
     $$('[data-f]', box).forEach(x => x.onclick = () => { S.filter = x.dataset.f; renderBoard(box); });
     $('[data-sort]', box).onchange = e => { S.sort = e.target.value; renderBoard(box); };
-    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.classList.add('busy'); try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new jobs (${r.found} seen)${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.classList.remove('busy'); } };
+    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.classList.add('busy'); try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new job${r.added === 1 ? '' : 's'}${r.duplicates ? `, ${r.duplicates} already on the board` : ''}${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.classList.remove('busy'); } };
     $('[data-web]', box).onclick = () => runAgent('/api/jobs/websearch', {}, 'An agent is searching career pages and job boards. New jobs appear here.');
     $('[data-add]', box).onclick = addJobDialog;
     $$('[data-job]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.job));
