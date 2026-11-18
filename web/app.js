@@ -10,7 +10,19 @@ const icon = (name, cls = 'i') => `<svg class="${cls}"><use href="/sprite.svg?v=
 
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
-async function api(path, { method = 'GET', body, raw = false } = {}) {
+// Cached reads (web/appcache.js) for app screens that opt in with { cache: '<app>', reload }: the last answer shows at once,
+// a background refresh re-runs reload() only when something changed (never mid-typing or with a dialog open).
+// Polls and progress checks don't pass cache, so they always reach the server (ETag'd, so unchanged answers are cheap).
+let appCacheMod = null; const appCaches = {}; const lastAppWrite = {};
+const CACHED_APPS = ['cases', 'research', 'lab', 'prompts', 'schedules', 'addons'];
+async function cachedGet(path, app, reload) {
+    appCacheMod ||= await import('/appcache.js'); const c = appCaches[app] ||= appCacheMod.appCache(app, { fresh: 8000 });
+    if (Date.now() - (lastAppWrite[app] || 0) < 4000) return c.fetch(path);
+    return c.get(path, () => { const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName); if (reload && !typing && $('#dialog').hidden) Promise.resolve(reload()).catch(() => {}); });
+}
+async function api(path, { method = 'GET', body, raw = false, cache = null, reload = null } = {}) {
+    if (cache && method === 'GET' && !raw) return cachedGet(path, cache, reload);
+    if (method !== 'GET') { const app = String(path).split('/')[2]; if (CACHED_APPS.includes(app)) { lastAppWrite[app] = Date.now(); appCaches[app]?.invalidate(); } }
     const headers = { 'X-Plato': '1' };
     if (body !== undefined && !(body instanceof Blob)) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, { method, headers, body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body), credentials: 'same-origin' });
@@ -2796,7 +2808,7 @@ function cronWords(c) {
 }
 const SCHED_TEMPLATE = '#!/usr/bin/env bash\n# What this routine does, in one line.\nset -euo pipefail\ncd "$PLATO_ROUTINE_DIR"   # its own work folder\n\necho "Ran at $(date -u)"\n';
 async function loadSchedules() {
-    const d = await api('/api/schedules'); const body = $('#sched-body'); if (!body) return;
+    const d = await api('/api/schedules', { cache: 'schedules', reload: loadSchedules }); const body = $('#sched-body'); if (!body) return;
     const sub = $('#more-schedules-sub'); const on = d.items.filter(i => i.state === 'on').length, prop = d.items.filter(i => i.state === 'proposed').length;
     if (sub) sub.textContent = d.items.length ? `${on} on${prop ? ` · ${prop} waiting for you` : ''}` : 'Routines the box runs on a timetable';
     const proposed = d.items.filter(i => i.state === 'proposed'), rest = d.items.filter(i => i.state !== 'proposed');
@@ -3462,7 +3474,7 @@ function bindAsks(root, then) {
 }
 
 async function loadResearch() {
-    const r = await api('/api/research');
+    const r = await api('/api/research', { cache: 'research', reload: loadResearch });
     const sub = $('#more-research-sub'); if (sub) sub.textContent = r.asks.length ? `${r.asks.length} need${r.asks.length === 1 ? 's' : ''} you` : r.topics.length ? `${r.topics.length} topic${r.topics.length === 1 ? '' : 's'}` : 'Papers your agents write from sources';
     const body = $('#research-body');
     let html = `<div id="r-agent"></div>`;
@@ -3483,7 +3495,7 @@ async function loadResearch() {
 function openResearch() { go('apps'); push('research'); }
 let appsPoll = null;
 async function loadApps() {
-    const { apps } = await api('/api/addons'); const box = $('#apps-body'); if (!box) return;
+    const { apps } = await api('/api/addons', { cache: 'addons', reload: loadApps }); const box = $('#apps-body'); if (!box) return;
     box.innerHTML = apps.map(a => `<div class="app-card ${a.added ? 'on' : ''}" data-app="${esc(a.id)}">
         <div class="app-top"><span class="ico ${a.added ? 'brass' : ''}">${icon(a.icon)}</span><div class="app-name"><b>${esc(a.title)}</b><span class="app-state ${a.installing ? 'busy' : a.added ? 'ok' : ''}">${a.installing ? 'Adding…' : a.added ? 'Added' : 'Not added'}</span></div>
             ${a.added ? `<button class="btn pri" data-open>${icon('chevron')}Open</button>` : a.installing ? '' : `<button class="btn pri" data-add>${icon('plus')}Add app</button>`}</div>
@@ -3528,7 +3540,7 @@ let promptsMod = null;
 async function promptsUI() { if (!promptsMod) { promptsMod = await import(`/prompts.js?v=${ASSET_V}`); promptsMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, $, $$ }); } return promptsMod; }
 const mdLite = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`).replace(/^# (.*)$/gm, '<h4>$1</h4>');
 async function loadLab() {
-    const d = await api('/api/lab'); labState.tools = d.tools; const box = $('#lab-body');
+    const d = await api('/api/lab', { cache: 'lab', reload: loadLab }); labState.tools = d.tools; const box = $('#lab-body');
     box.innerHTML = `<p class="r-sub">Test your own domains, services and applications, wherever they are hosted. Each engagement has a scope: only targets in it can be tested, by you or an agent.</p>
         ${d.engagements.map(e => `<button class="row lab-row" data-eng="${esc(e.slug)}"><span class="ico ${e.verified ? 'brass' : ''}">${icon('shield')}</span><div class="main"><div class="title">${esc(e.title)}</div><div class="sub">${e.targets} target${e.targets === 1 ? '' : 's'}${e.targets ? ` · ${e.verified} ready to test` : ''} · ${e.runs} run${e.runs === 1 ? '' : 's'}</div></div>${icon('chevron', 'i chev')}</button>`).join('')}
         <button class="r-new" data-new-eng><span class="ico brass">${icon('plus')}</span>New engagement</button>`;
@@ -3541,7 +3553,7 @@ async function loadLab() {
 }
 function openEng(slug, tab) { labState.slug = slug; if (tab) labState.tab = tab; push('eng'); loadEng().catch(e => toast(e.message, true)); }
 async function loadEng() {
-    const slug = labState.slug; const enc = encodeURIComponent(slug); const e = await api(`/api/lab/${enc}`);
+    const slug = labState.slug; const enc = encodeURIComponent(slug); const e = await api(`/api/lab/${enc}`, { cache: 'lab', reload: loadEng });
     if (!Object.keys(labState.tools).length) labState.tools = (await api('/api/lab')).tools;
     $('#eng-title').textContent = e.title;
     const running = e.runs.some(r => r.status === 'running');
@@ -3720,7 +3732,7 @@ async function openTopic(slug, tab) {
 }
 async function loadTopic() {
     const slug = researchState.slug; if (!slug) return;
-    const t = researchState.data = await api(`/api/research/${encodeURIComponent(slug)}`);
+    const t = researchState.data = await api(`/api/research/${encodeURIComponent(slug)}`, { cache: 'research', reload: loadTopic });
     $('#topic-title').textContent = t.title;
     const pendingN = t.asks.filter(a => a.status === 'pending').length;
     $('#topic-seg').innerHTML = [['paper', 'Paper'], ['sources', `Sources${t.sources.length ? `<em>${t.sources.length}</em>` : ''}`], ['notes', 'Notes'], ['ask', 'Ask'], ['agent', `Agent${pendingN ? `<em>${pendingN}</em>` : ''}`]].map(([k, l]) => `<button data-tt="${k}" class="${researchState.tab === k ? 'on' : ''}">${l}</button>`).join('');

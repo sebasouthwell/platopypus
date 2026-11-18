@@ -977,6 +977,12 @@ phone's Update button. Mechanism:
     sheet still loads them.
   - The Me tab builds only the open sub-tab's board and item list.
 
+- **2.21.3**: The same fast caching for Conspiracy, Research, Security Lab, AI prompts, Schedules and Apps. `api(path,
+  { cache: '<app>', reload })` in app.js opts a screen's page-load read into `web/appcache.js` (shown at once,
+  refreshed in the background, reload() re-run only when something changed); polls and progress checks don't opt in,
+  so they always reach the server. Writes to an app refresh its cache, and reads for 4 s after a write go to the server.
+  The server sends ETags (304 when unchanged) on those apps' JSON reads.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

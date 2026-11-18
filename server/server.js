@@ -149,7 +149,7 @@ function send(res, status, body, headers = {}) {
     if (res.auditHook && status < 300) { try { res.auditHook(body); } catch { /* never block the reply */ } }
     const data = typeof body === 'string' ? body : JSON.stringify(body);
     // Apps whose web views keep a cache (web/appcache.js) get an ETag: an unchanged answer comes back as 304, no body.
-    const rq = res.req; if (status === 200 && rq && rq.method === 'GET' && typeof body !== 'string' && /^\/api\/jobs(\/|$|\?)/.test(rq.url || '')) {
+    const rq = res.req; if (status === 200 && rq && rq.method === 'GET' && typeof body !== 'string' && /^\/api\/(jobs|cases|research|lab|prompts|schedules|addons)(\/|$|\?)/.test(rq.url || '')) {
         const tag = `W/"${crypto.createHash('sha1').update(data).digest('base64url').slice(0, 22)}"`;
         if (rq.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'private, no-cache', ...securityHeaders() }); return res.end(); }
         headers = { ...headers, ETag: tag, 'Cache-Control': 'private, no-cache' };

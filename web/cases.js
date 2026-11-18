@@ -36,7 +36,7 @@ export function setup(ctx) { C = ctx; }
 
 // ---------- the list ----------
 export async function loadCases() {
-    const { esc, icon, $, $$ } = C; const d = await C.api('/api/cases'); const box = $('#cases-body');
+    const { esc, icon, $, $$ } = C; const d = await C.api('/api/cases', { cache: 'cases', reload: loadCases }); const box = $('#cases-body');
     box.innerHTML = `<p class="r-sub">Follow the big questions down the rabbit hole: who is tied to whom, where the money went, why a deal or a market move happened. Everything on a case's board cites its source.</p>
         ${d.cases.map(c => { const seen = Number(localStorage.getItem(seenKey(c.slug)) || 0); return `<button class="row cs-row" data-case="${esc(c.slug)}"><span class="ico brass">${icon('search')}</span><div class="main"><div class="title">${esc(c.title)}</div><div class="sub">${c.question ? `${esc(c.question)} · ` : ''}${c.nodes} cards · ${c.links} strings · ${c.sources} sources${c.open ? ` · ${c.open} open` : ''}${!seen ? ' · not opened yet' : ''}</div></div>${icon('chevron', 'i chev')}</button>`; }).join('')}
         <button class="r-new" data-new-case><span class="ico brass">${icon('plus')}</span>New case</button>
@@ -63,7 +63,7 @@ export function openCase(slug, tab) {
 }
 export async function loadCase({ quiet = false } = {}) {
     const { $, $$, esc } = C; const enc = encodeURIComponent(S.slug);
-    const d = await C.api(`/api/cases/${enc}`); const prev = S.data; S.data = d;
+    const d = await C.api(`/api/cases/${enc}`, quiet ? {} : { cache: 'cases', reload: () => loadCase({ quiet: true }) }); const prev = S.data; S.data = d;
     if (!quiet || !prev) {
         S.lastSeen = Number(localStorage.getItem(seenKey(S.slug)) || 0);
         localStorage.setItem(seenKey(S.slug), String(Date.now()));

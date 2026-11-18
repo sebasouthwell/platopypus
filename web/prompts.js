@@ -57,7 +57,7 @@ export function renderDiff(oldText, newText, { left = 'Before', right = 'After' 
 // ---------- the page ----------
 const STATE = { default: ['Default', ''], custom: ['Yours', 'kelp'], outdated: ['Yours · based on an old default', 'flare'] };
 export async function loadPrompts() {
-    const { esc, icon, $, $$ } = C; const d = await C.api('/api/prompts'); const body = $('#prompts-body');
+    const { esc, icon, $, $$ } = C; const d = await C.api('/api/prompts', { cache: 'prompts', reload: loadPrompts }); const body = $('#prompts-body');
     const sub = $('#more-prompts-sub'); if (sub) sub.textContent = d.review ? `${d.review} need${d.review === 1 ? 's' : ''} your review after an update` : `${d.prompts.filter(p => p.state !== 'default').length} of yours · the instructions agents get`;
     const apps = [...new Set(d.prompts.map(p => p.app))];
     body.innerHTML = `<p class="note">The instructions PlatOpypus gives agents. Edit any of them: your version is used instead of the default. When an update changes a default you edited, it is marked here so you can compare and choose.</p>
