@@ -16,6 +16,10 @@ const md = s => C.esc(s || '').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(
 const b64 = file => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => bad(new Error('Could not read the file.')); r.readAsDataURL(file); });
 
 export function setup(ctx) { C = ctx; }
+async function runAgent(url, body, msg) {
+    try { const r = await C.api(url, { method: 'POST', body }); const { panel, close } = C.openDialog(`<h2>${C.icon('claude')}Started</h2><p class="muted">${C.esc(msg)}</p><div class="buttons"><button data-close>OK</button><button class="primary" data-watch>Watch it work</button></div>`, { size: 'small' }); C.$('[data-watch]', panel).onclick = () => { close(); C.openTerminal(r.shell, 'Job Hunt'); }; }
+    catch (e) { C.toast(e.message, true); }
+}
 
 export async function loadJobs(tab) {
     if (tab) S.tab = tab; clearInterval(S.poll); S.poll = null;
@@ -52,7 +56,7 @@ async function renderBoard(box) {
           <div class="seg jh-filter">${[['active', 'Active'], ['new', 'New'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']].map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
           <div class="jh-toolrow">
             <select data-sort aria-label="Sort">${[['match', 'Best match'], ['left', 'Most left over'], ['new', 'Newest'], ['deadline', 'Deadline']].map(([k, l]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-            <button class="btn" data-hunt>${icon('refresh')}Search job sites</button><button class="btn" data-add>${icon('plus')}Add a job</button>
+            <button class="btn" data-hunt>${icon('refresh')}Search job sites</button><button class="btn" data-web>${icon('globe')}Search the web</button><button class="btn" data-add>${icon('plus')}Add a job</button>
           </div>
         </div>
         <div class="jh-jobs">${jobCards(b.jobs) || `<p class="note">${b.jobs.length ? 'Nothing here with this filter.' : 'No jobs yet. Tell it what you want above, or set the search in Setup and search the job sites.'}</p>`}</div>`;
@@ -66,6 +70,7 @@ async function renderBoard(box) {
     $('[data-sort]', box).onchange = e => { S.sort = e.target.value; renderBoard(box); };
     $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Searching…'; try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new jobs (${r.found} seen)${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; } };
     $('[data-add]', box).onclick = addJobDialog;
+    $('[data-web]', box).onclick = () => runAgent('/api/jobs/websearch', {}, 'An agent is searching career pages and job boards. New jobs appear here.');
     $$('[data-job]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.job));
     if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden) renderBoard(box).catch(() => {}); }, 20_000);
 }
@@ -166,18 +171,39 @@ async function jobDialog(id) {
 
 // ---------- Me: a map of everything you have done ----------
 async function renderMe(box) {
-    const { esc, icon, $, $$ } = C; const me = await C.api('/api/jobs/me'); const kinds = S.ov.kinds;
-    const gaps = me.gaps.filter(g => g.status === 'open');
+    const { esc, icon, $, $$ } = C; const [me, dl] = await Promise.all([C.api('/api/jobs/me'), C.api('/api/jobs/docs')]); const kinds = S.ov.kinds;
+    const gaps = me.gaps.filter(g => g.status === 'open'); const props = me.items.filter(i => i.status === 'proposed');
     box.innerHTML = `
         <p class="r-sub">Everything you have done, in one place: agents check every job against it, and ask you for examples when a job wants something it cannot find here.</p>
-        <div class="r-actions"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button>
+        <div class="r-actions"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button><button class="btn" data-import>${icon('file-text')}Build from my CV</button><button class="btn" data-findme>${icon('globe')}Find me online</button>
           <div class="seg jh-meview">${[['map', 'Map'], ['list', 'List']].map(([k, l]) => `<button data-mv="${k}" class="${S.meView === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+        ${props.length ? `<div class="jh-props"><h3 class="jh-h">To confirm <span class="muted">· found by agents; not used for matching until you confirm</span></h3>${props.map(i => `<div class="jh-prop ${esc(i.confidence || 'medium')}"><div class="main"><div class="t"><span class="kdot" style="--k:${KIND_COLOR[i.kind]}"></span>${esc(i.title)}<span class="conf">${esc(i.confidence || 'medium')}</span></div><div class="muted">${esc([kinds[i.kind], i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`].filter(Boolean).join(' · '))}</div>${i.summary ? `<div class="s">${esc(i.summary)}</div>` : ''}${i.why ? `<div class="why">${esc(i.why)}</div>` : ''}<div class="src">${(i.sources || []).map(x => x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : `<span>${esc(x.title)}</span>`).join('')}</div></div><div class="acts"><button class="btn pri" data-ok-me="${i.id}">${icon('check')}It's me</button><button class="btn" data-me="${i.id}">Edit</button><button class="btn" data-no-me="${i.id}">${icon('x')}No</button></div></div>`).join('')}${props.length > 1 ? '<div class="r-actions"><button class="text-btn" data-ok-high>Confirm all high-confidence</button></div>' : ''}</div>` : ''}
         ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}
         ${me.items.length ? (S.meView === 'map' ? `<div class="jh-map">${meMap(me.items, kinds)}</div>` : '') : '<p class="note">Nothing here yet. The quickest start: talk to an agent about your projects and jobs, or add your CV on the CV tab and ask the agent to read it.</p>'}
         ${S.meView === 'list' || !me.items.length ? '' : '<p class="muted jh-maphint">Tap a dot to open it. Lines join related things.</p>'}
-        <div class="jh-melist" ${S.meView === 'map' ? 'hidden' : ''}>${Object.entries(kinds).map(([k, l]) => { const its = me.items.filter(i => i.kind === k); return its.length ? `<h3 class="jh-h" style="--k:${KIND_COLOR[k]}"><span class="kdot"></span>${esc(l)}</h3>${its.map(i => `<button class="row" data-me="${i.id}"><div class="main"><div class="title">${esc(i.title)}</div><div class="sub muted">${esc([i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`, i.level].filter(Boolean).join(' · '))}</div></div></button>`).join('')}` : ''; }).join('')}</div>`;
+        <h3 class="jh-h">My documents</h3>
+        <p class="note">Reports, papers, a dissertation, slides: anything that shows what you did. An agent breaks each one into the project, the skills it shows and the results, citing the page.</p>
+        ${dl.docs.map(d => `<div class="row"><span class="ico">${icon('file-text')}</span><div class="main"><div class="title">${esc(d.name)}</div><div class="sub muted">${esc([d.kind, d.original, d.read ? 'read into Me' : 'not read yet'].filter(Boolean).join(' · '))}</div></div><a class="text-btn" href="/api/jobs/docs/${d.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-docread="${d.id}">${d.read ? 'Read again' : 'Read into Me'}</button><button class="text-btn dim" data-docdel="${d.id}">Remove</button></div>`).join('')}
+        <div class="r-actions"><label class="btn">${icon('upload')}Add documents<input type="file" multiple accept=".pdf,.docx,.odt,.pptx,.md,.txt,.tex" data-docup hidden></label></div>
+        <div class="jh-melist" ${S.meView === 'map' ? 'hidden' : ''}>${Object.entries(kinds).map(([k, l]) => { const its = me.items.filter(i => i.kind === k); return its.length ? `<h3 class="jh-h" style="--k:${KIND_COLOR[k]}"><span class="kdot"></span>${esc(l)}</h3>${its.map(i => `<button class="row" data-me="${i.id}"><div class="main"><div class="title">${esc(i.title)}${i.status === 'proposed' ? ' <span class="jh-def" style="color:var(--brass);border-color:rgba(240,184,64,.4)">to confirm</span>' : ''}</div><div class="sub muted">${esc([i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`, i.level, (i.sources || []).length ? `${i.sources.length} source${i.sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '))}</div></div></button>`).join('')}` : ''; }).join('')}</div>`;
     $('[data-talk]', box).onclick = async () => { try { const r = await C.api('/api/jobs/me/interview', { method: 'POST', body: {} }); C.openTerminal(r.shell, 'Job Hunt'); } catch (e) { C.toast(e.message, true); } };
     $('[data-add]', box).onclick = () => meDialog(null, kinds);
+    $('[data-import]', box).onclick = importDialog;
+    $('[data-docup]', box).onchange = async e => {
+        const files = [...e.target.files]; if (!files.length) return; const added = [];
+        for (const f of files) { try { added.push(await C.api('/api/jobs/docs', { method: 'POST', body: { name: f.name.replace(/\.[^.]+$/, ''), file: f.name, data: await b64(f) } })); } catch (x) { C.toast(`${f.name}: ${x.message}`, true); } }
+        if (!added.length) return renderMe(box);
+        const { panel, close } = C.openDialog(`<h2>${icon('file-text')}${added.length} document${added.length === 1 ? '' : 's'} added</h2><p class="muted">Read ${added.length === 1 ? 'it' : 'them'} into Me now? An agent breaks each one into the project, skills and results, as proposals for you to confirm.</p><div class="buttons"><button data-close>Later</button><button class="primary" data-ok>Read into Me</button></div>`, { size: 'small' });
+        panel.querySelector('[data-close]').addEventListener('click', () => renderMe(box));
+        $('[data-ok]', panel).onclick = async () => { close(); for (const d of added) { try { await C.api(`/api/jobs/docs/${d.id}/read`, { method: 'POST', body: {} }); } catch (x) { C.toast(x.message, true); } } C.toast(`Reading ${added.length} document${added.length === 1 ? '' : 's'}: proposals appear under "To confirm".`); renderMe(box); };
+    };
+    $$('[data-docread]', box).forEach(x => x.onclick = () => runAgent(`/api/jobs/docs/${x.dataset.docread}/read`, {}, 'An agent is reading the document. Its proposals appear under "To confirm".'));
+    $$('[data-docdel]', box).forEach(x => x.onclick = async () => { if (await C.confirmDialog({ title: 'Remove this document?', text: 'The file is deleted from the box. Me items found in it stay.', action: 'Remove' })) { await C.api(`/api/jobs/docs/${x.dataset.docdel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderMe(box); } });
+    $('[data-findme]', box).onclick = findMeDialog;
+    const verify = async (id, action) => { try { await C.api(`/api/jobs/me/${id}/${action}`, { method: 'POST' }); } catch (e) { C.toast(e.message, true); } };
+    $$('[data-ok-me]', box).forEach(x => x.onclick = async () => { await verify(x.dataset.okMe, 'confirm'); renderMe(box); });
+    $$('[data-no-me]', box).forEach(x => x.onclick = async () => { await verify(x.dataset.noMe, 'reject'); renderMe(box); });
+    const hi = $('[data-ok-high]', box); if (hi) hi.onclick = async () => { for (const i of props.filter(p => p.confidence === 'high')) await verify(i.id, 'confirm'); renderMe(box); };
     $$('[data-mv]', box).forEach(x => x.onclick = () => { S.meView = x.dataset.mv; renderMe(box); });
     $$('[data-me]', box).forEach(x => x.onclick = () => meDialog(me.items.find(i => i.id === x.dataset.me), kinds, me.items));
     $$('[data-gap]', box).forEach(x => x.onclick = () => gapDialog(me.gaps.find(g => g.id === x.dataset.gap), kinds));
@@ -200,7 +226,7 @@ function meMap(items, kinds) {
     });
     for (const it of items) for (const l of it.links || []) { const a = pos.get(it.id), b = pos.get(l); if (a && b && it.id < l) svg += `<path d="M${a.x},${a.y} Q${cx},${cy} ${b.x},${b.y}" class="ln"/>`; }
     for (const it of items) { const p = pos.get(it.id); if (!p) continue; const lv = { aware: 4, working: 5.5, strong: 7, expert: 8.5 }[it.level] || 5; const right = p.x >= cx;
-        svg += `<g class="leaf" data-me="${it.id}" tabindex="0" role="button" aria-label="${esc(it.title)}"><circle cx="${p.x}" cy="${p.y}" r="${lv}" style="fill:${KIND_COLOR[p.k]}"/><text x="${p.x + (right ? 12 : -12)}" y="${p.y + 4}" text-anchor="${right ? 'start' : 'end'}">${esc(it.title.length > 26 ? `${it.title.slice(0, 25)}…` : it.title)}</text></g>`; }
+        svg += `<g class="leaf${it.status === 'proposed' ? ' prop' : ''}" data-me="${it.id}" tabindex="0" role="button" aria-label="${esc(it.title)}"><circle cx="${p.x}" cy="${p.y}" r="${lv}" style="fill:${KIND_COLOR[p.k]}"/><text x="${p.x + (right ? 12 : -12)}" y="${p.y + 4}" text-anchor="${right ? 'start' : 'end'}">${esc(it.title.length > 26 ? `${it.title.slice(0, 25)}…` : it.title)}</text></g>`; }
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of your experience">${svg}<g class="me"><circle cx="${cx}" cy="${cy}" r="26"/><text x="${cx}" y="${cy + 5}" text-anchor="middle">Me</text></g></svg>`;
 }
 function meDialog(it, kinds, all = []) {
@@ -215,9 +241,10 @@ function meDialog(it, kinds, all = []) {
         <div class="field"><label for="me-e">Evidence (one per line: results, numbers, links)</label><textarea id="me-e" rows="3">${esc((x.evidence || []).join('\n'))}</textarea></div>
         <div class="field"><label for="me-g">Skills and tools it shows (comma-separated)</label><input id="me-g" value="${esc((x.tags || []).join(', '))}"></div>
         ${all.length > 1 ? `<div class="field"><label>Related</label><div class="jh-rel">${all.filter(o => o.id !== x.id).map(o => `<label><input type="checkbox" value="${o.id}" ${(x.links || []).includes(o.id) ? 'checked' : ''}>${esc(o.title)}</label>`).join('')}</div></div>` : ''}
-        <div class="buttons">${it ? '<button class="danger" data-del>Delete</button>' : ''}<button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+        ${(x.sources || []).length ? `<div class="field"><label>Sources</label><div class="jh-src">${x.sources.map(s2 => s2.url ? `<a href="${esc(s2.url)}" target="_blank" rel="noopener noreferrer">${esc(s2.title || s2.url)}</a>${s2.note ? ` <span class="muted">${esc(s2.note)}</span>` : ''}` : `<span>${esc(s2.title)}</span>`).join('<br>')}</div></div>` : ''}
+        <div class="buttons">${it ? '<button class="danger" data-del>Delete</button>' : ''}<button data-close>Cancel</button><button class="primary" data-ok>${x.status === 'proposed' ? 'Save and confirm' : 'Save'}</button></div>`);
     $('[data-ok]', panel).onclick = async () => {
-        try { await C.api('/api/jobs/me', { method: 'POST', body: { kind: $('#me-k', panel).value, title: $('#me-t', panel).value, org: $('#me-o', panel).value, from: $('#me-f', panel).value, to: $('#me-to', panel).value, level: $('#me-l', panel).value || undefined, summary: $('#me-s', panel).value, evidence: $('#me-e', panel).value.split('\n').map(s => s.trim()).filter(Boolean), tags: $('#me-g', panel).value, ...(all.length > 1 ? { links: [...panel.querySelectorAll('.jh-rel input:checked')].map(c => c.value) } : {}) } }); close(); reload(); } catch (e) { C.toast(e.message, true); }
+        try { if (x.status === 'proposed') await C.api(`/api/jobs/me/${x.id}/confirm`, { method: 'POST' }); await C.api('/api/jobs/me', { method: 'POST', body: { kind: $('#me-k', panel).value, title: $('#me-t', panel).value, org: $('#me-o', panel).value, from: $('#me-f', panel).value, to: $('#me-to', panel).value, level: $('#me-l', panel).value || undefined, summary: $('#me-s', panel).value, evidence: $('#me-e', panel).value.split('\n').map(s => s.trim()).filter(Boolean), tags: $('#me-g', panel).value, ...(all.length > 1 ? { links: [...panel.querySelectorAll('.jh-rel input:checked')].map(c => c.value) } : {}) } }); close(); reload(); } catch (e) { C.toast(e.message, true); }
     };
     const del = $('[data-del]', panel); if (del) del.onclick = async () => { close(); if (await C.confirmDialog({ title: `Delete "${it.title}"?`, text: 'It goes from Me and from any links.', action: 'Delete' })) { await C.api(`/api/jobs/me/${it.id}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); reload(); } };
 }
@@ -264,10 +291,11 @@ async function renderCv(box) {
     const sv = $('[data-version]', box); if (sv) sv.onclick = () => saveVersionDialog(cats);
     $$('[data-cvdef]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/cvs/${x.dataset.cvdef}`, { method: 'POST', body: { defaultFor: x.dataset.cat } }).catch(e => C.toast(e.message, true)); renderCv(box); });
     $$('[data-cvedit]', box).forEach(x => x.onclick = () => cvFileDialog(u.cvs.find(c => c.id === x.dataset.cvedit)));
+    $$('[data-cvimport]', box).forEach(x => x.onclick = () => runAgent('/api/jobs/me/import', { cv: x.dataset.cvimport, template: !t.template }, `An agent is reading this CV${t.template ? '' : ' (and making your LaTeX template from it)'}. Its proposals appear under "To confirm" on the Me tab.`));
     $('[data-cvfile]', box).onchange = async e => { const f = e.target.files[0]; if (!f) return; cvFileDialog(null, f); };
 }
 const choice = () => Object.fromEntries(Object.entries(S.choice).map(([k, v]) => [k, v === 'off' ? null : v]));
-function cvRow(c) { const { esc } = C; return `<div class="row"><div class="main"><div class="title">${esc(c.name)}${(c.defaultFor || []).length ? ' <span class="jh-def">default</span>' : ''}</div><div class="sub muted">${esc(c.original)}${c.notes ? ` · ${esc(c.notes)}` : ''}</div></div><a class="text-btn" href="/api/jobs/cvs/${c.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-cvedit="${c.id}">Edit</button></div>`; }
+function cvRow(c) { const { esc } = C; return `<div class="row"><div class="main"><div class="title">${esc(c.name)}${(c.defaultFor || []).length ? ' <span class="jh-def">default</span>' : ''}</div><div class="sub muted">${esc(c.original)}${c.notes ? ` · ${esc(c.notes)}` : ''}</div></div><a class="text-btn" href="/api/jobs/cvs/${c.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-cvedit="${c.id}">Edit</button><button class="text-btn" data-cvimport="${c.id}">Read into Me</button></div>`; }
 function cvFileDialog(cv, file) {
     const { esc, icon, $ } = C;
     const { panel, close } = C.openDialog(`<h2>${icon('file-text')}${cv ? esc(cv.name) : 'Add a CV file'}</h2>
@@ -364,4 +392,25 @@ async function renderSetup(box) {
             ${v.needs.length ? `<div class="jh-keyrow">${v.needs.map(n => `<input data-key="${k}" data-env="${n}" type="password" autocomplete="off" placeholder="${esc(n)}${v.ready ? ' (saved; paste to replace)' : ''}">`).join('')}<button class="btn" data-savekey="${k}">Save</button></div>${v.signup ? `<a class="text-btn" href="${esc(v.signup)}" target="_blank" rel="noopener">Get a key</a>` : ''}` : ''}</div>`).join('')}`;
     $('[data-save]', box).onclick = async () => { try { await C.api('/api/jobs/settings', { method: 'POST', body: { keywords: $('#st-k', box).value, locations: $('#st-l', box).value, countries: $('#st-co', box).value, nationality: $('#st-na', box).value, remote: $('#st-r', box).checked, salaryMin: $('#st-m', box).value, exclude: $('#st-x', box).value, agent: $('#st-a', box).value, model: $('#st-mo', box).value, sources: $$('[data-src]', box).filter(x => x.checked).map(x => x.dataset.src), money: { studentLoan: $('#st-sl', box).value, pension: Number($('#st-pe', box).value) || 0, notes: $('#st-mn', box).value } } }); C.toast('Saved'); reload(); } catch (e) { C.toast(e.message, true); } };
     $$('[data-savekey]', box).forEach(b => b.onclick = async () => { const k = b.dataset.savekey; const values = Object.fromEntries($$(`[data-key="${k}"]`, box).map(i => [i.dataset.env, i.value.trim()]).filter(([, v]) => v)); if (!Object.keys(values).length) return C.toast('Paste the key first.', true); try { await C.api('/api/jobs/key', { method: 'POST', body: { source: k, values } }); C.toast('Saved in the Vault'); reload(); } catch (e) { C.toast(e.message, true); } });
+}
+
+// Read a CV file into Me (as proposals), optionally making the LaTeX template from it.
+async function importDialog() {
+    const { esc, icon, $ } = C; const [u, t] = await Promise.all([C.api('/api/jobs/cvs'), C.api('/api/jobs/cv')]);
+    if (!u.cvs.length) { C.toast('Add your CV file on the CV tab first.', true); return loadJobs('cv'); }
+    const { panel, close } = C.openDialog(`<h2>${icon('file-text')}Build Me from my CV</h2><p class="muted">An agent reads the CV and proposes each project, job, qualification and skill in it. You confirm them here.</p>
+        <div class="field"><label for="im-cv">CV file</label><select id="im-cv">${u.cvs.map(c => `<option value="${c.id}">${esc(c.name)} · ${esc(c.original)}</option>`).join('')}</select></div>
+        ${t.template ? '' : '<label class="jh-check"><input type="checkbox" id="im-tpl" checked>Also make my LaTeX CV template from it</label>'}
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Start</button></div>`);
+    $('[data-ok]', panel).onclick = () => { close(); runAgent('/api/jobs/me/import', { cv: $('#im-cv', panel).value, template: !!$('#im-tpl', panel)?.checked }, 'An agent is reading your CV. Its proposals appear under "To confirm" on the Me tab.'); };
+}
+// Like a Conspiracy probe, aimed at your own public work: sourced proposals you confirm.
+function findMeDialog() {
+    const { icon, $ } = C;
+    const { panel, close } = C.openDialog(`<h2>${icon('globe')}Find me online</h2><p class="muted">An agent searches for your public work (code, projects, publications, talks, awards, articles), using only what you give here. Every find comes with its sources and how sure it is that it's you, and you confirm each one. It doesn't collect private details.</p>
+        <div class="field"><label for="fm-n">Your name, as it appears publicly</label><input id="fm-n" maxlength="120"></div>
+        <div class="field"><label for="fm-l">Your profiles and links (one per line)</label><textarea id="fm-l" rows="3" placeholder="https://github.com/you&#10;https://your-site.example"></textarea></div>
+        <div class="field"><label for="fm-h">Hints: where you studied or worked, topics</label><textarea id="fm-h" rows="2" placeholder="Computer Science, 2021–2025; security; Splunk"></textarea></div>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Search</button></div>`);
+    $('[data-ok]', panel).onclick = () => { const name = $('#fm-n', panel).value.trim(); if (!name) return C.toast('Give your name.', true); close(); runAgent('/api/jobs/me/findme', { name, links: $('#fm-l', panel).value, hints: $('#fm-h', panel).value }, 'An agent is looking for your public work. Finds appear under "To confirm" on the Me tab, each with sources.'); };
 }

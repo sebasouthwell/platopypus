@@ -90,15 +90,25 @@ export function addMe(b, by = 'phone') {
     const m = me(); const kind = ME_KINDS[b.kind] ? b.kind : 'project'; const title = clip(b.title, 160); if (title.length < 2) throw httpError(400, 'Give it a title.');
     const same = m.items.find(i => i.kind === kind && i.title.toLowerCase() === title.toLowerCase());
     const it = same || { id: id6('m'), kind, title, created: Date.now(), by };
-    if (b.summary !== undefined) it.summary = clip(b.summary, 3000);
-    if (b.level !== undefined) it.level = LEVELS.includes(b.level) ? b.level : it.level;
+    const keep = b.proposed && same && same.status !== 'proposed';   // a confirmed item: proposals add evidence and sources, never rewrite it
+    if (b.summary !== undefined && !(keep && it.summary)) it.summary = clip(b.summary, 3000);
+    if (b.level !== undefined && !(keep && it.level)) it.level = LEVELS.includes(b.level) ? b.level : it.level;
     for (const k of ['org', 'from', 'to', 'where']) if (b[k] !== undefined) it[k] = clip(b[k], 120);
     if (b.tags !== undefined) it.tags = [...new Set((Array.isArray(b.tags) ? b.tags : String(b.tags).split(',')).map(t => clip(t, 40).toLowerCase()).filter(Boolean))].slice(0, 30);
-    if (b.evidence !== undefined) it.evidence = (Array.isArray(b.evidence) ? b.evidence : [b.evidence]).map(e => clip(e, 500)).filter(Boolean).slice(0, 20);
+    if (b.evidence !== undefined) { const ev = (Array.isArray(b.evidence) ? b.evidence : [b.evidence]).map(e => clip(e, 500)).filter(Boolean); it.evidence = (b.proposed && same ? [...new Set([...(same.evidence || []), ...ev])] : ev).slice(0, 30); }
     if (b.links !== undefined) it.links = (Array.isArray(b.links) ? b.links : String(b.links).split(',')).map(x => x.trim()).filter(x => m.items.some(i => i.id === x)).slice(0, 40);
+    if (b.sources !== undefined) { const src = (Array.isArray(b.sources) ? b.sources : [b.sources]).map(x => (typeof x === 'string' ? { url: x } : x)).map(x => ({ url: clip(x.url, 600), title: clip(x.title, 200), note: clip(x.note, 400) })).filter(x => x.url || x.title); const all = b.proposed && same ? [...(same.sources || []), ...src] : src; it.sources = all.filter((x, i) => all.findIndex(y => y.url === x.url && y.title === x.title && y.note === x.note) === i).slice(0, 20); }
+    // Proposed: found by an agent (in your CV, or online) and waiting for you to confirm. Only confirmed items count in matching.
+    if (b.proposed) { if (same && same.status !== 'proposed') it.newEvidence = Date.now(); if (!same || same.status === 'proposed') { it.status = 'proposed'; it.why = clip(b.why, 600); it.confidence = ['high', 'medium', 'low'].includes(b.confidence) ? b.confidence : 'medium'; } }
+    else if (by === 'phone') { delete it.status; delete it.confidence; }
     it.updated = Date.now();
-    if (!same) m.items.push(it); saveMe(m); log({ kind: 'me', by, what: `${same ? 'Updated' : 'Added'} ${ME_KINDS[kind].toLowerCase()}: ${title}` });
+    if (!same) m.items.push(it); saveMe(m); log({ kind: 'me', by, what: `${it.status === 'proposed' ? 'Proposed' : same ? 'Updated' : 'Added'} ${ME_KINDS[kind].toLowerCase()}: ${title}` });
     return it;
+}
+export function verifyMe(id, action) {
+    const m = me(); const it = m.items.find(i => i.id === id); if (!it) throw httpError(404, 'No such item.');
+    if (action === 'reject') { removeMe(id); log({ kind: 'me', by: 'phone', what: `Rejected: ${it.title}` }); return { removed: id }; }
+    delete it.status; delete it.confidence; it.verified = Date.now(); saveMe(m); log({ kind: 'me', by: 'phone', what: `Confirmed: ${it.title}` }); return it;
 }
 export function removeMe(id) { const m = me(); const n = m.items.length; m.items = m.items.filter(i => i.id !== id); for (const i of m.items) i.links = (i.links || []).filter(x => x !== id); if (m.items.length === n) throw httpError(404, 'No such item.'); saveMe(m); return { removed: id }; }
 // Gaps: what a job asked for that Me has no evidence of. The user answers (adds an example) or dismisses them.
@@ -110,7 +120,7 @@ const STOP = new Set('a an and the of to in for on with or as at by from is are 
 const words = t => String(t || '').toLowerCase().replace(/[^a-z0-9+#.\s-]/g, ' ').split(/\s+/).map(w => w.replace(/^[.-]+|[.-]+$/g, '')).filter(w => w.length > 1 && !STOP.has(w));
 // For each requirement, the Me items sharing the most words with it (the agent judges the real fit).
 export function candidates(requirements, { per = 4 } = {}) {
-    const items = me().items.map(i => ({ i, w: new Set(words([i.title, i.summary, (i.tags || []).join(' '), i.org].join(' '))) }));
+    const items = me().items.filter(i => i.status !== 'proposed').map(i => ({ i, w: new Set(words([i.title, i.summary, (i.tags || []).join(' '), i.org].join(' '))) }));
     return requirements.map(r => {
         const rw = words(r);
         const scored = items.map(({ i, w }) => ({ id: i.id, kind: i.kind, title: i.title, level: i.level || null, hits: rw.filter(x => w.has(x)) })).filter(x => x.hits.length).sort((a, b) => b.hits.length - a.hits.length).slice(0, per);
@@ -240,6 +250,18 @@ export function updateCv(id, b) {
     writeJson(cvFile(), { cvs: list }); return cv;
 }
 export function removeCv(id) { const list = cvs(); const cv = list.find(x => x.id === id); if (!cv) throw httpError(404, 'No such CV.'); fs.rmSync(P('cvs', cv.file), { force: true }); writeJson(cvFile(), { cvs: list.filter(x => x.id !== id) }); return { removed: id }; }
+export async function cvText(id) { return fileText(cvPath(id).file); }
+export async function fileText(f) {
+    const ext = path.extname(f).toLowerCase(); const { execFile } = await import('node:child_process');
+    const run = (cmd, args) => new Promise((ok, bad) => execFile(cmd, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }, (e, so) => (e ? bad(e) : ok(String(so)))));
+    try {
+        if (['.md', '.txt', '.tex'].includes(ext)) return fs.readFileSync(f, 'utf8').slice(0, 200_000);
+        if (ext === '.pdf') return (await run('pdftotext', ['-layout', f, '-'])).replace(/\f/g, '\n[page break]\n').slice(0, 300_000);
+        if (ext === '.pptx') { const list = (await run('unzip', ['-Z1', f])).split('\n').filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0])); let out = ''; for (const n of list) out += `\n[slide ${n.match(/\d+/)[0]}]\n` + (await run('unzip', ['-p', f, n])).replace(/<\/a:p>/g, '\n').replace(/<[^>]+>/g, ''); return out.slice(0, 300_000); }
+        if (ext === '.docx' || ext === '.odt') { const xml = await run('unzip', ['-p', f, ext === '.docx' ? 'word/document.xml' : 'content.xml']); return xml.replace(/<\/(w:p|text:p|text:h)>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/\n{3,}/g, '\n\n').slice(0, 200_000); }
+    } catch { /* fall through */ }
+    return `Could not extract text here (${ext}; pdftotext comes with the Research app, unzip for Word). The file is at ${f}: read it with your own tools.`;
+}
 export const cvPath = id => { const cv = cvs().find(x => x.id === id); if (!cv) throw httpError(404, 'No such CV.'); return { file: P('cvs', cv.file), name: cv.original || cv.file }; };
 
 // ---------- applications ----------
@@ -471,6 +493,21 @@ export function addWish(text, by = 'phone') {
     log({ kind: 'wish', by, what: `Wish: ${t}` }); return w;
 }
 export function finishWish(id, { status = 'done', summary = '' } = {}) { const list = wishes(); const w = list.find(x => x.id === id); if (!w) throw httpError(404, 'No such wish.'); w.status = status; w.summary = clip(summary, 2000); w.finished = Date.now(); writeJson(P('wishes.json'), { wishes: list }); return w; }
+export function importPrompt(cv, { template = false } = {}) {
+    return `Build my Me map from my CV "${cv.name}" (CV file id ${cv.id}).\n1. read_cv (id ${cv.id}) and me_summary.\n2. For every project, job or role, qualification, education, skill and achievement in it, call propose_me with what the CV says (title, org, dates, a summary in my words, tags, evidence such as numbers and results, level only if the CV makes it clear) and sources [{"title": "CV: ${cv.name}"}]. Then link related items with link_me (skills and achievements to the role or project they came from). Do not invent or embellish; things the CV implies but does not state go in "why" with confidence "low".\n` +
+        (template ? `3. If cv_sections says there is no template yet, write my CV as a clean one- or two-page LaTeX article (geometry, enumitem, titlesec, hyperref only; no other packages, no \\input) with each section marked by a line "% @section{Name}" before it and "% @end" after it, using exactly the CV's content, and save it with set_cv_template.\n` : '') +
+        `Finish with a short summary: how many items you proposed, and anything you could not read. I will confirm each item on the Me tab.`;
+}
+export function findMePrompt({ name, links = '', hints = '' }) {
+    return `Find what is publicly on record about my own work, to build my Me map for job hunting. I asked for this and it is about me.\n\nMy name: ${clip(name, 120)}\nMy profiles and links: ${clip(links, 1500) || '(none given)'}\nHints (where I studied or worked, topics): ${clip(hints, 1500) || '(none)'}\n\n` +
+        `Search the web like a careful researcher. Start from the links I gave, then search my name together with the hints. Look for: code and repositories, projects and demos, publications and theses, talks, competition or CTF results, awards, certifications with public verification, articles I wrote, news mentioning my work, and public professional profiles.\n` +
+        `For each finding call propose_me with: kind, title, summary, org, dates, tags, evidence, and sources [{url, title, note}] (every item needs at least one URL), "why" (how you know it is me), and confidence: high (my own linked profile or repo), medium (name plus a matching hint), low (name only). Anything that may be someone else with my name: confidence low, and say so in why.\n` +
+        `Never collect private details: no home address, phone, family, date of birth, finances, health or private social accounts. Skip anything that is not about my work, study or achievements.\nRead me_summary first and do not duplicate items already there (you may propose extra sources and evidence for them with the same kind and title). Finish with a short summary of what you found and what is uncertain. I will confirm each item.`;
+}
+export function webHuntPrompt(s) {
+    return `Search the web for jobs that match my search settings, beyond the job-site APIs: company career pages, sector job boards, graduate-scheme lists and recruiter sites.\nKeywords: ${s.keywords || '(read Me and infer suitable roles)'}\nPlaces: ${s.locations || 'anywhere'}${s.remote ? ' (and remote)' : ''}\nCountries: ${s.countries || 'gb'}\nLowest salary: ${s.salaryMin || 'not set'}\nRule out: ${s.exclude || 'nothing'}\n\n` +
+        `Read me_summary first. Add each real, open job with add_job (title, company, location, salary, deadline, url of the actual advert, the advert text and requirements). Check the advert is still open and the link works; skip aggregator pages without a real advert. Aim for 10 to 20 good ones, then score the best 5 (compatibility, save_match, save_money). Finish with a short summary.`;
+}
 export function wishPrompt(w) {
     return `A job wish from the person this Job Hunt is for:\n\n"${w.text}"\n\nWish id: ${w.id}. Work it through with the jobs tools (MCP server "jobs", or the \`jobhunt\` command):\n` +
         `1. Read Me (me_summary) so you know who this is for.\n2. Set the search from the wish (set_search: keywords, locations, remote, salary floor) and run hunt.\n` +
@@ -481,7 +518,7 @@ export function wishPrompt(w) {
 
 // ---------- agent tools (one list: the jobs CLI and the jobs MCP server both come from it) ----------
 import * as kit from './kit/tools.js';
-const meLine = i => `${i.id} [${i.kind}${i.level ? `, ${i.level}` : ''}] ${i.title}${i.org ? ` (${i.org})` : ''}${i.from ? ` ${i.from}${i.to ? `–${i.to}` : ''}` : ''}`;
+const meLine = i => `${i.id} [${i.kind}${i.level ? `, ${i.level}` : ''}${i.status === 'proposed' ? ', UNVERIFIED' : ''}] ${i.title}${i.org ? ` (${i.org})` : ''}${i.from ? ` ${i.from}${i.to ? `–${i.to}` : ''}` : ''}`;
 const jobLine = j => `${j.id} ${j.status === 'new' ? '' : `[${j.status}] `}${j.title}${j.company ? ` · ${j.company}` : ''}${j.location ? ` · ${j.location}` : ''}${j.salary ? ` · ${j.salary}` : ''}${j.match ? ` · match ${j.match.score}` : ''}`;
 kit.registerApp('jobs', {
     context(shell) { if (!shell?.cwd || !inJobs(shell.cwd)) { const e = new Error('Job Hunt tools work from a shell in the Job Hunt folder.'); e.status = 403; throw e; } return {}; },
@@ -491,6 +528,17 @@ kit.registerApp('jobs', {
         { name: 'me_item', description: 'One Me item in full: summary, evidence, tags, links.', inputSchema: kit.obj({ id: kit.str('Me item id') }, ['id']), run: (c, a) => { const i = me().items.find(x => x.id === a.id); if (!i) throw httpError(404, 'No such item.'); return i; } },
         { name: 'add_me', description: 'Add or update a Me item (same kind and title updates it). Only what the person told you or what their files show.', inputSchema: kit.obj({ kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), summary: kit.str('What it was and what they did'), level: kit.str('aware | working | strong | expert'), org: kit.str('Company, university or client'), from: kit.str('Start (YYYY or YYYY-MM)'), to: kit.str('End, or "now"'), tags: kit.arr('Skills and tools it shows'), evidence: kit.arr('Concrete evidence: results, numbers, links, files'), links: kit.arr('Ids of related Me items') }, ['kind', 'title']),
             run: (c, a, by) => meLine(addMe(a, by)) },
+        { name: 'propose_me', description: 'Propose a Me item you found (in the person\'s CV or online) for them to confirm. Needs sources; say in "why" how you know it is theirs, and how sure you are.', inputSchema: kit.obj({ kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), summary: kit.str('What it was and what they did'), level: kit.str('aware | working | strong | expert, only if clear'), org: kit.str('Company, university or client'), from: kit.str('Start'), to: kit.str('End, or now'), tags: kit.arr('Skills and tools it shows'), evidence: kit.arr('Concrete evidence'), links: kit.arr('Ids of related Me items'), sources: kit.arr('Where it comes from', kit.obj({ url: kit.str('Link'), title: kit.str('Title'), note: kit.str('What it shows') })), why: kit.str('How you know it is this person'), confidence: kit.str('high | medium | low') }, ['kind', 'title', 'sources']),
+            run: (c, a, by) => meLine(addMe({ ...a, proposed: true }, by)) },
+        { name: 'link_me', description: 'Link Me items to each other (e.g. a skill to the project that shows it, an achievement to its role). Use after proposing, once both ids exist.', inputSchema: kit.obj({ id: kit.str('Me item id'), to: kit.arr('Ids to link it to') }, ['id', 'to']),
+            run: (c, a) => { const m = me(); const it = m.items.find(i => i.id === a.id); if (!it) throw httpError(404, 'No such item.'); const ok = (a.to || []).filter(x => x !== a.id && m.items.some(i => i.id === x)); it.links = [...new Set([...(it.links || []), ...ok])].slice(0, 40); saveMe(m); return `${it.title}: ${it.links.length} links`; } },
+        { name: 'doc_files', description: 'The person\'s own documents (reports, papers, theses, slides): id, name, kind, whether read into Me yet.', inputSchema: kit.obj({}), run: () => docs().map(x => `${x.id} ${x.name}${x.kind ? ` (${x.kind})` : ''}${x.read ? ' [read into Me]' : ''}`).join('\n') || 'No documents.' },
+        { name: 'read_doc', description: 'The text of one of the person\'s documents (page breaks and slides marked).', inputSchema: kit.obj({ id: kit.str('Document id') }, ['id']), run: async (c, a) => docText(a.id) },
+        { name: 'mark_doc_read', description: 'Mark a document as read into Me.', inputSchema: kit.obj({ id: kit.str('Document id') }, ['id']), run: (c, a) => { markDocRead(a.id); return 'ok'; } },
+        { name: 'cv_files', description: 'The person\'s uploaded CV files (id, name, categories).', inputSchema: kit.obj({}), run: () => cvs().map(x => `${x.id} ${x.name} (${x.original})${x.categories.length ? ` [${x.categories.join(', ')}]` : ''}`).join('\n') || 'No CV files.' },
+        { name: 'read_cv', description: 'The text of an uploaded CV file.', inputSchema: kit.obj({ id: kit.str('CV file id') }, ['id']), run: async (c, a) => cvText(a.id) },
+        { name: 'set_cv_template', description: 'Create the person\'s LaTeX CV template (only when there is none yet). Mark each section with a line "% @section{Name}" before it and "% @end" after it.', inputSchema: kit.obj({ tex: kit.str('The whole .tex document'), name: kit.str('Name for it') }, ['tex']),
+            run: (c, a, by) => { if (cvTemplate().template) throw httpError(409, 'There is already a template: suggest section variants instead.'); if (/\\(input|include|write18|openout|immediate)\b/.test(a.tex)) throw httpError(400, 'No \\input, \\include or \\write18.'); const t = setTemplate({ tex: a.tex, name: a.name || 'My CV' }, by); return `Template saved: ${t.sections.map(x => x.name).join(', ')}`; } },
         { name: 'set_search', description: 'Set what the hunt looks for.', inputSchema: kit.obj({ keywords: kit.str('Job-site search words'), locations: kit.str('Places, comma-separated'), remote: kit.bool('Include remote jobs'), salaryMin: kit.num('Lowest yearly salary'), exclude: kit.str('Words that rule a job out, comma-separated') }),
             run: (c, a) => { const s = setSettings(a); return `Search: "${s.keywords}" in ${s.locations || 'anywhere'}${s.remote ? ' (and remote)' : ''}${s.salaryMin ? `, from ${s.salaryMin}` : ''}`; } },
         { name: 'hunt', description: 'Run the job-site search now (Adzuna, Reed, Jooble when keys are set; Remotive, Arbeitnow always). New jobs land on the board.', inputSchema: kit.obj({}), run: async (c, a, by) => hunt(by) },
@@ -565,4 +613,32 @@ export function stagePrompt(j, stage, extra = '') {
     if (stage === 'interview') return `${head}Stage: Interview.\nsave_draft name "interview-prep" with: the likely format; 6–8 STAR stories from Me mapped to the job's competencies (Situation, Task, Action (most of it), Result, first person); 10–15 likely questions (motivation, competency, technical, scenario) each with notes on which story or points to use; technical topics to revise; 5 questions to ask them drawn from the research; and a short logistics checklist. Where Me lacks a story for a competency, add_gap.${tail}`;
     if (stage === 'followup') return `${head}Stage: Follow up.\nsave_draft "thank-you": a short, specific thank-you message to send after the interview (leave [placeholders] for names and details the person must fill in). Also save_draft "offer-checklist": what to compare if an offer comes (pay, take-home vs living costs using save_money figures, pension, holiday, hybrid, training, progression, start date) and how to negotiate politely on facts.${tail}`;
     throw httpError(400, 'That stage has no agent work.');
+}
+
+// ---------- my documents: reports, papers, theses, slides, anything that shows what you have done ----------
+// Kept in /Jobs/docs (docs.json lists them). "Read into Me" sends one to an agent that breaks it into the project, the
+// skills it shows and the results, as proposals citing the document and the page or section.
+const DOC_EXT = ['.pdf', '.docx', '.odt', '.pptx', '.md', '.txt', '.tex'];
+const docsFile = () => P('docs', 'docs.json');
+export function docs() { return (readJson(docsFile(), { docs: [] }) || { docs: [] }).docs; }
+export function addDoc({ name, file, data, kind = '', notes = '' }, by = 'phone') {
+    const list = docs(); const ext = path.extname(String(file || '')).toLowerCase(); if (!DOC_EXT.includes(ext)) throw httpError(400, 'Documents: PDF, Word, ODT, PowerPoint, LaTeX, Markdown or text.');
+    const buf = Buffer.from(String(data || ''), 'base64'); if (!buf.length || buf.length > 40 * 1024 * 1024) throw httpError(400, 'The file is empty or over 40 MB.');
+    fs.mkdirSync(P('docs'), { recursive: true }); share(P('docs'));
+    const id = id6('d'); const f = `${id}${ext}`; fs.writeFileSync(P('docs', f), buf); share(P('docs', f));
+    const d = { id, name: clip(name || path.basename(file, ext), 160), file: f, original: clip(file, 200), kind: clip(kind, 60), notes: clip(notes, 1000), added: Date.now(), by, read: null };
+    list.push(d); writeJson(docsFile(), { docs: list }); log({ kind: 'doc', by, what: `Document added: ${d.name}` }); return d;
+}
+export function removeDoc(id) { const list = docs(); const d = list.find(x => x.id === id); if (!d) throw httpError(404, 'No such document.'); fs.rmSync(P('docs', d.file), { force: true }); writeJson(docsFile(), { docs: list.filter(x => x.id !== id) }); return { removed: id }; }
+export function docPath(id) { const d = docs().find(x => x.id === id); if (!d) throw httpError(404, 'No such document.'); return { file: P('docs', d.file), name: d.original || d.file, doc: d }; }
+export const docText = async id => fileText(docPath(id).file);
+export function markDocRead(id) { const list = docs(); const d = list.find(x => x.id === id); if (d) { d.read = Date.now(); writeJson(docsFile(), { docs: list }); } }
+export function docPrompt(d, extra = '') {
+    return `Break down one of my documents into my Me map: "${d.name}" (document id ${d.id}${d.kind ? `, a ${d.kind}` : ''}).${d.notes ? ` My note on it: ${d.notes}` : ''}${extra ? `\nAlso: ${clip(extra, 1000)}` : ''}\n\n` +
+        `1. me_summary, then read_doc (id ${d.id}). Page breaks and slide numbers are marked in the text.\n` +
+        `2. propose_me ONE item for the work itself (kind project, or role/education if that is what it is): title, org, dates, a summary of the problem, what I did myself, methods and results, tags, and evidence with figures.\n` +
+        `3. propose_me each skill the document actually demonstrates (kind skill): the level it supports (aware, working, strong, expert) and why, with evidence quoting what I did, and links to the project item's id. If a skill is already in Me, propose it again with the same title so the new evidence and source are added.\n` +
+        `4. propose_me achievements or results worth a CV line (grades, awards, publications, measurable outcomes), linked to the project.\n` +
+        `Every proposal: sources [{"title": "${d.name.replace(/"/g, "'")}", "note": "page or section it comes from"}], confidence high (it says so plainly), medium (clearly implied) or low (inferred). Only what the document supports; group work: say what was mine if it says, otherwise note it is unclear.\n` +
+        `5. Link items with link_me once their ids exist (skills and results to the project).\n6. Finish with mark_doc_read (id ${d.id}) and a short summary of what you proposed.`;
 }

@@ -1252,3 +1252,22 @@ textarea.mono { font-family: var(--mono); font-size: 12.5px; }
 .jh-draft { max-height: 60vh; overflow: auto; }
 @media (max-width: 560px) { .jh-checks { grid-template-columns: 1fr; } }
 .jh-wishline.ended .dot { background: var(--mist); }
+
+.jh-props { margin: 8px 0 12px; display: grid; gap: 8px; }
+.jh-props .jh-h .muted { font-weight: 400; margin: 0 !important; font-size: 12px !important; }
+.jh-prop { display: flex; gap: 12px; padding: 12px; background: var(--hull); border: 1px dashed var(--rail); border-radius: 14px; }
+.jh-prop.high { border-color: rgba(63,211,154,.45); } .jh-prop.low { border-color: rgba(244,106,92,.35); }
+.jh-prop .main { flex: 1; min-width: 0; font-size: 14px; display: grid; gap: 3px; }
+.jh-prop .t { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+.jh-prop .kdot { width: 9px; height: 9px; border-radius: 50%; background: var(--k); flex: none; }
+.jh-prop .conf { font-size: 11px; font-weight: 500; color: var(--mist); border: 1px solid var(--rail); border-radius: 6px; padding: 0 6px; }
+.jh-prop.high .conf { color: var(--kelp); } .jh-prop.low .conf { color: var(--flare); }
+.jh-prop .s { color: var(--foam); line-height: 1.45; }
+.jh-prop .why { color: var(--mist); font-size: 13px; font-style: italic; }
+.jh-prop .src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; }
+.jh-prop .src a, .jh-src a { color: var(--dock); overflow-wrap: anywhere; }
+.jh-prop .acts { display: flex; flex-direction: column; gap: 6px; }
+.jh-prop .acts .btn { padding: 8px 12px; font-size: 13.5px; justify-content: center; }
+.jh-src { font-size: 13.5px; line-height: 1.6; }
+.jh-map .leaf.prop circle { fill: var(--sea) !important; stroke: var(--mist); stroke-width: 1.5; stroke-dasharray: 2 2; }
+@media (max-width: 560px) { .jh-prop { flex-direction: column; } .jh-prop .acts { flex-direction: row; } }

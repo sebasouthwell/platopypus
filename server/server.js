@@ -833,6 +833,30 @@ const server = http.createServer(async (req, res) => {
                 await shells.create({ name, kind: 'agent', agent: b.agent || s.agent || 'claude', model: b.model ?? s.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt });
                 return send(res, 201, { shell: name });
             }
+            // Agent runs that propose Me items for you to confirm: import a CV, or find your work online. Also a web job search.
+            if (['me/import', 'me/findme', 'websearch'].includes(rest) && method === 'POST') {
+                jobs.writeBrief(); const b = await body(); const st = jobs.settings();
+                let prompt, label;
+                if (rest === 'me/import') { const cv = jobs.cvs().find(x => x.id === b.cv); if (!cv) return send(res, 400, { error: 'Pick a CV file (CV tab: add one first).' }); prompt = jobs.importPrompt(cv, { template: !!b.template }); label = 'import'; }
+                else if (rest === 'me/findme') { if (!String(b.name || '').trim()) return send(res, 400, { error: 'Give your name.' }); prompt = jobs.findMePrompt(b); label = 'findme'; }
+                else { prompt = jobs.webHuntPrompt(st); label = 'web'; }
+                const name = `${label}-${Math.random().toString(36).slice(2, 6)}`;
+                await shells.create({ name, kind: 'agent', agent: b.agent || st.agent || 'claude', model: b.model ?? st.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true });
+                jobs.log({ kind: label === 'web' ? 'hunt' : 'me', by: 'phone', what: label === 'import' ? 'Agent reading a CV into Me' : label === 'findme' ? 'Agent looking for your work online' : 'Agent searching the web for jobs' });
+                return send(res, 201, { shell: name });
+            }
+            if (rest === 'docs' && method === 'GET') return send(res, 200, { docs: jobs.docs() });
+            if (rest === 'docs' && method === 'POST') return send(res, 201, jobs.addDoc(await body(56 * 1024 * 1024), 'phone'));
+            if ((jm = rest.match(/^docs\/(d[0-9a-f]{6})\/(delete|file|read)$/))) {
+                if (jm[2] === 'delete' && method === 'POST') return send(res, 200, jobs.removeDoc(jm[1]));
+                if (jm[2] === 'file' && method === 'GET') { const f = jobs.docPath(jm[1]); return fileOut(f.file, typeOf(f.file), f.name, url.searchParams.get('download') !== '1'); }
+                if (jm[2] === 'read' && method === 'POST') {
+                    jobs.writeBrief(); const b = await body(); const st = jobs.settings(); const d = jobs.docPath(jm[1]).doc; const name = `doc-${jm[1].slice(1)}-${Math.random().toString(36).slice(2, 4)}`;
+                    await shells.create({ name, kind: 'agent', agent: b.agent || st.agent || 'claude', model: b.model ?? st.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.docPrompt(d, b.extra || ''), oneshot: true });
+                    jobs.log({ kind: 'me', by: 'phone', what: `Agent reading "${d.name}" into Me` }); return send(res, 201, { shell: name });
+                }
+            }
+            if ((jm = rest.match(/^me\/(m[0-9a-f]{6})\/(confirm|reject)$/)) && method === 'POST') return send(res, 200, jobs.verifyMe(jm[1], jm[2]));
             if (rest === 'me' && method === 'GET') return send(res, 200, jobs.me());
             if (rest === 'me' && method === 'POST') return send(res, 201, jobs.addMe(await body(), 'phone'));
             if ((jm = rest.match(/^me\/(m[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeMe(jm[1]));

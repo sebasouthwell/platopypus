@@ -151,7 +151,7 @@ export const SLEUTH_TOOLS = ['case_status', 'send_probe', 'list_probes', 'show_p
 export const RESEARCH_TOOLS = ['research_status', 'add_source', 'find', 'read', 'transcript', 'frames', 'see_frames', 'source_meta', 'cite', 'build_paper', 'ask_user', 'wait_answer', 'user_answers', 'reply_question'];
 // The MCP server for a session type: sleuth for a Conspiracy case, research for a Research topic.
 export const LAB_TOOLS = ['lab_status', 'lab_tools', 'run_tool', 'show_run'];
-export const JOB_TOOLS = ['me_summary', 'me_item', 'add_me', 'set_search', 'hunt', 'list_jobs', 'show_job', 'add_job', 'set_requirements', 'compatibility', 'save_match', 'uk_estimate', 'save_money', 'add_gap', 'cv_sections', 'cv_section_text', 'suggest_cv_section', 'save_draft', 'read_draft', 'job_advice', 'finish_wish', 'log'];
+export const JOB_TOOLS = ['me_summary', 'me_item', 'add_me', 'propose_me', 'link_me', 'doc_files', 'read_doc', 'mark_doc_read', 'cv_files', 'read_cv', 'set_cv_template', 'set_search', 'hunt', 'list_jobs', 'show_job', 'add_job', 'set_requirements', 'compatibility', 'save_match', 'uk_estimate', 'save_money', 'add_gap', 'cv_sections', 'cv_section_text', 'suggest_cv_section', 'save_draft', 'read_draft', 'job_advice', 'finish_wish', 'log'];
 export const MCP_FOR = { jobs: { name: 'jobs', command: 'plato-mcp', args: ['jobs'], tools: JOB_TOOLS }, case: { name: 'sleuth', command: 'sleuth-mcp', tools: SLEUTH_TOOLS }, research: { name: 'research', command: 'research-mcp', tools: RESEARCH_TOOLS }, lab: { name: 'lab', command: 'lab-mcp', tools: LAB_TOOLS } };
 const PASS_ENV = '["PORTHOLE_TOKEN","PLATO_TOKEN","PORTHOLE_PORT","PLATO_PORT","PORTHOLE_PROJECT_ROOT","PORTHOLE_SESSION","HOME","PATH"]';
 export function mcpArgs(agent, session) {

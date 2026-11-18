@@ -18,6 +18,7 @@ Use the **jobs** MCP tools when you have them (`mcp__jobs__…`). Otherwise use 
 | `save_match` | Your verdict: score 0–100, the level they would come in at, and meets, partly or gap per requirement, with Me ids. |
 | `uk_estimate`, `save_money` | Take-home pay, living costs where the job is, and what is left, with your assumptions. |
 | `add_gap` | Something jobs want that Me has no evidence of: a question for the person. |
+| `propose_me`, `doc_files`, `read_doc`, `cv_files`, `read_cv`, `set_cv_template` | Read the person's CV and documents (reports, papers, slides) and propose Me items with sources, for them to confirm. |
 | `cv_sections`, `cv_section_text`, `suggest_cv_section` | Their LaTeX CV, section by section. Suggest a tailored version of a section; they choose. |
 | `save_draft`, `read_draft`, `job_advice` | Drafts for a job (cover letter, answers, interview prep, thank-you), and the research already gathered. |
 | `finish_wish`, `log` | Close a wish with a summary; see recent activity. |
@@ -48,4 +49,9 @@ into `save_money` so the person can check them. For jobs abroad, also check the 
 ## Privacy
 
 Me, the CVs and applications are personal. Don't put them into web searches or send them anywhere. Search for jobs and
-companies, never for the person.
+companies. The one exception: when the person starts a "find me online" run, search for their public work using the
+name, links and hints they gave, propose what you find with `propose_me` (sources and confidence on each), and never
+collect private details (address, phone, family, date of birth, finances, health, private accounts).
+
+Items you find in a CV or online go in with `propose_me`; they count only once the person confirms them. Use `add_me`
+only for what the person tells you directly.

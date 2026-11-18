@@ -809,6 +809,23 @@ phone's Update button. Mechanism:
     interactive sessions) lost the message: `--allowedTools` takes several values and swallowed it. The prompt now
     follows `--`.
 
+- **2.17.0**: Job Hunt builds Me from your own material, with sources you confirm.
+  - Me items can be **proposed**: `status: "proposed"`, `confidence` (high, medium, low), `why`, and `sources`
+    ({url, title, note}). Proposed items are shown under "To confirm" on the Me tab (and hollow on the map), and are
+    left out of matching until confirmed (`POST /api/jobs/me/<id>/confirm|reject`). Re-proposing an item that is already
+    confirmed only adds evidence and sources; it never rewrites the summary or level.
+  - **Build from my CV:** an agent reads an uploaded CV (`read_cv`: pdftotext, or unzip for Word/ODT) and proposes each
+    item, and can create the LaTeX template from it (`set_cv_template`, only when there is none; no `\input`).
+  - **My documents:** reports, papers, theses and slides (PDF, Word, ODT, PowerPoint, LaTeX, Markdown, text) kept in
+    `/Jobs/docs` (`docs.json`). "Read into Me" breaks one into the project, the skills it demonstrates (with a level
+    and evidence) and results, each citing the document and page or section, linked with `link_me`.
+  - **Find me online:** the person gives their name, links and hints; an agent searches only for their public work and
+    proposes items with URLs and how sure it is that they are the person's. Private details are never collected; the brief
+    allows searching for the person only in this run.
+  - **Search the web** on the Board: an agent looks beyond the job-site APIs (career pages, sector boards) using the
+    search settings, adds real open adverts and scores the best.
+  - New jobs tools: propose_me, link_me, doc_files, read_doc, mark_doc_read, cv_files, read_cv, set_cv_template.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
