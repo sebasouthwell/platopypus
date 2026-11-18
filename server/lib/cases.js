@@ -160,9 +160,11 @@ const findNode = (b, ref) => {
 function checkStrength(b, strength, ids) {
     if (strength === 'alleged') return;
     const rel = ids.map(id => b.sources.find(s => s.id === id)?.reliability);
-    if (!ids.length) throw httpError(400, `A ${strength} string needs a source. Without one it can only be "alleged".`);
-    if (strength === 'documented' && !rel.includes('primary')) throw httpError(400, `"documented" needs a primary source (an official register, filing, court record, exchange or chain data). ${ids.join(', ')} ${ids.length === 1 ? 'is' : 'are'} rated ${[...new Set(rel)].join('/')}: use --strength reported${rel.includes('reputable') ? '' : ' (with a reputable source) or alleged'}, or cite a primary source.`);
-    if (strength === 'reported' && !rel.some(r => r === 'primary' || r === 'reputable')) throw httpError(400, `"reported" needs a reputable or primary source. ${ids.join(', ')} ${ids.length === 1 ? 'is' : 'are'} rated other: use --strength alleged, or cite a better source.`);
+    const have = r => b.sources.filter(s => s.reliability === r).map(s => s.id);
+    const offer = () => { const p = have('primary'), r = have('reputable'); return `${p.length ? ` Primary sources in this case: ${p.slice(0, 12).join(', ')}.` : ' This case has no primary sources yet.'}${r.length ? ` Reputable: ${r.slice(0, 12).join(', ')}.` : ''}`; };
+    if (!ids.length) throw httpError(400, `A ${strength} string needs a source; without one, set strength to "alleged".${offer()}`);
+    if (strength === 'documented' && !rel.includes('primary')) throw httpError(400, `"documented" needs a primary source (an official register, filing, court record, exchange or chain data); ${ids.join(', ')} ${ids.length === 1 ? 'is' : 'are'} rated ${[...new Set(rel)].join('/')}. Cite a primary source if one supports it, or set strength to ${rel.includes('reputable') ? '"reported"' : '"reported" (with a reputable source) or "alleged"'}.${offer()}`);
+    if (strength === 'reported' && !rel.some(r => r === 'primary' || r === 'reputable')) throw httpError(400, `"reported" needs a reputable or primary source; ${ids.join(', ')} ${ids.length === 1 ? 'is' : 'are'} rated other. Cite a better source if one supports it, or set strength to "alleged".${offer()}`);
 }
 function sourceRefs(b, refs) {
     const list = Array.isArray(refs) ? refs : String(refs || '').split(',').map(s => s.trim()).filter(Boolean);

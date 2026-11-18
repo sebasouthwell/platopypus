@@ -106,6 +106,9 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         const built = agents.command({ agent, yolo: !!yolo, resume: !!resume, profile, login: !!login, model });
         command = built.cmd; agentEnv = built.env;
         agentInfo = { agent, yolo: !!yolo, resume: !!resume, profile: profile || 'default' };
+        // Conspiracy and Research sessions: their tools as an MCP server too (typed tools; the shell token is passed through).
+        const mcpFlags = !login ? agents.mcpArgs(agent, session) : '';   // case → sleuth tools, research → research tools
+        if (mcpFlags) command += ` ${mcpFlags}`;
         // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
         // Antigravity gets it typed in once it is up.
         if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex' || agent === 'cline') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
@@ -114,7 +117,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
             const mf = agents.modelArgs(agent, model).map(a => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
-            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} "$PORTHOLE_FIRST_PROMPT"`;
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
             if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';

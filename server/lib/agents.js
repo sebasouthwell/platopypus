@@ -144,6 +144,23 @@ function refreshSignIn(list) {
 export const MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\/\[\]@-]{0,99}$/;
 // Codex can drive a model on your Ollama server instead of OpenAI's: write the model as "oss:<name>".
 export const ossModel = (agent, model) => (agent === 'codex' && /^oss:/.test(String(model || '').trim()) ? String(model).trim().slice(4) : null);
+// The Conspiracy MCP server (bin/sleuth-mcp) on an agent's command line, for case sessions. Codex filters the
+// environment of MCP servers, so the shell token is passed through by name. Cline reads it from its MCP settings file
+// (written per shell, see cline.isolate). Others: none.
+export const SLEUTH_TOOLS = ['case_status', 'send_probe', 'list_probes', 'show_probe', 'adopt_probe_sources', 'add_source', 'pin_card', 'connect_cards', 'add_note', 'add_question', 'answer_question', 'add_theory', 'weigh_evidence', 'find_paths'];
+export const RESEARCH_TOOLS = ['research_status', 'add_source', 'find', 'read', 'transcript', 'frames', 'see_frames', 'source_meta', 'cite', 'build_paper', 'ask_user', 'wait_answer', 'user_answers', 'reply_question'];
+// The MCP server for a session type: sleuth for a Conspiracy case, research for a Research topic.
+export const LAB_TOOLS = ['lab_status', 'lab_tools', 'run_tool', 'show_run'];
+export const MCP_FOR = { case: { name: 'sleuth', command: 'sleuth-mcp', tools: SLEUTH_TOOLS }, research: { name: 'research', command: 'research-mcp', tools: RESEARCH_TOOLS }, lab: { name: 'lab', command: 'lab-mcp', tools: LAB_TOOLS } };
+const PASS_ENV = '["PORTHOLE_TOKEN","PLATO_TOKEN","PORTHOLE_PORT","PLATO_PORT","PORTHOLE_PROJECT_ROOT","PORTHOLE_SESSION","HOME","PATH"]';
+export function mcpArgs(agent, session) {
+    const m = MCP_FOR[session]; if (!m) return '';
+    // Long tools (a transcript, waiting on the user) may run for minutes: 15 minutes before the agent gives up on one.
+    if (agent === 'codex') return `-c 'mcp_servers.${m.name}.command="${m.command}"' -c 'mcp_servers.${m.name}.env_vars=${PASS_ENV}' -c 'mcp_servers.${m.name}.tool_timeout_sec=900'`;
+    if (agent === 'claude') return `--mcp-config '{"mcpServers":{"${m.name}":{"command":"${m.command}","args":[]}}}' --allowedTools ${m.tools.map(t => `mcp__${m.name}__${t}`).join(',')}`;
+    return '';
+}
+export const sleuthMcpArgs = agent => mcpArgs(agent, 'case');
 export function modelArgs(agent, model) {
     const m = String(model || '').trim(); if (!m) return [];
     if (!MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes).');

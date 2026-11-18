@@ -11,6 +11,9 @@ to add it to the scope.
 
 ## How
 
+If you have the lab MCP tools (lab_status, lab_tools, run_tool, show_run), prefer them: the same as the `lab`
+commands below, with the same scope checks, and typed fields instead of shell quoting.
+
 - `lab status`: the scope and recent runs. Start here, and read `findings.md`.
 - `lab tools`: what you can run.
 - `lab run <tool> <target>` runs a tool's standard preset and prints a short summary. Read the summary first; open

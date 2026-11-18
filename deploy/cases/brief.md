@@ -2,7 +2,9 @@
 
 ## Quick start (do this, in this order)
 
-Everything goes through the `sleuth` command. Do not scrape websites yourself with curl or wget: send a probe.
+Everything goes through sleuth: the `sleuth` command, or the same actions as tools if you have the sleuth MCP tools
+(case_status, send_probe, show_probe, adopt_probe_sources, pin_card, connect_cards, add_note…). Prefer the tools when
+you have them. Do not scrape websites yourself with curl or wget: send a probe.
 
 1. `sleuth status`: read the question and the "To do next" list.
 2. `sleuth probe "<one subject>" "<one narrow question>"`: up to the budget; they run while you work.

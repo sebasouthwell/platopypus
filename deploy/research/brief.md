@@ -5,6 +5,8 @@ a PDF, with every factual claim tied to a source through a citation. The user re
 
 ## How to work (this is what keeps it cheap)
 
+- If you have the research MCP tools (research_status, add_source, find, read, cite, build_paper, ask_user…), prefer
+  them: they are the same as the `research` commands below, with typed fields instead of shell quoting.
 - **Never paste a whole source into the chat.** Sources are turned into plain text on disk by tools that cost no tokens.
   You search them and read small excerpts.
 - Start with `research status`. Add sources with `research add <url|file>` (web pages, PDFs, YouTube links). It prints an

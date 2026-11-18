@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+// sleuth-mcp: the Conspiracy case tools as an MCP server (stdio), for agents that call tools natively: Codex, Claude,
+// Cline, OpenCode, Goose, Qwen Code. Same actions and rules as the `sleuth` command, with typed fields instead of shell
+// quoting. The case is the one the agent's shell works in; PlatOpypus checks every call.
+//
+// Register it as a local MCP server whose command is `sleuth-mcp` (no arguments). It needs the shell's environment
+// (PORTHOLE_TOKEN), so tell the agent to pass that through if it filters the environment.
+import readline from 'node:readline';
+
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+let cookie = null;
+async function call(p, method = 'GET', body) {
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    if (!cookie) {
+        const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) throw new Error('No PlatOpypus token in this environment: start the agent from a PlatOpypus case shell (and let it pass PORTHOLE_TOKEN to MCP servers).');
+        const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) throw new Error('PlatOpypus did not accept this shell\'s token.');
+        cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: method === 'GET' ? undefined : JSON.stringify({ ...(body || {}), pid: process.pid }) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d;
+}
+const S = (type, description, extra = {}) => ({ type, description, ...extra });
+const TYPES = ['person', 'org', 'gov', 'asset', 'wallet', 'money', 'deal', 'document', 'event', 'address', 'claim'];
+const TOOLS = [
+    { name: 'case_status', description: 'The case: question, To-do list, cards, strings, sources, open questions, theories, probes and budget. Start here and come back after each step.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'send_probe', description: 'Send ONE narrow question about ONE subject to a fresh zero-trust sub-agent with web search. It sees nothing but this subject and question. Returns at once; check with list_probes / show_probe.', inputSchema: { type: 'object', properties: { subject: S('string', 'Who or what the question is about, e.g. "Rolls-Royce Holdings plc"'), question: S('string', 'One narrow, answerable question, e.g. "Who were its largest shareholders at 31 Dec 2024, with percentages?"'), agent: S('string', 'Optional: claude, codex, antigravity or cline (default: the case setting)'), model: S('string', 'Optional model name') }, required: ['subject', 'question'] } },
+    { name: 'list_probes', description: 'All probes with their status (running, done, failed).', inputSchema: { type: 'object', properties: {} } },
+    { name: 'show_probe', description: 'A probe\'s full answer.', inputSchema: { type: 'object', properties: { id: S('string', 'Probe id, e.g. p1') }, required: ['id'] } },
+    { name: 'adopt_probe_sources', description: 'Turn the links in a finished probe\'s answer into sources (S1, S2…), each rated primary, reputable or other by its website. Do this before pinning what the probe found.', inputSchema: { type: 'object', properties: { id: S('string', 'Probe id, e.g. p1') }, required: ['id'] } },
+    { name: 'add_source', description: 'Add one source by hand.', inputSchema: { type: 'object', properties: { title: S('string', 'Title'), url: S('string', 'http(s) link'), publisher: S('string', 'Publisher'), date: S('string', 'YYYY-MM-DD'), reliability: S('string', 'primary (official record/filing/exchange/chain data), reputable (established reporting) or other', { enum: ['primary', 'reputable', 'other'] }), quote: S('string', 'The passage that matters') }, required: ['title'] } },
+    { name: 'pin_card', description: 'Put a card on the board (or add to an existing one with the same name).', inputSchema: { type: 'object', properties: { type: S('string', 'Card type', { enum: TYPES }), name: S('string', 'Its name, e.g. "BlackRock, Inc."'), note: S('string', 'What it is, in one line, with figures and dates'), sources: S('array', 'Source ids that support it, e.g. ["S2"]', { items: { type: 'string' } }), when: S('string', 'Optional date YYYY, YYYY-MM or YYYY-MM-DD') }, required: ['type', 'name'] } },
+    { name: 'connect_cards', description: 'A string between two cards: FROM does LABEL to TO (it must read as a true sentence, e.g. FROM "BlackRock, Inc." LABEL "holds 5.01% of" TO "Rolls-Royce Holdings plc"). documented needs a primary source, reported a reputable or primary one; otherwise alleged.', inputSchema: { type: 'object', properties: { from: S('string', 'The card doing it'), label: S('string', 'What joins them, as a verb phrase'), to: S('string', 'The card it is done to'), strength: S('string', 'How well supported', { enum: ['documented', 'reported', 'alleged'] }), sources: S('array', 'Source ids', { items: { type: 'string' } }), when: S('string', 'Optional date'), amount: S('number', 'Optional amount'), currency: S('string', 'Optional currency, e.g. GBP') }, required: ['from', 'label', 'to', 'strength'] } },
+    { name: 'add_note', description: 'Add a line to the case notes: what the evidence shows, citing sources like [S2].', inputSchema: { type: 'object', properties: { text: S('string', 'The note') }, required: ['text'] } },
+    { name: 'add_question', description: 'Record an open question.', inputSchema: { type: 'object', properties: { text: S('string', 'The question'), card: S('string', 'Optional card it is about') }, required: ['text'] } },
+    { name: 'answer_question', description: 'Answer an open question.', inputSchema: { type: 'object', properties: { id: S('string', 'Question id, e.g. Q2'), answer: S('string', 'The answer'), sources: S('array', 'Source ids', { items: { type: 'string' } }) }, required: ['id', 'answer'] } },
+    { name: 'add_theory', description: 'Record a possible explanation (include an innocent one).', inputSchema: { type: 'object', properties: { text: S('string', 'The theory') }, required: ['text'] } },
+    { name: 'weigh_evidence', description: 'Mark a source or string as supporting, contradicting or neutral for a theory.', inputSchema: { type: 'object', properties: { theory: S('string', 'Theory id, e.g. T1'), evidence: S('string', 'Source id (S3) or string id'), verdict: S('string', 'Verdict', { enum: ['supports', 'contradicts', 'neutral', 'none'] }) }, required: ['theory', 'evidence', 'verdict'] } },
+    { name: 'find_paths', description: 'The chains of strings already joining two cards.', inputSchema: { type: 'object', properties: { from: S('string', 'A card'), to: S('string', 'Another card') }, required: ['from', 'to'] } },
+];
+const list = a => (Array.isArray(a) ? a : String(a || '').split(',').map(x => x.trim()).filter(Boolean));
+async function run(name, a) {
+    switch (name) {
+        case 'case_status': {
+            const d = await call('/api/agent/case'); const nm = new Map(d.board.nodes.map(n => [n.id, n.label]));
+            return [`${d.title}\nQuestion: ${d.question}\nProbes used ${d.probes.length} of ${d.budget}; depth ${d.depth}.`,
+                d.todo?.length ? `To do next:\n${d.todo.map(t => `- ${t}`).join('\n')}` : 'To do: nothing flagged.',
+                `Cards (${d.board.nodes.length}):\n${d.board.nodes.map(n => `- [${n.type}] ${n.label}${n.origin ? ' (start)' : ''} ${n.sources.length ? `{${n.sources.join(',')}}` : '(no source)'}`).join('\n')}`,
+                `Strings (${d.board.links.length}):\n${d.board.links.map(l => `- ${nm.get(l.from)} → ${l.label} → ${nm.get(l.to)} (${l.strength}${l.sources.length ? `; ${l.sources.join(',')}` : ''})`).join('\n')}`,
+                `Sources (${d.board.sources.length}): ${d.board.sources.slice(-40).map(s => `${s.id}[${s.reliability}]`).join(' ')}`,
+                d.board.theories.length ? `Theories:\n${d.board.theories.map(t => `- ${t.id} ${t.text}`).join('\n')}` : '',
+                d.probes.length ? `Probes:\n${d.probes.map(p => `- ${p.id} [${p.status}] ${p.subject}: ${p.question.slice(0, 120)}`).join('\n')}` : ''].filter(Boolean).join('\n\n');
+        }
+        case 'send_probe': { const p = await call('/api/agent/case/probe', 'POST', { subject: a.subject, question: a.question, agent: a.agent || null, model: a.model ?? null }); return `${p.id} started on ${p.subject}. It runs in the background: check with list_probes, then show_probe ${p.id}.`; }
+        case 'list_probes': { const d = await call('/api/agent/case'); return d.probes.length ? d.probes.map(p => `${p.id} [${p.status}] ${p.subject}: ${p.question.slice(0, 140)}`).join('\n') : 'No probes yet.'; }
+        case 'show_probe': { const p = await call(`/api/agent/case/probes/${encodeURIComponent(a.id)}`); return `${p.id} [${p.status}] ${p.subject}\n\n${p.answer || '(still running)'}${p.status === 'done' ? `\n\nNext: adopt_probe_sources ${p.id}, then pin_card / connect_cards citing the source ids.` : ''}`; }
+        case 'adopt_probe_sources': { const r = await call('/api/agent/case/adopt', 'POST', { id: a.id }); return `${r.sources.map(x => `${x.id} [${x.reliability}] ${x.url}`).join('\n')}\n\nprimary sources allow documented strings; reputable allow reported; other only alleged.`; }
+        case 'add_source': { const s = await call('/api/agent/case/source', 'POST', a); return `${s.id} [${s.reliability}] ${s.title}`; }
+        case 'pin_card': { const n = await call('/api/agent/case/pin', 'POST', { type: a.type, label: a.name, note: a.note, sources: list(a.sources), when: a.when }); return `${n.id} [${n.type}] ${n.label}${n.sources.length ? ` {${n.sources.join(',')}}` : ' (no source yet)'}`; }
+        case 'connect_cards': { const l = await call('/api/agent/case/link', 'POST', { from: a.from, to: a.to, label: a.label, strength: a.strength, sources: list(a.sources), when: a.when, amount: a.amount, currency: a.currency }); return `${l.id}: "${a.from} ${l.label} ${a.to}" (${l.strength}). If that sentence is backwards, say so to the user; it can be removed on the board.`; }
+        case 'add_note': { await call('/api/agent/case/note', 'POST', { text: a.text }); return 'Added to the notes.'; }
+        case 'add_question': { const q = await call('/api/agent/case/ask', 'POST', { text: a.text, node: a.card }); return `${q.id} ${q.text}`; }
+        case 'answer_question': { const q = await call('/api/agent/case/answer', 'POST', { id: a.id, answer: a.answer, sources: list(a.sources) }); return `${q.id} ${q.status}`; }
+        case 'add_theory': { const t = await call('/api/agent/case/theory', 'POST', { text: a.text }); return `${t.id} ${t.text}`; }
+        case 'weigh_evidence': { const t = await call('/api/agent/case/weigh', 'POST', { id: a.theory, ref: a.evidence, verdict: a.verdict }); return `${t.id}: ${Object.keys(t.evidence).length} pieces of evidence weighed.`; }
+        case 'find_paths': { const r = await call('/api/agent/case/path', 'POST', { from: a.from, to: a.to }); return r.paths.length ? `${r.paths.length} chain(s); the shortest has ${r.paths[0].length} string(s). Open the Board to see them.` : 'No chain of strings joins them yet.'; }
+        default: throw new Error(`Unknown tool ${name}`);
+    }
+}
+
+// MCP over stdio: one JSON-RPC message per line.
+const send = m => process.stdout.write(JSON.stringify(m) + '\n');
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', async line => {
+    let m; try { m = JSON.parse(line); } catch { return; }
+    if (m.id === undefined) return;   // notifications
+    try {
+        if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'sleuth', version: '1.0.0' }, instructions: 'Conspiracy case tools. Loop: case_status → send_probe → show_probe → adopt_probe_sources → pin_card → connect_cards → add_note, until the To-do list is empty or the probe budget is used.' } });
+        if (m.method === 'ping') return send({ jsonrpc: '2.0', id: m.id, result: {} });
+        if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: TOOLS } });
+        if (m.method === 'tools/call') {
+            try { const text = await run(m.params?.name, m.params?.arguments || {}); return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text }] } }); }
+            catch (e) { return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true } }); }
+        }
+        send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Method not found: ${m.method}` } });
+    } catch (e) { send({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: e.message } }); }
+});

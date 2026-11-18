@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+// lab-mcp: the Security Lab tools as an MCP server (stdio), for agents that call tools natively. Same actions and the
+// same checks as `lab`: every run goes through PlatOpypus, which refuses any target that is not in this engagement's
+// scope, and the scanners themselves cannot be run directly. The engagement is the one the agent's shell works in.
+import readline from 'node:readline';
+
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let cookie = null;
+async function call(p, method = 'GET', body) {
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    if (!cookie) {
+        const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) throw new Error('No PlatOpypus token in this environment: start the agent from a Security Lab engagement shell (and let it pass PORTHOLE_TOKEN to MCP servers).');
+        const login = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!login.ok) throw new Error('PlatOpypus did not accept this shell\'s token.');
+        cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: method === 'GET' ? undefined : JSON.stringify({ ...(body || {}), pid: process.pid }) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d;
+}
+const S = (type, description, extra = {}) => ({ type, description, ...extra });
+const TOOLS = [
+    { name: 'lab_status', description: 'The engagement: what is in scope (and verified), and recent runs. Start here; only in-scope targets can be tested.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'lab_tools', description: 'The tools you can run, their presets, and which look at this box rather than a target.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'run_tool', description: 'Run a tool against an in-scope target with its preset (or your own arguments: no file paths, every host must be in scope). Waits for it to finish and returns a short summary; the full output stays in runs/<id>/. Start light (nmap quick, testssl, whatweb); no denial of service, brute force or exploitation unless the user asked for that test.', inputSchema: { type: 'object', properties: { tool: S('string', 'Tool name from lab_tools, e.g. nmap'), target: S('string', 'An in-scope domain, IP or URL'), preset: S('string', 'Optional preset name, e.g. quick'), args: S('array', 'Optional: your own arguments instead of a preset', { items: { type: 'string' } }) }, required: ['tool'] } },
+    { name: 'show_run', description: 'A run\'s command, status and summary (or the end of its output).', inputSchema: { type: 'object', properties: { id: S('string', 'Run id, e.g. r012') }, required: ['id'] } },
+];
+async function run(name, a) {
+    switch (name) {
+        case 'lab_status': {
+            const s = await call('/api/agent/lab/status');
+            return `${s.title}\nScope (${s.scope.length}):\n${s.scope.map(t => `- ${t.value} (${t.kind}, ${t.status === 'unverified' ? 'NOT verified: cannot be tested yet' : t.status})`).join('\n') || '- nothing yet: ask the user to add targets'}\n\nRecent runs:\n${(s.runs || []).slice(0, 12).map(r => `- ${r.id} ${r.title}${r.target ? ` · ${r.target}` : ''} [${r.status}] ${r.headline || ''}`).join('\n') || '- none'}`;
+        }
+        case 'lab_tools': { const s = await call('/api/agent/lab/status'); return Object.entries(s.tools).map(([k, t]) => `${k}: ${t.title}${t.presets.length ? ` (presets: ${t.presets.join(', ')})` : ''}${t.local ? ' [looks at this box]' : ''}`).join('\n'); }
+        case 'run_tool': {
+            const body = Array.isArray(a.args) && a.args.length ? { tool: a.tool, args: a.args.map(String) } : { tool: a.tool, target: a.target || null, preset: a.preset || null };
+            const r = await call('/api/agent/lab/run', 'POST', body);
+            let s = r; for (let i = 0; i < 400 && s.status === 'running'; i++) { await sleep(3000); s = await call(`/api/agent/lab/run/${r.id}`); }
+            return `${r.id}: ${r.cmd}\n${s.status}\n\n${s.summary || s.headline || '(no summary)'}\n\nFull output: runs/${r.id}/out.txt${s.files?.length ? `; files: ${s.files.map(f => `runs/${r.id}/${f}`).join(' ')}` : ''}`;
+        }
+        case 'show_run': { const s = await call(`/api/agent/lab/run/${encodeURIComponent(a.id)}`); return `${s.cmd}\n${s.status}\n\n${s.summary || String(s.output || '').slice(-4000)}`; }
+        default: throw new Error(`Unknown tool ${name}`);
+    }
+}
+const send = m => process.stdout.write(JSON.stringify(m) + '\n');
+readline.createInterface({ input: process.stdin }).on('line', async line => {
+    let m; try { m = JSON.parse(line); } catch { return; }
+    if (m.id === undefined) return;
+    try {
+        if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'lab', version: '1.0.0' }, instructions: 'Security Lab tools. Only targets in the engagement\'s scope can be tested; every run is checked. Start with lab_status.' } });
+        if (m.method === 'ping') return send({ jsonrpc: '2.0', id: m.id, result: {} });
+        if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: TOOLS } });
+        if (m.method === 'tools/call') {
+            try { const text = await run(m.params?.name, m.params?.arguments || {}); return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text }] } }); }
+            catch (e) { return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true } }); }
+        }
+        send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Method not found: ${m.method}` } });
+    } catch (e) { send({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: e.message } }); }
+});

@@ -4,6 +4,7 @@
 // and writes Cline's provider settings for whichever user runs it, just before it starts.
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import * as agentsLib from './agents.js';
 import path from 'node:path';
 import { config } from './config.js';
 import { record } from './audit.js';
@@ -79,19 +80,22 @@ export function sessionRules(home, shell, env = {}, owner = null) {
     ].filter(Boolean).join('\n');
     const text = `# This PlatOpypus session\n\nYou are running in a PlatOpypus agent shell. These facts and the brief below apply to everything you do in it; the general instructions about this box (the platopypus block) also apply.\n\n${facts}\n\n${brief ? `## Session brief (the file $PORTHOLE_SECURITY_FILE, included here so you do not need to read it)\n\n${brief.trim()}\n` : 'There is no separate brief for this session.\n'}`;
     const f = path.join(rules, 'platopypus-session.md'); fs.writeFileSync(f, text, { mode: 0o600 });
-    const data = isolate(home, dir, owner);
+    const data = isolate(home, dir, owner, { session: env.PORTHOLE_SESSION });
     if (owner) { for (const p of [path.join(home, '.cline'), root, dir, rules, f]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
     return { CLINE_DIR: dir, ...data };
 }
 // A data folder of its own (with the provider settings copied in) and a hub port no other shell uses.
 const HUB_PORTS = [26000, 29999];
-export function isolate(home, dir, owner = null) {
+export function isolate(home, dir, owner = null, { session = null } = {}) {
     const data = path.join(dir, 'data'), settings = path.join(data, 'settings');
     fs.mkdirSync(settings, { recursive: true, mode: 0o700 });
     for (const n of ['providers.json', 'global-settings.json']) { const src = path.join(home, '.cline', 'data', 'settings', n); try { if (fs.existsSync(src)) { fs.copyFileSync(src, path.join(settings, n)); fs.chmodSync(path.join(settings, n), 0o600); } } catch { /* not there */ } }
     const taken = new Set(); try { for (const d of fs.readdirSync(path.join(home, '.cline', 'shells'))) { const pf = path.join(home, '.cline', 'shells', d, 'hub.port'); if (path.join(home, '.cline', 'shells', d) !== dir && fs.existsSync(pf)) taken.add(Number(fs.readFileSync(pf, 'utf8'))); } } catch { /* none */ }
     let port; do { port = HUB_PORTS[0] + Math.floor(Math.random() * (HUB_PORTS[1] - HUB_PORTS[0])); } while (taken.has(port));
     fs.writeFileSync(path.join(dir, 'hub.port'), String(port));
+    // A case or research shell: its tools as an MCP server, approved (PlatOpypus and the research command check every call).
+    const m = agentsLib.MCP_FOR[session];
+    if (m) fs.writeFileSync(path.join(settings, 'cline_mcp_settings.json'), JSON.stringify({ mcpServers: { [m.name]: { command: m.command, args: [], disabled: false, timeout: 900, autoApprove: m.tools } } }, null, 2), { mode: 0o600 });
     if (owner) { for (const p of [data, settings, ...fs.readdirSync(settings).map(n => path.join(settings, n)), path.join(dir, 'hub.port')]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
     return { CLINE_DATA_DIR: data, CLINE_HUB_PORT: String(port) };
 }

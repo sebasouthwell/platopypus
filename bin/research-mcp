@@ -1,0 +1,78 @@
+#!/usr/bin/env node
+// research-mcp: the Research topic tools as an MCP server (stdio), for agents that call tools natively (Codex, Claude,
+// Cline, OpenCode, Qwen Code…). Each tool runs the `research` command with its arguments passed separately (no shell,
+// no quoting), in the topic folder, so the behaviour, the limits and the asks to the user are exactly the command's.
+//
+// The topic is found from the working folder, or from PORTHOLE_PROJECT_ROOT (the session's topic) if the agent starts
+// MCP servers elsewhere.
+import readline from 'node:readline';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+
+function topicDir() {
+    for (const start of [process.cwd(), process.env.PORTHOLE_PROJECT_ROOT].filter(Boolean)) {
+        let d = path.resolve(start);
+        for (;;) { if (fs.existsSync(path.join(d, '.platopypus', 'research.json'))) return d; const up = path.dirname(d); if (up === d) break; d = up; }
+    }
+    return null;
+}
+const S = (type, description, extra = {}) => ({ type, description, ...extra });
+const TOOLS = [
+    { name: 'research_status', description: 'The topic: its sources (id, kind, size, transcript state), what has been read, and what is waiting on the user. Start here.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'add_source', description: 'Fetch a web page, PDF or video (or a file path) into the topic\'s sources; prints its id and a short summary.', inputSchema: { type: 'object', properties: { url: S('string', 'A URL or a file path'), note: S('string', 'Why this source') }, required: ['url'] } },
+    { name: 'find', description: 'Search every source (or one) and get a few short snippets with where they are. Prefer this to reading whole sources.', inputSchema: { type: 'object', properties: { words: S('string', 'What to look for'), source: S('string', 'Optional source id, e.g. s03'), limit: S('number', 'Optional, default 8') }, required: ['words'] } },
+    { name: 'read', description: 'A small excerpt (about 3000 characters) of a source: at a time in a video, a PDF page, or a chunk.', inputSchema: { type: 'object', properties: { id: S('string', 'Source id, e.g. s03'), at: S('string', 'Time in a video, e.g. 14:32'), for: S('string', 'How long from that time, e.g. 2m (default 90s)'), page: S('number', 'PDF page'), chunk: S('number', 'Chunk number'), from: S('number', 'Character offset') }, required: ['id'] } },
+    { name: 'transcript', description: 'Make a video\'s transcript searchable: captions if it has them, otherwise asks the user to allow an audio download, then speech to text. Can take minutes.', inputSchema: { type: 'object', properties: { id: S('string', 'Video source id'), engine: S('string', 'local or openai', { enum: ['local', 'openai'] }) }, required: ['id'] } },
+    { name: 'frames', description: 'Take frames from a video and read their text (asks the user once). Can take minutes.', inputSchema: { type: 'object', properties: { id: S('string', 'Video source id'), every: S('number', 'Seconds between frames, default 30') }, required: ['id'] } },
+    { name: 'see_frames', description: 'Get chosen frames as image files to look at (asks the user).', inputSchema: { type: 'object', properties: { id: S('string', 'Video source id'), frames: S('array', 'Frame names, e.g. ["f0003"]', { items: { type: 'string' } }) }, required: ['id', 'frames'] } },
+    { name: 'source_meta', description: 'Who wrote a source: without other fields, shows its first and last page; with doi, takes the entry from the DOI; with title/author/year, sets them.', inputSchema: { type: 'object', properties: { id: S('string', 'Source id'), doi: S('string', 'A DOI'), title: S('string', 'Title'), author: S('string', 'Authors, "A and B"'), year: S('string', 'Year'), type: S('string', 'BibTeX type, e.g. article') }, required: ['id'] } },
+    { name: 'cite', description: 'Cite a source for a claim: returns the \\cite{} to put in the paper, adds the BibTeX entry, and logs the claim.', inputSchema: { type: 'object', properties: { id: S('string', 'Source id'), claim: S('string', 'The claim it supports'), at: S('string', 'Time in a video'), page: S('number', 'PDF page'), quote: S('string', 'The supporting passage') }, required: ['id', 'claim'] } },
+    { name: 'build_paper', description: 'Build the paper (latexmk); returns pages, warnings and the first errors.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'ask_user', description: 'Ask the user something (a card on their phone). Waits for the answer unless later is true.', inputSchema: { type: 'object', properties: { question: S('string', 'The question'), options: S('array', 'Optional choices', { items: { type: 'string' } }), why: S('string', 'What depends on the answer'), later: S('boolean', 'Do not wait; pick the answer up with user_answers') }, required: ['question'] } },
+    { name: 'wait_answer', description: 'Wait for an earlier ask.', inputSchema: { type: 'object', properties: { id: S('string', 'Ask id') }, required: ['id'] } },
+    { name: 'user_answers', description: 'What the user answered, noted or asked in the app since you last looked.', inputSchema: { type: 'object', properties: { all: S('boolean', 'Everything, not only new') } } },
+    { name: 'reply_question', description: 'Answer a question the user asked in the app, or say where its answer went in the paper.', inputSchema: { type: 'object', properties: { id: S('string', 'Question id'), text: S('string', 'The answer (plain text, cite like [s03 14:32])'), added: S('string', 'Or: the section of the paper it was added to') }, required: ['id'] } },
+];
+function argsFor(name, a) {
+    const f = (k, v) => (v === undefined || v === null || v === '' ? [] : [`--${k}`, String(v)]);
+    switch (name) {
+        case 'research_status': return ['status'];
+        case 'add_source': return ['add', a.url, ...f('note', a.note)];
+        case 'find': return ['find', a.words, ...f('source', a.source), ...f('limit', a.limit)];
+        case 'read': return ['read', a.id, ...f('at', a.at), ...f('for', a.for), ...f('page', a.page), ...f('chunk', a.chunk), ...f('from', a.from)];
+        case 'transcript': return ['transcript', a.id, ...f('engine', a.engine)];
+        case 'frames': return ['frames', a.id, ...f('every', a.every)];
+        case 'see_frames': return ['see', a.id, ...(Array.isArray(a.frames) ? a.frames : String(a.frames || '').split(/[,\s]+/)).filter(Boolean)];
+        case 'source_meta': return ['meta', a.id, ...f('doi', a.doi), ...f('title', a.title), ...f('author', a.author), ...f('year', a.year), ...f('type', a.type)];
+        case 'cite': return ['cite', a.id, ...f('at', a.at), ...f('page', a.page), ...f('quote', a.quote), ...f('claim', a.claim)];
+        case 'build_paper': return ['build'];
+        case 'ask_user': return ['ask', a.question, ...(Array.isArray(a.options) && a.options.length ? ['--options', a.options.join('|')] : []), ...f('why', a.why), ...(a.later ? ['--later'] : [])];
+        case 'wait_answer': return ['wait', a.id];
+        case 'user_answers': return ['answers', ...(a.all ? ['--all'] : [])];
+        case 'reply_question': return ['reply', a.id, ...(a.added ? ['--added', String(a.added)] : ['--text', String(a.text || '')])];
+        default: throw new Error(`Unknown tool ${name}`);
+    }
+}
+function run(name, a) {
+    const dir = topicDir(); if (!dir) return Promise.reject(new Error('Not inside a research topic (start the agent in /Research/<Topic>).'));
+    const args = argsFor(name, a);
+    if (args.some(x => x === undefined)) return Promise.reject(new Error('A required field is missing.'));
+    return new Promise(resolve => execFile('research', args, { cwd: dir, timeout: 15 * 60_000, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
+        const out = `${stdout || ''}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim();
+        resolve({ text: out || (err ? err.message : '(done)'), isError: !!err && !/^Still waiting/m.test(out) });
+    }));
+}
+
+const send = m => process.stdout.write(JSON.stringify(m) + '\n');
+readline.createInterface({ input: process.stdin }).on('line', async line => {
+    let m; try { m = JSON.parse(line); } catch { return; }
+    if (m.id === undefined) return;
+    try {
+        if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'research', version: '1.0.0' }, instructions: 'Research topic tools. Prefer find and read (small excerpts) to reading whole sources; cite every claim with cite.' } });
+        if (m.method === 'ping') return send({ jsonrpc: '2.0', id: m.id, result: {} });
+        if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: TOOLS } });
+        if (m.method === 'tools/call') { const r = await run(m.params?.name, m.params?.arguments || {}).catch(e => ({ text: `Error: ${e.message}`, isError: true })); return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: r.text }], ...(r.isError ? { isError: true } : {}) } }); }
+        send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Method not found: ${m.method}` } });
+    } catch (e) { send({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: e.message } }); }
+});

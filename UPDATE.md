@@ -737,6 +737,27 @@ phone's Update button. Mechanism:
     default (yours kept as deprecated, last five), migrate, or keep yours. Briefs read from a path get a readable copy
     in `/usr/local/share/platopypus/prompts`. Your agent instructions replace the platopypus block in every agent's
     instruction file, and are re-applied at start.
+- **2.15.0**: The Conspiracy, Research and Security Lab tools as MCP servers. `bin/sleuth-mcp` (linked in /usr/local/bin) speaks MCP over stdio,
+  with 14 typed tools: case_status, send_probe, list_probes, show_probe, adopt_probe_sources, add_source, pin_card,
+  connect_cards, add_note, add_question, answer_question, add_theory, weigh_evidence and find_paths. They call the same
+  `/api/agent/case*` routes as `sleuth`, with the same checks: the shell's token, a process of that shell, and the case
+  the shell works in. Case sessions register it automatically:
+  - Codex: `-c mcp_servers.sleuth.command=…` with the shell token passed through `env_vars`.
+  - Claude: `--mcp-config` with the tools pre-allowed.
+  - Cline: `cline_mcp_settings.json` in the shell's own data folder, with the tools auto-approved.
+
+  It works with any MCP-capable agent (OpenCode and Qwen Code were tested with it on the test box). The case
+  brief now says to prefer the tools.
+  - **Research tools too:** `bin/research-mcp` wraps the `research` command as 14 typed tools: research_status,
+    add_source, find, read, transcript, frames, see_frames, source_meta, cite, build_paper, ask_user, wait_answer,
+    user_answers and reply_question. Each runs `research` with separate arguments in the topic folder (from the working
+    folder or `PORTHOLE_PROJECT_ROOT`). Research sessions register it the same way (Codex tool timeout 900 s, Cline 900 s)
+    and the research brief says to prefer the tools. `agents.mcpArgs(agent, session)` picks the server by session type.
+  - **Security Lab too:** `bin/lab-mcp` offers lab_status, lab_tools, run_tool (waits and returns the summary) and
+    show_run over the same `/api/agent/lab/*` routes, so every target is still checked against the scope. Lab sessions
+    register it; the lab brief says to prefer it.
+  - **Strength errors** no longer name the command's flags. They list the case's primary and reputable sources, so an
+    agent using the tools can cite a better source or lower the strength (in tests, agents gave up on strings without this).
 
 ## Release checklist
 
