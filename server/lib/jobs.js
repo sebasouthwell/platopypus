@@ -108,6 +108,15 @@ export function addMe(b, by = 'phone') {
     if (!same) m.items.push(it); saveMe(m); log({ kind: 'me', by, what: `${it.status === 'proposed' ? 'Proposed' : same ? 'Updated' : 'Added'} ${ME_KINDS[kind].toLowerCase()}: ${title}` });
     return it;
 }
+// Confirm (or reject) many proposals at once: by ids, by confidence (high, medium, low) or by source title.
+export function verifyMany({ ids, confidence, source, action = 'confirm' } = {}) {
+    const m = me(); const conf = Array.isArray(confidence) ? confidence : confidence ? [confidence] : null; const idset = Array.isArray(ids) ? new Set(ids) : null;
+    const hit = m.items.filter(i => i.status === 'proposed' && (!idset || idset.has(i.id)) && (!conf || conf.includes(i.confidence || 'medium')) && (!source || (i.sources || []).some(x => (x.title || x.url || '') === source)));
+    if (action === 'reject') { const gone = new Set(hit.map(i => i.id)); m.items = m.items.filter(i => !gone.has(i.id)); for (const i of m.items) i.links = (i.links || []).filter(x => !gone.has(x)); }
+    else for (const i of hit) { delete i.status; delete i.confidence; i.verified = Date.now(); }
+    saveMe(m); log({ kind: 'me', by: 'phone', what: `${action === 'reject' ? 'Rejected' : 'Confirmed'} ${hit.length} item${hit.length === 1 ? '' : 's'}${source ? ` from ${source}` : conf ? ` (${conf.join(', ')})` : ''}` });
+    return { count: hit.length };
+}
 export function verifyMe(id, action) {
     const m = me(); const it = m.items.find(i => i.id === id); if (!it) throw httpError(404, 'No such item.');
     if (action === 'reject') { removeMe(id); log({ kind: 'me', by: 'phone', what: `Rejected: ${it.title}` }); return { removed: id }; }

@@ -884,6 +884,7 @@ const server = http.createServer(async (req, res) => {
                     jobs.log({ kind: 'me', by: 'phone', what: `Agent reading "${d.name}" into Me` }); return send(res, 201, { shell: name });
                 }
             }
+            if (rest === 'me/verify' && method === 'POST') return send(res, 200, jobs.verifyMany(await body(256 * 1024)));
             if ((jm = rest.match(/^me\/(m[0-9a-f]{6})\/(confirm|reject)$/)) && method === 'POST') return send(res, 200, jobs.verifyMe(jm[1], jm[2]));
             if (rest === 'me' && method === 'GET') return send(res, 200, jobs.me());
             if (rest === 'me' && method === 'POST') return send(res, 201, jobs.addMe(await body(), 'phone'));

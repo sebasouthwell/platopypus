@@ -1528,3 +1528,8 @@ input[type=month] { color-scheme: dark; }
 @media (prefers-reduced-motion: reduce) { .jh-pbin .pc { transition: none; } }
 
 .jh-pbin .yr.brk { border-left-style: dotted; } .jh-pbin .yr.brk span { color: rgba(255,230,200,.3); }
+
+.jh-bulk { position: sticky; top: 52px; z-index: 2; display: grid; gap: 8px; padding: 12px; margin-bottom: 10px; background: color-mix(in srgb, var(--hull-2) 96%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--rail); border-radius: 14px; box-shadow: 0 8px 18px -10px rgba(0,0,0,.6); }
+.jh-bulk .t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; } .jh-bulk .t .muted { font-size: 12.5px !important; margin: 0 !important; }
+.jh-bulk .b { display: flex; flex-wrap: wrap; gap: 6px; } .jh-bulk .b .btn { min-height: 42px; padding: 0 12px; font-size: 13.5px; } .jh-bulk .b em { font-style: normal; font-family: var(--mono); font-size: 12px; opacity: .75; }
+.jh-bulk .srcs { display: flex; gap: 6px; flex-wrap: wrap; } .jh-bulk .srcs select { flex: 1; min-width: 180px; min-height: 42px; } .jh-bulk .srcs .btn { min-height: 42px; }

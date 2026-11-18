@@ -960,6 +960,10 @@ phone's Update button. Mechanism:
   - The brief gives academic and extracurricular work (modules, coursework, dissertations, group projects,
     hackathons, society roles) full weight as evidence of skill, while not counting it as years in a job.
 
+- **2.21.1**: Bulk approval at the top of To confirm: a sticky bar with Confirm high-confidence, High + medium,
+  Confirm all (asks first), and confirm or reject everything from one source. One call (`POST /api/jobs/me/verify` with
+  `ids`, `confidence` or `source`, and `action`).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
