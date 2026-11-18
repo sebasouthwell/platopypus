@@ -54,7 +54,7 @@ export function setSettings(b = {}) {
     if (!ready()) setup();
     const s = readJson(P('.platopypus', 'jobs.json'), {}) || {};
     for (const k of ['keywords', 'locations', 'countries', 'nationality', 'exclude', 'home', 'currency', 'agent', 'model']) if (b[k] !== undefined) s[k] = clip(b[k], 400);
-    if (b.remote !== undefined) s.remote = !!b.remote; if (b.autoCpd !== undefined) s.autoCpd = !!b.autoCpd; if (b.autoAssess !== undefined) s.autoAssess = !!b.autoAssess; if (b.autoAssessPerDay !== undefined) s.autoAssessPerDay = Math.max(0, Math.min(50, Math.round(Number(b.autoAssessPerDay) || 0)));
+    if (b.remote !== undefined) s.remote = !!b.remote; if (b.autoCpd !== undefined) s.autoCpd = !!b.autoCpd; if (b.autoRead !== undefined) s.autoRead = !!b.autoRead; if (b.autoAssess !== undefined) s.autoAssess = !!b.autoAssess; if (b.autoAssessPerDay !== undefined) s.autoAssessPerDay = Math.max(0, Math.min(50, Math.round(Number(b.autoAssessPerDay) || 0)));
     if (b.salaryMin !== undefined) { const n = Number(b.salaryMin); s.salaryMin = Number.isFinite(n) && n > 0 ? Math.round(n) : null; }
     if (Array.isArray(b.sources)) s.sources = b.sources.filter(x => SOURCES[x]);
     if (b.money && typeof b.money === 'object') s.money = { ...DEFAULTS.money, ...(s.money || {}), ...Object.fromEntries(Object.entries(b.money).map(([k, v]) => [k, typeof v === 'number' ? v : clip(v, 200)])) };
@@ -173,6 +173,7 @@ function upsertJob(b, j, by) {
     if (Number.isFinite(+j.salaryMax) && j.salaryMax !== null && j.salaryMax !== '') set('salaryMax', Math.round(+j.salaryMax));
     if (Array.isArray(j.requirements) && j.requirements.length && (fresh || !(it.requirements || []).length)) it.requirements = j.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
     set('category', j.category ? clip(j.category, 60) : '');
+    if (['realistic', 'stretch', 'entry', 'goal'].includes(j.route)) it.route = j.route;
     if (url || j.source) { it.sources ||= []; if (!it.sources.some(x => (url && x.url === url) || (!url && x.source === j.source))) it.sources.push({ source: clip(j.source || by, 60), url, at: Date.now() }); it.sources = it.sources.slice(-12); }
     it.keys = [...new Set([...(it.keys || []), ...keys, ...fingerprints(it)])].slice(0, 24); for (const k of it.keys) b._ix.set(k, it);
     if (!fresh) it.seenAgain = Date.now();
@@ -217,6 +218,7 @@ export function updateJob(id, body, by = 'phone') {
     const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
     if (body.status !== undefined) { if (!STATUSES.includes(body.status)) throw httpError(400, `Status: ${STATUSES.join(', ')}.`); j.status = body.status; log({ kind: 'status', by, what: `${j.title}: ${body.status}` }); }
     for (const k of ['title', 'company', 'location', 'salary', 'deadline', 'category', 'notes']) if (body[k] !== undefined) j[k] = clip(body[k], k === 'notes' ? 3000 : 200);
+    if (body.route !== undefined) j.route = ['realistic', 'stretch', 'entry', 'goal'].includes(body.route) ? body.route : undefined;
     if (Array.isArray(body.requirements)) j.requirements = body.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
     j.updated = Date.now(); saveBoard(b); return j;
 }
@@ -227,7 +229,8 @@ export function setMatch(id, body, by = 'phone') {
     const ids = new Set(me().items.map(i => i.id));
     j.match = { score, summary: clip(body.summary, 1500), level: clip(body.level, 40), by, at: Date.now(),
         lines: (Array.isArray(body.lines) ? body.lines : []).slice(0, 30).map(l => ({ requirement: clip(l.requirement, 300), verdict: ['meets', 'partly', 'gap'].includes(l.verdict) ? l.verdict : 'partly', evidence: (Array.isArray(l.evidence) ? l.evidence : String(l.evidence || '').split(',')).map(x => x.trim()).filter(x => ids.has(x)).slice(0, 6), note: clip(l.note, 400) })),
-        cv: body.cv ? clip(body.cv, 20) : null };
+        cv: body.cv ? clip(body.cv, 20) : null,
+        wants: Number.isFinite(Number(body.wantsScore)) && body.wantsScore !== null && body.wantsScore !== '' ? { score: Math.max(0, Math.min(100, Math.round(Number(body.wantsScore)))), note: clip(body.wantsNote, 600) } : null };
     for (const l of j.match.lines) if (l.verdict === 'gap') addGap({ text: l.requirement, job: j.id }, by);
     j.updated = Date.now(); saveBoard(b); log({ kind: 'match', by, what: `${j.title}${j.company ? ` at ${j.company}` : ''}: ${score}/100` });
     return j;
@@ -590,6 +593,12 @@ export function addWish(text, by = 'phone') {
     const list = wishes(); const w = { id: id6('w'), text: t, at: Date.now(), by, status: 'started' }; list.unshift(w); writeJson(P('wishes.json'), { wishes: list.slice(0, 100) });
     log({ kind: 'wish', by, what: `Wish: ${t}` }); return w;
 }
+export function setWishPlan(id, b) {
+    const list = wishes(); const w = list.find(x => x.id === id); if (!w) throw httpError(404, 'No such wish.');
+    const arr = v => (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => clip(x, 300)).filter(Boolean).slice(0, 12);
+    w.plan = { standing: ['in-field', 'adjacent', 'career change'].includes(b.standing) ? b.standing : clip(b.standing, 40), level: clip(b.level, 120), summary: clip(b.summary, 1200), routes: arr(b.routes), gaps: arr(b.gaps), steps: arr(b.steps), at: Date.now() };
+    writeJson(P('wishes.json'), { wishes: list }); log({ kind: 'wish', by: 'agent', what: `Where you stand for "${w.text.slice(0, 60)}": ${w.plan.standing}${w.plan.level ? `, ${w.plan.level}` : ''}` }); return w.plan;
+}
 export function finishWish(id, { status = 'done', summary = '' } = {}) { const list = wishes(); const w = list.find(x => x.id === id); if (!w) throw httpError(404, 'No such wish.'); w.status = status; w.summary = clip(summary, 2000); w.finished = Date.now(); writeJson(P('wishes.json'), { wishes: list }); return w; }
 export function importPrompt(cv, { template = false } = {}) {
     return `Build my Me map from my CV "${cv.name}" (CV file id ${cv.id}).\n1. read_cv (id ${cv.id}) and me_summary.\n2. For every project, job or role, qualification, education, skill and achievement in it, call propose_me with what the CV says (title, org, dates, a summary in my words, tags, evidence such as numbers and results, level only if the CV makes it clear) and sources [{"title": "CV: ${cv.name}"}]. Then link related items with link_me (skills and achievements to the role or project they came from). Do not invent or embellish; things the CV implies but does not state go in "why" with confidence "low".\n` +
@@ -607,17 +616,18 @@ export function webHuntPrompt(s) {
         `Read me_summary first. Add each real, open job with add_job (title, company, location, salary, deadline, url of the actual advert, the advert text and requirements). Check the advert is still open and the link works; skip aggregator pages without a real advert. Aim for 10 to 20 good ones, then score the best 5 (compatibility, save_match, save_money). Finish with a short summary.`;
 }
 export function wishPrompt(w) {
-    return `A job wish from the person this Job Hunt is for:\n\n"${w.text}"\n\nWish id: ${w.id}. Work it through with the jobs tools (MCP server "jobs", or the \`jobhunt\` command):\n` +
-        `1. Read Me (me_summary) so you know who this is for.\n2. Set the search from the wish (set_search: keywords, locations, remote, salary floor) and run hunt.\n` +
-        `3. Search the web too for strong matches the job sites miss, and add each with add_job (title, company, location, salary, url, requirements).\n` +
-        `4. For the 5 to 10 best new jobs: list_jobs, show_job, compatibility, then save_match (per requirement: meets/partly/gap with Me evidence ids) and save_money (take-home, living, left over, with assumptions).\n` +
-        `5. Finish with finish_wish (id ${w.id}) and a short summary: what you found, the best three and why, and gaps worth closing.\nNever invent experience the person does not have; gaps are useful.`;
+    return `A job wish from the person this Job Hunt is for:\n\n"${w.text}"\n\nWish id: ${w.id}. Work it through with the jobs tools (MCP server "jobs", or the \`jobhunt\` command).\n\n` +
+        `1. Reality check first. Read me_summary and show_plan (if a plan exists and the wish fits its goal, search along it) (confirmed items count; unverified ones are hints) and Me notes. Decide where the person stands for this wish: "in-field" (Me already shows this work), "adjacent" (transferable skills, a step sideways or up) or "career change" (little or nothing in Me for it), and the level they could realistically enter at now. If Me is empty, say so: judge only from the wish and lean towards entry routes.\n` +
+        `2. Plan the search from that, not just from the words of the wish. In-field: search at their level and one above. Adjacent: roles that use what they have and lead towards the goal. Career change: entry routes (trainee, assistant, junior, apprentice, graduate schemes, conversion courses, volunteering or part-time that builds evidence), plus two or three goal jobs for reference only. Save the plan with set_wish_plan (standing, level, routes, gaps, steps).\n` +
+        `3. set_search for the realistic roles and run hunt. Search the web too for strong matches the job sites miss, and add each with add_job (title, company, location, salary, url of the real advert, requirements) and route: "realistic" (could apply now), "stretch" (a reach, worth a try), "entry" (a way in to the goal) or "goal" (where they want to end up; not yet realistic).\n` +
+        `4. For the 5 to 10 best: show_job, compatibility, save_match (per requirement meets/partly/gap with Me evidence ids; the level they would come in at; and wantsScore and wantsNote against what matters to them in show_plan: money, travel, remote, place, hours…, must-haves first) and save_money.\nIf the person has no career goal but has wants, search for jobs that give those (for example well-paid, travel-heavy or fully remote roles that fit their background).\n` +
+        `5. Record the most useful gaps with add_gap (what would most move them towards the goal). Finish with finish_wish (id ${w.id}): where they stand, the best three to apply for now and why, and the route to the goal. Be honest and kind; never invent experience; a gap named clearly is useful.`;
 }
 
 // ---------- agent tools (one list: the jobs CLI and the jobs MCP server both come from it) ----------
 import * as kit from './kit/tools.js';
 const meLine = i => `${i.id} [${i.kind}${i.level ? `, ${i.level}` : ''}${i.status === 'proposed' ? ', UNVERIFIED' : ''}] ${i.title}${i.org ? ` (${i.org})` : ''}${i.from ? ` ${i.from}${i.to ? `–${i.to}` : ''}` : ''}`;
-const jobLine = j => `${j.id} ${j.status === 'new' ? '' : `[${j.status}] `}${j.title}${j.company ? ` · ${j.company}` : ''}${j.location ? ` · ${j.location}` : ''}${j.salary ? ` · ${j.salary}` : ''}${j.match ? ` · match ${j.match.score}` : ''}`;
+const jobLine = j => `${j.id} ${j.status === 'new' ? '' : `[${j.status}] `}${j.route ? `(${j.route}) ` : ''}${j.title}${j.company ? ` · ${j.company}` : ''}${j.location ? ` · ${j.location}` : ''}${j.salary ? ` · ${j.salary}` : ''}${j.match ? ` · match ${j.match.score}` : ''}`;
 kit.registerApp('jobs', {
     context(shell) { if (!shell?.cwd || !inJobs(shell.cwd)) { const e = new Error('Job Hunt tools work from a shell in the Job Hunt folder.'); e.status = 403; throw e; } return {}; },
     tools: [
@@ -656,12 +666,12 @@ kit.registerApp('jobs', {
         { name: 'list_jobs', description: 'Jobs on the board.', inputSchema: kit.obj({ status: kit.str('new | shortlisted | applying | applied | hidden'), unscored: kit.bool('Only jobs without a match yet'), limit: kit.num('How many (default 40)') }),
             run: (c, a) => board().jobs.filter(j => (a.status ? j.status === a.status : j.status !== 'hidden') && (!a.unscored || !j.match)).sort((x, y) => y.found - x.found).slice(0, a.limit || 40).map(jobLine).join('\n') || 'No jobs.' },
         { name: 'show_job', description: 'One job in full (description, requirements, match, money).', inputSchema: kit.obj({ id: kit.str('Job id') }, ['id']), run: (c, a) => getJob(a.id) },
-        { name: 'add_job', description: 'Add a job you found (the same url or title and company updates it).', inputSchema: kit.obj({ title: kit.str('Job title'), company: kit.str('Employer'), location: kit.str('Where'), salary: kit.str('As advertised'), salaryMin: kit.num('Yearly, low end'), salaryMax: kit.num('Yearly, high end'), deadline: kit.str('YYYY-MM-DD'), url: kit.str('Link to the advert'), description: kit.str('The advert text'), requirements: kit.arr('Each requirement, one per item'), category: kit.str('A short category, e.g. "Data", "Security"') }, ['title']),
+        { name: 'add_job', description: 'Add a job you found (the same url or title and company updates it).', inputSchema: kit.obj({ title: kit.str('Job title'), company: kit.str('Employer'), location: kit.str('Where'), salary: kit.str('As advertised'), salaryMin: kit.num('Yearly, low end'), salaryMax: kit.num('Yearly, high end'), deadline: kit.str('YYYY-MM-DD'), url: kit.str('Link to the advert'), description: kit.str('The advert text'), requirements: kit.arr('Each requirement, one per item'), category: kit.str('A short category, e.g. "Data", "Security"'), route: kit.str('realistic | stretch | entry | goal: how this job relates to where the person stands') }, ['title']),
             run: (c, a, by) => { const n = board().jobs.length; const it = addJob({ ...a, source: a.source || 'agent' }, by); return `${board().jobs.length === n ? 'Already on the board (merged): ' : ''}${jobLine(it)}`; } },
         { name: 'set_requirements', description: 'Store the requirements you read from a job advert (one per item).', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements') }, ['id', 'requirements']), run: (c, a, by) => jobLine(updateJob(a.id, { requirements: a.requirements }, by)) },
         { name: 'compatibility', description: 'For each requirement of a job, the Me items most likely to be evidence (by shared words). Judge each yourself, open items with me_item, and ask the person for an example when nothing fits.', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements to check, if the job has none stored') }, ['id']),
             run: (c, a) => { const j = getJob(a.id); const reqs = a.requirements?.length ? a.requirements : j.requirements || []; if (!reqs.length) return 'This job has no requirements stored: read the advert (show_job) and call set_requirements first.'; return candidates(reqs).map(r => `• ${r.requirement}\n${r.candidates.length ? r.candidates.map(x => `    ${x.id} ${x.title}${x.level ? ` (${x.level})` : ''} — shares: ${x.hits.join(', ')}`).join('\n') : '    (nothing in Me: a gap, or ask the person)'}`).join('\n'); } },
-        { name: 'save_match', description: 'Save your judgement of fit: score 0-100, a summary, the likely level (e.g. graduate, junior, mid), and per requirement meets/partly/gap with Me evidence ids. Gaps become questions for the person.', inputSchema: kit.obj({ id: kit.str('Job id'), score: kit.num('0 to 100'), summary: kit.str('Why, in two or three sentences'), level: kit.str('The level this person would come in at'), lines: kit.arr('Per requirement', kit.obj({ requirement: kit.str('Requirement'), verdict: kit.str('meets | partly | gap'), evidence: kit.arr('Me item ids'), note: kit.str('Why') })), cv: kit.str('Best CV id or version for it') }, ['id', 'score']),
+        { name: 'save_match', description: 'Save your judgement of fit: score 0-100, a summary, the likely level (e.g. graduate, junior, mid), and per requirement meets/partly/gap with Me evidence ids. Gaps become questions for the person.', inputSchema: kit.obj({ id: kit.str('Job id'), score: kit.num('0 to 100'), summary: kit.str('Why, in two or three sentences'), level: kit.str('The level this person would come in at'), lines: kit.arr('Per requirement', kit.obj({ requirement: kit.str('Requirement'), verdict: kit.str('meets | partly | gap'), evidence: kit.arr('Me item ids'), note: kit.str('Why') })), cv: kit.str('Best CV id or version for it'), wantsScore: kit.num('0-100: how well the job gives what matters to the person (show_plan); must-haves weigh most'), wantsNote: kit.str('Which wants it meets or misses') }, ['id', 'score']),
             run: (c, a, by) => jobLine(setMatch(a.id, a, by)) },
         { name: 'uk_estimate', description: 'A rough UK take-home for a gross salary (tax, NI, student loan, pension). UK jobs only: for other countries work it out from that country\'s tax and social-security rules (search official sources).', inputSchema: kit.obj({ gross: kit.num('Yearly gross') }, ['gross']), run: (c, a) => ukEstimate(a.gross, settings().money) },
         { name: 'save_money', description: 'Save the money line for a job (yearly, in the job\'s local currency): gross, take-home, living costs where the job is, what is left, and your assumptions (tax rules and year, sources).', inputSchema: kit.obj({ id: kit.str('Job id'), currency: kit.str('ISO code: GBP, EUR, CHF…'), gross: kit.num('Gross'), takeHome: kit.num('After tax, NI, loan, pension'), living: kit.num('Rent, bills, council tax, food, travel'), left: kit.num('Left over'), assumptions: kit.str('How you worked it out and the sources') }, ['id']),
@@ -675,6 +685,12 @@ kit.registerApp('jobs', {
             run: (c, a, by) => saveDraft(a.job, a.name, a.text, by) },
         { name: 'read_draft', description: 'Read a saved draft for a job.', inputSchema: kit.obj({ job: kit.str('Job id'), name: kit.str('Draft name') }, ['job', 'name']), run: (c, a) => readDraft(a.job, a.name) },
         { name: 'job_advice', description: 'The research answers already gathered for a job (company, role, visa, pay).', inputSchema: kit.obj({ job: kit.str('Job id') }, ['job']), run: (c, a) => adviceFor(a.job).filter(p => p.status === 'done').map(p => `## ${p.subject}\n${p.answer}`).join('\n\n') || 'No research yet.' },
+        { name: 'set_wish_plan', description: 'Save where the person stands for a wish, before searching: standing (in-field | adjacent | career change), the level they could enter at now, the routes to the goal, the gaps, and next steps.', inputSchema: kit.obj({ id: kit.str('Wish id'), standing: kit.str('in-field | adjacent | career change'), level: kit.str('e.g. "graduate / junior", "entry: commis chef"'), summary: kit.str('Two or three sentences, honest and kind'), routes: kit.arr('Ways in or up (roles, schemes, courses)'), gaps: kit.arr('What is missing for the goal'), steps: kit.arr('Concrete next steps') }, ['id', 'standing']),
+            run: (c, a) => { const p = setWishPlan(a.id, a); return `Plan saved: ${p.standing}${p.level ? `, ${p.level}` : ''}`; } },
+        { name: 'set_route', description: 'Label a job on the board: realistic | stretch | entry | goal.', inputSchema: kit.obj({ id: kit.str('Job id'), route: kit.str('realistic | stretch | entry | goal') }, ['id', 'route']), run: (c, a, by) => jobLine(updateJob(a.id, { route: a.route }, by)) },
+        { name: 'show_plan', description: 'The person\'s career plan: goal, where they stand, milestones with status.', inputSchema: kit.obj({}), run: () => { const p = plan(); if (!p) return 'No plan yet.'; return `Goal: ${p.goal || '(none: the person goes by what matters to them)'}\nWhat matters: ${(p.wants || []).map(w => `${w.importance}: ${WANT_KINDS[w.kind]}${w.detail ? ` (${w.detail})` : ''}`).join('; ') || '(not set)'}\nStanding: ${p.standing} ${p.level ? `(${p.level})` : ''}\n${p.summary}\nGaps: ${(p.gaps || []).join('; ')}\nMilestones:\n${p.milestones.map(m => `${m.id} [${m.status}] (${m.kind}${m.due ? `, by ${m.due}` : ''}) ${m.title}${m.detail ? ` — ${m.detail}` : ''}${m.note ? ` | note: ${m.note}` : ''}`).join('\n')}`; } },
+        { name: 'save_plan', description: 'Save the whole career plan: goal, standing, level, summary, gaps, milestones (keep ids of milestones you keep), and why it changed.', inputSchema: kit.obj({ goal: kit.str('The goal (may be empty when the person goes by what matters to them)'), wants: kit.arr('What matters (keep as given unless asked)', kit.obj({ id: kit.str('Keep the id'), kind: kit.str('money | travel | remote | location | hours | stability | growth | purpose | people | other'), detail: kit.str('Detail'), importance: kit.str('must | important | nice') })), standing: kit.str('in-field | adjacent | career change'), level: kit.str('Level now'), summary: kit.str('Where they stand, honestly'), gaps: kit.arr('Gaps'), milestones: kit.arr('Milestones', kit.obj({ id: kit.str('Keep the id of an existing milestone'), title: kit.str('What'), detail: kit.str('How'), kind: kit.str('skill | experience | qualification | application | network | other'), due: kit.str('YYYY-MM or YYYY-MM-DD'), status: kit.str('todo | doing | done'), note: kit.str('Evidence or progress') })), why: kit.str('What changed, in one line') }, ['milestones']),
+            run: (c, a, by) => { const p = savePlan(a, by); return `Plan saved: ${p.milestones.filter(m => m.status === 'done').length}/${p.milestones.length} done.`; } },
         { name: 'finish_wish', description: 'Close a wish with a short summary for the person.', inputSchema: kit.obj({ id: kit.str('Wish id'), summary: kit.str('What you found, the best three and why, gaps to close') }, ['id', 'summary']), run: (c, a) => finishWish(a.id, { summary: a.summary }) },
         { name: 'log', description: 'Recent Job Hunt activity.', inputSchema: kit.obj({}), run: () => readLog(40).map(e => `${new Date(e.t).toISOString().slice(0, 16)} ${e.by}: ${e.what}`).join('\n') },
     ],
@@ -736,7 +752,7 @@ export function addDoc({ name, file, data, kind = '', notes = '' }, by = 'phone'
     fs.mkdirSync(P('docs'), { recursive: true }); share(P('docs'));
     const id = id6('d'); const f = `${id}${ext}`; fs.writeFileSync(P('docs', f), buf); share(P('docs', f));
     const d = { id, name: clip(name || path.basename(file, ext), 160), file: f, original: clip(file, 200), kind: clip(kind, 60), notes: clip(notes, 1000), added: Date.now(), by, read: null };
-    list.push(d); writeJson(docsFile(), { docs: list }); log({ kind: 'doc', by, what: `Document added: ${d.name}` }); return d;
+    list.push(d); writeJson(docsFile(), { docs: list }); log({ kind: 'doc', by, what: `Document added: ${d.name}` }); setTimeout(queueDocReads, 500); return d;
 }
 export function removeDoc(id) { const list = docs(); const d = list.find(x => x.id === id); if (!d) throw httpError(404, 'No such document.'); fs.rmSync(P('docs', d.file), { force: true }); writeJson(docsFile(), { docs: list.filter(x => x.id !== id) }); return { removed: id }; }
 export function docPath(id) { const d = docs().find(x => x.id === id); if (!d) throw httpError(404, 'No such document.'); return { file: P('docs', d.file), name: d.original || d.file, doc: d }; }
@@ -960,6 +976,7 @@ export function saveCpd(b, by = 'phone') {
     if (b.type !== undefined) e.type = CPD_TYPES[b.type] ? b.type : 'work'; e.type ||= 'work';
     if (b.project !== undefined) e.project = clip(b.project, 160);
     if (b.meId !== undefined) e.meId = me().items.some(i => i.id === b.meId) ? b.meId : null;
+    if (b.milestone !== undefined) e.milestone = (plan()?.milestones || []).some(m => m.id === b.milestone) ? b.milestone : null;
     if (b.hours !== undefined) { const h = Number(b.hours); e.hours = Number.isFinite(h) && h > 0 ? Math.round(h * 4) / 4 : null; }
     if (b.tags !== undefined) e.tags = [...new Set((Array.isArray(b.tags) ? b.tags : String(b.tags).split(',')).map(t => clip(t, 40).toLowerCase()).filter(Boolean))].slice(0, 15);
     if (b.text !== undefined && e.processed) e.processed = null;   // edited: read it again
@@ -975,7 +992,7 @@ export function cpdCsv() {
 export function cpdPrompt() {
     return `Update my Me map from my CPD log. cpd_entries (new entries only) and me_summary first.\n` +
         `For each new entry: if it shows a skill I have not got in Me, or a higher or broader use of one I have, propose_me it (kind skill, evidence quoting what I did, a level only if the entries clearly support it, links to the project). If it is progress on an ongoing project or role, propose_me that item again with the same kind and title so the new evidence and dates are added (it will not overwrite what I confirmed). Courses, certifications and talks become cert, education or achievement items when they are complete. Many small entries on one theme can become one skill with combined evidence. Useful context that is not an item (what was mine in a team, what I am working towards) goes in add_me_note.\n` +
-        `Every proposal: sources [{"title": "CPD log", "note": "<dates of the entries>"}]. Do not invent; routine entries with nothing new can be skipped. Then mark_cpd_processed with the ids you read, and finish with a short summary of what changed.`;
+        `Every proposal: sources [{"title": "CPD log", "note": "<dates of the entries>"}]. Do not invent; routine entries with nothing new can be skipped. If there is a plan (show_plan) and an entry clearly evidences a milestone, update it (save_plan with the milestone's status and a note; keep other ids). Then mark_cpd_processed with the ids you read, and finish with a short summary of what changed.`;
 }
 let cpdBusy = false;
 function maybeAutoCpd() {
@@ -984,4 +1001,58 @@ function maybeAutoCpd() {
     const today = new Date().toISOString().slice(0, 10); if (readLog(500).some(e => e.kind === 'cpd' && e.auto && new Date(e.t).toISOString().slice(0, 10) === today)) return;
     cpdBusy = true; log({ kind: 'cpd', by: 'box', auto: true, what: `Updating Me from ${fresh.length} new CPD entries` });
     runner(cpdPrompt(), 'cpd').then(name => waitShell(name)).catch(e => log({ kind: 'cpd', by: 'box', what: `CPD update not started: ${e.message}` })).finally(() => { cpdBusy = false; });
+}
+
+// ---------- my plan: the goal, where I stand, and milestones towards it ----------
+// One lasting plan (/Jobs/plan.json), started from a wish's "where you stand" or written by hand. CPD entries can be
+// linked to a milestone; "Update my plan" has an agent tick off what Me and the log now evidence and re-order the rest.
+// What matters to the person, with or without a career goal: money, travel, remote, a place, hours, stability, growth,
+// purpose… each must-have, important or nice. Agents weigh every job against these (a "wants" score beside the fit).
+export const WANT_KINDS = { money: 'Money', travel: 'Travel', remote: 'Remote or flexible', location: 'A place to live', hours: 'Hours and balance', stability: 'Stability', growth: 'Learning and growth', purpose: 'Purpose', people: 'People and culture', other: 'Other' };
+function cleanWants(list) { return (Array.isArray(list) ? list : []).slice(0, 20).map(w => ({ id: /^w[0-9a-f]{6}$/.test(w.id || '') ? w.id : id6('w'), kind: WANT_KINDS[w.kind] ? w.kind : 'other', detail: clip(w.detail, 300), importance: ['must', 'important', 'nice'].includes(w.importance) ? w.importance : 'important' })).filter(w => w.detail || w.kind !== 'other'); }
+export function setWants(list, by = 'phone') { const old = plan(); return savePlan({ ...(old || {}), goal: old?.goal || '', wants: list, why: 'What matters to me changed', milestones: old?.milestones || [] }, by); }
+export const MILESTONE_KINDS = { skill: 'Skill', experience: 'Experience', qualification: 'Qualification', application: 'Applications', network: 'People and network', other: 'Other' };
+const planFile = () => P('plan.json');
+export function plan() { return readJson(planFile(), null); }
+function cleanMilestone(m, old) {
+    return { id: old?.id || (/^s[0-9a-f]{6}$/.test(m.id || '') ? m.id : id6('s')), title: clip(m.title ?? old?.title, 200), detail: clip(m.detail ?? old?.detail ?? '', 1500), kind: MILESTONE_KINDS[m.kind] ? m.kind : old?.kind || 'other', due: /^\d{4}-\d{2}(-\d{2})?$/.test(m.due || '') ? m.due : (m.due === '' ? '' : old?.due || ''), status: ['todo', 'doing', 'done'].includes(m.status) ? m.status : old?.status || 'todo', note: clip(m.note ?? old?.note ?? '', 800), done: m.status === 'done' ? (old?.done || Date.now()) : null };
+}
+export function savePlan(b, by = 'phone') {
+    const old = plan(); const arr = v => (Array.isArray(v) ? v : String(v || '').split('\n')).map(x => clip(x, 300)).filter(Boolean).slice(0, 12);
+    const goal = clip(b.goal ?? old?.goal ?? '', 300); const wants = b.wants !== undefined ? cleanWants(b.wants) : old?.wants || [];
+    if ((!goal || goal.length < 3) && !wants.length) throw httpError(400, 'Say what the goal is, or what matters to you.');
+    const ms = Array.isArray(b.milestones) ? b.milestones.slice(0, 40).map(m => cleanMilestone(m, (old?.milestones || []).find(x => x.id === m.id))).filter(m => m.title) : old?.milestones || [];
+    const p = { goal, wants, standing: clip(b.standing ?? old?.standing ?? '', 40), level: clip(b.level ?? old?.level ?? '', 160), summary: clip(b.summary ?? old?.summary ?? '', 1500), gaps: b.gaps !== undefined ? arr(b.gaps) : old?.gaps || [], milestones: ms, created: old?.created || Date.now(), updated: Date.now(), by, history: [...(old?.history || []), ...(old ? [{ at: Date.now(), by, what: b.why ? clip(b.why, 300) : 'Plan updated' }] : [])].slice(-30) };
+    writeJson(planFile(), p); log({ kind: 'plan', by, what: old ? `Plan updated${b.why ? `: ${clip(b.why, 120)}` : ''}` : `Plan started: ${goal || 'what matters to me'}` }); return p;
+}
+export function setMilestone(id, b, by = 'phone') {
+    const p = plan(); if (!p) throw httpError(404, 'No plan yet.'); const i = p.milestones.findIndex(m => m.id === id);
+    if (b.delete) { if (i < 0) throw httpError(404, 'No such milestone.'); p.milestones.splice(i, 1); }
+    else if (i < 0) { if (id !== 'new') throw httpError(404, 'No such milestone.'); p.milestones.push(cleanMilestone(b)); }
+    else { const before = p.milestones[i].status; p.milestones[i] = cleanMilestone(b, p.milestones[i]); if (before !== p.milestones[i].status) log({ kind: 'plan', by, what: `Milestone ${p.milestones[i].status === 'done' ? 'done' : p.milestones[i].status}: ${p.milestones[i].title}` }); }
+    p.updated = Date.now(); writeJson(planFile(), p); return p;
+}
+export function adoptWishPlan(wid, by = 'phone') {
+    const w = wishes().find(x => x.id === wid); if (!w?.plan) throw httpError(404, 'That wish has no plan.');
+    const ms = [...(w.plan.steps || []).map(t => ({ title: t, kind: 'other' })), ...(w.plan.routes || []).map(t => ({ title: `Way in: ${t}`, kind: 'application' })), ...(w.plan.gaps || []).map(t => ({ title: `Close the gap: ${t}`, kind: 'skill' }))];
+    return savePlan({ goal: w.text, standing: w.plan.standing, level: w.plan.level, summary: w.plan.summary, gaps: w.plan.gaps, milestones: ms, why: 'Started from a wish' }, by);
+}
+export function planPrompt() {
+    return `Update my career plan. show_plan, me_summary, and cpd_entries (all: true) first.\n` +
+        `For each milestone: mark it done when confirmed Me items or CPD entries clearly evidence it (say which in its note), doing when there is real progress, and leave it otherwise. Re-order and refine the rest so the next steps are concrete and achievable (what, how, by when); add milestones for new gaps that jobs keep asking about (Me gaps) and drop ones that no longer serve the goal. Re-assess where I stand (standing and level) honestly.\n` +
+        `Save it with save_plan (the whole plan, keeping milestone ids you keep) and "why" in one line. Never mark something done without evidence. Finish with a short summary: what moved, what is next.`;
+}
+
+// Documents are read into Me by themselves, one at a time (settings.autoRead, default on; up to 20 a day).
+let docBusy = false;
+export function queueDocReads() {
+    const s = settings(); if (s.autoRead === false || docBusy || !runner) return;
+    const unread = docs().filter(d => !d.read && !d.queued); if (!unread.length) return;
+    const day = new Date().toISOString().slice(0, 10); const used = readLog(3000).filter(e => e.kind === 'doc' && e.auto && new Date(e.t).toISOString().slice(0, 10) === day).length;
+    if (used >= 20) return;
+    docBusy = true; const d = unread[0];
+    const list = docs(); const x = list.find(y => y.id === d.id); x.queued = Date.now(); writeJson(docsFile(), { docs: list });
+    log({ kind: 'doc', by: 'box', auto: true, what: `Reading "${d.name}" into Me` });
+    runner(docPrompt(d), `doc-${d.id.slice(1)}`).then(name => waitShell(name)).catch(e => log({ kind: 'doc', by: 'box', what: `Could not read "${d.name}": ${e.message}` }))
+        .finally(() => { const l2 = docs(); const y = l2.find(z => z.id === d.id); if (y) { delete y.queued; if (!y.read) y.read = Date.now(); writeJson(docsFile(), { docs: l2 }); } docBusy = false; queueDocReads(); });
 }

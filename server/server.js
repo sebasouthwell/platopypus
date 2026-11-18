@@ -94,6 +94,9 @@ elevate.setShellLookup(name => shells.shellMeta(name)?.cwd || null);
 // ---------- helpers ----------
 
 // What a restricted (agent-user shell) session may call: the box CLIs and nothing else.
+// Job Hunt's one-shot agents (automatic assessments, CPD and document reading) start through this.
+async function jobsRunner(prompt, base) { const st = jobs.settings(); const name = `${base}-${Math.random().toString(36).slice(2, 4)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true }); return name; }
+setTimeout(() => { try { if (jobs.ready()) { jobs.setAgentRunner(jobsRunner); jobs.queueDocReads(); } } catch { /* Job Hunt not set up */ } }, 30_000);
 const AGENT_ROUTES = [
     ['GET', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}$/], ['POST', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}\/[a-z_]{2,40}$/],   // app tools (kit/tools.js); each app checks the shell
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
@@ -804,7 +807,7 @@ const server = http.createServer(async (req, res) => {
         }
         // Conspiracy: cases, the pinboard, theories, probes. Needs the app.
         // Job Hunt (lib/jobs.js). Files go up as base64 in JSON (CVs, application documents).
-        jobs.setAgentRunner(async (prompt, base) => { const st = jobs.settings(); const name = `${base}-${Math.random().toString(36).slice(2, 4)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true }); return name; });
+        jobs.setAgentRunner(jobsRunner);
         if (p === '/api/jobs' || p.startsWith('/api/jobs/')) {
             if (!(await addons.isAdded('jobs'))) return send(res, 409, { error: 'Add Job Hunt first (Apps tab).', needApp: 'jobs' });
             if (!jobs.ready()) jobs.setup();
@@ -848,6 +851,12 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, { shell: name });
             }
             if (rest === 'frameworks' && method === 'GET') return send(res, 200, { frameworks: jobs.frameworks() });
+            if (rest === 'wants' && method === 'POST') return send(res, 200, jobs.setWants((await body()).wants || [], 'phone'));
+            if (rest === 'plan' && method === 'GET') return send(res, 200, { plan: jobs.plan(), kinds: jobs.MILESTONE_KINDS, wantKinds: jobs.WANT_KINDS });
+            if (rest === 'plan' && method === 'POST') return send(res, 200, jobs.savePlan(await body(), 'phone'));
+            if ((jm = rest.match(/^plan\/milestone\/(s[0-9a-f]{6}|new)$/)) && method === 'POST') return send(res, 200, jobs.setMilestone(jm[1], await body(), 'phone'));
+            if (rest === 'plan/adopt' && method === 'POST') return send(res, 200, jobs.adoptWishPlan(String((await body()).wish || ''), 'phone'));
+            if (rest === 'plan/update' && method === 'POST') { jobs.writeBrief(); const st = jobs.settings(); const name = `plan-${Math.random().toString(36).slice(2, 6)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.planPrompt(), oneshot: true }); jobs.log({ kind: 'plan', by: 'phone', what: 'Updating the plan' }); return send(res, 201, { shell: name }); }
             if (rest === 'cpd' && method === 'GET') return send(res, 200, { entries: jobs.cpd(), types: jobs.CPD_TYPES });
             if (rest === 'cpd' && method === 'POST') return send(res, 201, jobs.saveCpd(await body(), 'phone'));
             if ((jm = rest.match(/^cpd\/(p[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeCpd(jm[1]));

@@ -7,6 +7,9 @@
 let C = null;
 const S = { tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
+const ROUTE = { realistic: 'Apply now', stretch: 'Stretch', entry: 'Way in', goal: 'Goal' };
+const STANDING = { 'in-field': 'In your field', adjacent: 'A step across', 'career change': 'A career change' };
+const planHtml = (p, wid) => !p ? '' : `<div class="jh-plan"><div class="jh-plan-h"><b>${C.esc(STANDING[p.standing] || p.standing)}</b>${p.level ? `<span>${C.esc(p.level)}</span>` : ''}</div>${p.summary ? `<p>${C.esc(p.summary)}</p>` : ''}${[['Ways in', p.routes], ['Gaps', p.gaps], ['Next steps', p.steps]].filter(([, v]) => v?.length).map(([l, v]) => `<div class="jh-plan-l"><span>${l}</span><ul>${v.map(x => `<li>${C.esc(x)}</li>`).join('')}</ul></div>`).join('')}${wid ? `<button class="btn jh-adopt" data-adopt="${wid}">Make this my plan</button>` : ''}</div>`;
 const STAGE_TXT = { preparing: 'Preparing', applied: 'Applied', assessment: 'Assessment', interview: 'Interview', final: 'Final round', offer: 'Offer', accepted: 'Accepted', rejected: 'Rejected', withdrawn: 'Withdrawn' };
 const KIND_COLOR = { project: '#F0B840', role: '#6FB1F0', skill: '#3FD39A', education: '#B38CFF', cert: '#2EC4B6', achievement: '#FF7AA8', interest: '#93A4BA' };
 const SYM = { GBP: '£', EUR: '€', USD: '$', CHF: 'CHF ' };
@@ -42,16 +45,16 @@ async function renderBoard(box) {
     const keyed = Object.entries(ov.settings.keys).filter(([, k]) => k.needs.length);
     const noKeys = keyed.every(([, k]) => !k.ready) && localStorage.getItem('jh.keysBanner') !== 'off';
     const live = w.wishes.filter(x => x.status === 'started'); const last = w.wishes.find(x => x.status !== 'started');
-    const count = st => b.jobs.filter(j => (st === 'active' ? !['hidden', 'applied'].includes(j.status) : j.status === st)).length;
-    const filters = [['active', 'Active'], ['new', 'New'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']];
+    const count = st => b.jobs.filter(j => fmatch(j, st)).length;
+    const filters = [['active', 'Active'], ['new', 'New'], ['now', 'Apply now'], ['entry', 'Ways in'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']].filter(([k]) => !['now', 'entry'].includes(k) || b.jobs.some(j => j.route));
     box.innerHTML = `
         <form class="jh-ask" data-wish>
           <label for="jh-wish-t" class="jh-ask-l">What job do you want?</label>
           <div class="jh-ask-row"><textarea id="jh-wish-t" rows="1" maxlength="600" placeholder="e.g. junior SOC analyst in Leeds"></textarea><button class="jh-ask-go" type="submit" aria-label="Find jobs">${icon('search')}</button></div>
           <p class="jh-ask-h">An agent sets the search, hunts job sites and the web, then scores the best against Me.</p>
         </form>
-        ${live.map(x => `<div class="jh-live"><span class="dot"></span><span class="t">Working on: ${esc(x.text)}</span><button class="text-btn" data-watch="wish-${esc(x.id.slice(1))}">Watch</button></div>`).join('')}
-        ${last ? `<details class="jh-last ${last.status}"><summary><span class="dot"></span><span class="t">${last.status === 'done' ? 'Latest result' : 'Last run ended'}: ${esc(last.text)}</span></summary><div class="jh-wishsum">${md(last.summary || '')}</div></details>` : ''}
+        ${live.map(x => `<div class="jh-live"><span class="dot"></span><span class="t">${x.plan ? `${esc(STANDING[x.plan.standing] || x.plan.standing)}: searching` : 'Checking your background'} for ${esc(x.text)}</span><button class="text-btn" data-watch="wish-${esc(x.id.slice(1))}">Watch</button></div>${x.plan ? `<details class="jh-last"><summary><span class="dot"></span><span class="t">Where you stand</span></summary>${planHtml(x.plan, x.id)}</details>` : ''}`).join('')}
+        ${last ? `<details class="jh-last ${last.status}"><summary><span class="dot"></span><span class="t">${last.status === 'done' ? 'Latest result' : 'Last run ended'}: ${esc(last.text)}</span></summary>${planHtml(last.plan, last.id)}<div class="jh-wishsum">${md(last.summary || '')}</div></details>` : ''}
         ${noKeys ? `<div class="jh-note1">${icon('key')}<span>Job-site keys (Adzuna, Reed, Jooble) find far more UK jobs.</span><button class="text-btn" data-go-setup>Add</button><button class="jh-iconbtn" data-nokeys aria-label="Dismiss">${icon('x')}</button></div>` : ''}
         ${upcomingList(ov.upcoming || [])}
         <div class="jh-chips" role="tablist" aria-label="Filter jobs">${filters.map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? 'on' : ''}" role="tab" aria-selected="${S.filter === k}">${l}<span>${count(k)}</span></button>`).join('')}</div>
@@ -69,6 +72,7 @@ async function renderBoard(box) {
         try { await C.api('/api/jobs/wish', { method: 'POST', body: { text: t } }); C.toast('An agent is on it. New jobs appear here as it finds them.'); await loadJobs(); } catch (x) { C.toast(x.message, true); }
     };
     const gs = $('[data-go-setup]', box); if (gs) gs.onclick = () => loadJobs('setup');
+    $$('[data-adopt]', box).forEach(x => x.onclick = async () => { try { await C.api('/api/jobs/plan/adopt', { method: 'POST', body: { wish: x.dataset.adopt } }); C.toast('Saved as your plan (CPD tab).'); loadJobs('cpd'); } catch (e) { C.toast(e.message, true); } });
     const nk = $('[data-nokeys]', box); if (nk) nk.onclick = () => { localStorage.setItem('jh.keysBanner', 'off'); nk.parentElement.remove(); };
     $$('[data-watch]', box).forEach(x => x.onclick = () => C.openTerminal(x.dataset.watch, 'Job Hunt').catch(e => C.toast(e.message, true)));
     $$('[data-f]', box).forEach(x => x.onclick = () => { S.filter = x.dataset.f; renderBoard(box); });
@@ -81,9 +85,10 @@ async function renderBoard(box) {
     $$('[data-upapp]', box).forEach(x => x.onclick = async () => { const { apps } = await C.api('/api/jobs/apps'); appDialog(apps.find(a => a.id === x.dataset.upapp)); });
     if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden && document.activeElement !== ta) renderBoard(box).catch(() => {}); }, 20_000);
 }
+const fmatch = (j, st) => (st === 'active' ? !['hidden', 'applied'].includes(j.status) : st === 'now' ? ['realistic', 'stretch'].includes(j.route) && j.status !== 'hidden' : st === 'entry' ? j.route === 'entry' && j.status !== 'hidden' : j.status === st);
 function jobCards(jobs) {
     const { esc } = C; const today = new Date().toISOString().slice(0, 10);
-    const list = jobs.filter(j => (S.filter === 'active' ? !['hidden', 'applied'].includes(j.status) : j.status === S.filter));
+    const list = jobs.filter(j => fmatch(j, S.filter));
     const key = { match: j => -(j.match?.score ?? -1), left: j => -(j.money?.left ?? -1e9), new: j => -j.found, deadline: j => (j.deadline || '9999') }[S.sort];
     list.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
     return list.map(j => {
@@ -91,8 +96,8 @@ function jobCards(jobs) {
         const late = j.deadline && j.deadline < today;
         return `<button class="jh-job" data-job="${esc(j.id)}">
             <span class="jh-fit ${tone}" style="--v:${sc ?? 0}"><b>${sc ?? '–'}</b></span>
-            <span class="main"><span class="t">${esc(j.title)}</span><span class="s">${esc([j.company, j.location].filter(Boolean).join(' · '))}</span>
-              <span class="m">${j.salary ? `<span>${esc(j.salary)}</span>` : ''}${j.money?.left !== undefined && j.money?.left !== null ? `<span class="left">${money(j.money.left, j.money.currency)} left / yr</span>` : ''}${j.deadline ? `<span class="${late ? 'late' : ''}">closes ${esc(j.deadline)}</span>` : ''}${j.status !== 'new' ? `<span class="st">${esc(j.status)}</span>` : ''}<span class="src">${esc(j.source || j.by || '')}</span></span></span>
+            <span class="main"><span class="t">${j.route ? `<span class="jh-route ${j.route}">${ROUTE[j.route]}</span>` : ''}${esc(j.title)}</span><span class="s">${esc([j.company, j.location].filter(Boolean).join(' · '))}</span>
+              <span class="m">${j.salary ? `<span>${esc(j.salary)}</span>` : ''}${j.match?.wants ? `<span class="wants" title="${esc(j.match.wants.note || '')}">♥ ${j.match.wants.score}</span>` : ''}${j.money?.left !== undefined && j.money?.left !== null ? `<span class="left">${money(j.money.left, j.money.currency)} left / yr</span>` : ''}${j.deadline ? `<span class="${late ? 'late' : ''}">closes ${esc(j.deadline)}</span>` : ''}${j.status !== 'new' ? `<span class="st">${esc(j.status)}</span>` : ''}<span class="src">${esc(j.source || j.by || '')}</span></span></span>
         </button>`;
     }).join('');
 }
@@ -138,7 +143,7 @@ async function jobDialog(id) {
           ${d.drafts.length ? `<div class="jh-drafts">${d.drafts.map(x => `<button class="chip" data-draft="${esc(x.name)}">${icon('file-text')}${esc(x.name)}</button>`).join('')}</div>` : ''}
         </div>
         <h3 class="jh-h" id="js-fit">Fit</h3>
-        ${j.match ? `<div class="jh-matchhead"><span class="jh-fit big ${j.match.score >= 70 ? 'hi' : j.match.score >= 45 ? 'mid' : 'lo'}" style="--v:${j.match.score}"><b>${j.match.score}</b></span><div>${j.match.level ? `<b>Comes in at: ${esc(j.match.level)}</b><br>` : ''}${esc(j.match.summary || '')}<div class="muted">by ${esc(j.match.by)} · ${ago(j.match.at)}</div></div></div>
+        ${j.match ? `<div class="jh-matchhead"><span class="jh-fit big ${j.match.score >= 70 ? 'hi' : j.match.score >= 45 ? 'mid' : 'lo'}" style="--v:${j.match.score}"><b>${j.match.score}</b></span><div>${j.match.level ? `<b>Comes in at: ${esc(j.match.level)}</b><br>` : ''}${j.match.wants ? `<span class="jh-wantsline">♥ ${j.match.wants.score} for what matters to you${j.match.wants.note ? `: ${esc(j.match.wants.note)}` : ''}</span><br>` : ''}${esc(j.match.summary || '')}<div class="muted">by ${esc(j.match.by)} · ${ago(j.match.at)}</div></div></div>
             <div class="jh-lines">${j.match.lines.map(l => `<div class="jh-line ${l.verdict}"><span class="v">${VERDICT[l.verdict]}</span><div><div>${esc(l.requirement)}</div>${l.note ? `<div class="muted">${esc(l.note)}</div>` : ''}${l.evidence.length ? `<div class="jh-ev">${l.evidence.map(e => byId.get(e)).filter(Boolean).map(i => `<span style="--k:${KIND_COLOR[i.kind]}">${esc(i.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>`
             : `<p class="note">Not scored yet. ${d.candidates.length ? 'Likely evidence from Me is listed below; ' : ''}an agent scores it when it works a wish, or ask for it now.</p>${d.candidates.length ? `<div class="jh-lines">${d.candidates.map(r => `<div class="jh-line ${r.candidates.length ? 'partly' : 'gap'}"><span class="v">${r.candidates.length ? 'Maybe' : 'Nothing'}</span><div>${esc(r.requirement)}${r.candidates.length ? `<div class="jh-ev">${r.candidates.map(x => `<span style="--k:${KIND_COLOR[x.kind]}">${esc(x.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>` : ''}<div class="r-actions"><button class="btn" data-score>${icon('claude')}Score it against Me</button></div>`}
         <h3 class="jh-h" id="js-assess">How they will assess you</h3>
@@ -449,7 +454,7 @@ async function renderSetup(box) {
         <div class="card jh-form">
           <div class="jh-two"><div class="field"><label for="st-a">Agent for wishes and advice</label><select id="st-a">${['claude', 'codex', 'cline', 'antigravity'].map(a => `<option value="${a}" ${(s.agent || 'claude') === a ? 'selected' : ''}>${esc(C.agentTitle ? C.agentTitle(a) : a)}</option>`).join('')}</select></div><div class="field"><label for="st-mo">Model</label><input id="st-mo" value="${esc(s.model || '')}" placeholder="default (or oss:<ollama model>)"></div></div>
         </div>
-        <div class="card jh-form" style="margin-top:8px"><label class="jh-check"><input type="checkbox" id="st-ac" ${s.autoCpd === false ? '' : 'checked'}>Update Me from my CPD log by itself (when 5+ entries are new, at most once a day)</label><label class="jh-check"><input type="checkbox" id="st-aa" ${s.autoAssess === false ? '' : 'checked'}>Assess new jobs that use a framework (Civil Service, SFIA…) automatically</label><div class="field"><label for="st-ad">At most this many agent assessments a day (reused ones are free)</label><input id="st-ad" type="number" min="0" max="50" value="${esc(s.autoAssessPerDay ?? 6)}"></div></div>
+        <div class="card jh-form" style="margin-top:8px"><label class="jh-check"><input type="checkbox" id="st-ar" ${s.autoRead === false ? '' : 'checked'}>Read documents I add into Me by themselves</label><label class="jh-check"><input type="checkbox" id="st-ac" ${s.autoCpd === false ? '' : 'checked'}>Update Me from my CPD log by itself (when 5+ entries are new, at most once a day)</label><label class="jh-check"><input type="checkbox" id="st-aa" ${s.autoAssess === false ? '' : 'checked'}>Assess new jobs that use a framework (Civil Service, SFIA…) automatically</label><div class="field"><label for="st-ad">At most this many agent assessments a day (reused ones are free)</label><input id="st-ad" type="number" min="0" max="50" value="${esc(s.autoAssessPerDay ?? 6)}"></div></div>
         <h3 class="jh-h">Money</h3>
         <div class="card jh-form">
           <div class="jh-two"><div class="field"><label for="st-sl">Student loan</label><select id="st-sl">${[['none', 'None'], ['plan1', 'Plan 1'], ['plan2', 'Plan 2'], ['plan4', 'Plan 4 (Scotland)'], ['plan5', 'Plan 5'], ['postgrad', 'Postgraduate']].map(([k, l]) => `<option value="${k}" ${mo.studentLoan === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="field"><label for="st-pe">Pension (% of pay)</label><input id="st-pe" type="number" min="0" max="40" value="${esc(mo.pension ?? 5)}"></div></div>
@@ -460,7 +465,7 @@ async function renderSetup(box) {
         <p class="note">Keys are kept in the Vault. Remotive and Arbeitnow need none.</p>
         ${Object.entries(s.keys).map(([k, v]) => `<div class="card jh-key"><div class="jh-keyhead"><b>${esc(v.title)}</b><span class="${v.ready ? 'live' : 'muted'}">${v.ready ? 'ready' : v.needs.length ? 'no key' : 'ready, no key needed'}</span><label class="jh-check"><input type="checkbox" data-src="${k}" ${s.sources.includes(k) ? 'checked' : ''}>Use</label></div>
             ${v.needs.length ? `<div class="jh-keyrow">${v.needs.map(n => `<input data-key="${k}" data-env="${n}" type="password" autocomplete="off" placeholder="${esc(n)}${v.ready ? ' (saved; paste to replace)' : ''}">`).join('')}<button class="btn" data-savekey="${k}">Save</button></div>${v.signup ? `<a class="text-btn" href="${esc(v.signup)}" target="_blank" rel="noopener">Get a key</a>` : ''}` : ''}</div>`).join('')}`;
-    $('[data-save]', box).onclick = async () => { try { await C.api('/api/jobs/settings', { method: 'POST', body: { keywords: $('#st-k', box).value, locations: $('#st-l', box).value, countries: $('#st-co', box).value, nationality: $('#st-na', box).value, remote: $('#st-r', box).checked, salaryMin: $('#st-m', box).value, exclude: $('#st-x', box).value, agent: $('#st-a', box).value, model: $('#st-mo', box).value, autoAssess: $('#st-aa', box).checked, autoCpd: $('#st-ac', box).checked, autoAssessPerDay: Number($('#st-ad', box).value), sources: $$('[data-src]', box).filter(x => x.checked).map(x => x.dataset.src), money: { studentLoan: $('#st-sl', box).value, pension: Number($('#st-pe', box).value) || 0, notes: $('#st-mn', box).value } } }); C.toast('Saved'); reload(); } catch (e) { C.toast(e.message, true); } };
+    $('[data-save]', box).onclick = async () => { try { await C.api('/api/jobs/settings', { method: 'POST', body: { keywords: $('#st-k', box).value, locations: $('#st-l', box).value, countries: $('#st-co', box).value, nationality: $('#st-na', box).value, remote: $('#st-r', box).checked, salaryMin: $('#st-m', box).value, exclude: $('#st-x', box).value, agent: $('#st-a', box).value, model: $('#st-mo', box).value, autoAssess: $('#st-aa', box).checked, autoCpd: $('#st-ac', box).checked, autoRead: $('#st-ar', box).checked, autoAssessPerDay: Number($('#st-ad', box).value), sources: $$('[data-src]', box).filter(x => x.checked).map(x => x.dataset.src), money: { studentLoan: $('#st-sl', box).value, pension: Number($('#st-pe', box).value) || 0, notes: $('#st-mn', box).value } } }); C.toast('Saved'); reload(); } catch (e) { C.toast(e.message, true); } };
     $$('[data-savekey]', box).forEach(b => b.onclick = async () => { const k = b.dataset.savekey; const values = Object.fromEntries($$(`[data-key="${k}"]`, box).map(i => [i.dataset.env, i.value.trim()]).filter(([, v]) => v)); if (!Object.keys(values).length) return C.toast('Paste the key first.', true); try { await C.api('/api/jobs/key', { method: 'POST', body: { source: k, values } }); C.toast('Saved in the Vault'); reload(); } catch (e) { C.toast(e.message, true); } });
 }
 
@@ -503,13 +508,14 @@ function frameworkSection(j, d) {
 
 // ---------- CPD log ----------
 async function renderCpd(box) {
-    const { esc, icon, $, $$ } = C; const [{ entries, types }, me] = await Promise.all([C.api('/api/jobs/cpd'), C.api('/api/jobs/me')]);
+    const { esc, icon, $, $$ } = C; const [{ entries, types }, me, { plan: pl, kinds: mk, wantKinds: wk }] = await Promise.all([C.api('/api/jobs/cpd'), C.api('/api/jobs/me'), C.api('/api/jobs/plan')]);
     const today = new Date().toISOString().slice(0, 10); const projects = me.items.filter(i => ['project', 'role', 'education'].includes(i.kind) && i.status !== 'proposed');
     const fresh = entries.filter(e => !e.processed).length; const hours = entries.reduce((n, e) => n + (e.hours || 0), 0);
     const days = new Set(entries.map(e => e.date)); let streak = 0; for (let d = new Date(); days.has(d.toISOString().slice(0, 10)); d.setDate(d.getDate() - 1)) streak++;
     const yearAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10); const yearHours = entries.filter(e => e.date >= yearAgo).reduce((n, e) => n + (e.hours || 0), 0);
     const byWeek = new Map(); for (const e of entries.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created)) { const d = new Date(`${e.date}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const k = d.toISOString().slice(0, 10); if (!byWeek.has(k)) byWeek.set(k, []); byWeek.get(k).push(e); }
     box.innerHTML = `
+        ${planCard(pl, mk, wk)}
         <form class="jh-wish" data-cpd>
           <label for="cp-t">What did you do or learn today?</label>
           <textarea id="cp-t" rows="3" maxlength="6000" placeholder="e.g. Wrote a Sigma rule for suspicious PowerShell; learned how to test it against the Splunk lab; found that encoded commands evade my first version"></textarea>
@@ -518,6 +524,7 @@ async function renderCpd(box) {
             <select id="cp-y" aria-label="Type">${Object.entries(types).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
             <input id="cp-p" list="cp-pl" maxlength="160" placeholder="Project (optional)" aria-label="Project"><datalist id="cp-pl">${projects.map(p => `<option value="${esc(p.title)}">`).join('')}</datalist>
             <input id="cp-h" type="number" min="0" step="0.25" placeholder="Hours" aria-label="Hours">
+            ${pl?.milestones?.length ? `<select id="cp-m" aria-label="Milestone"><option value="">Towards a milestone (optional)</option>${pl.milestones.filter(m => m.status !== 'done').map(m => `<option value="${m.id}">${esc(m.title)}</option>`).join('')}</select>` : ''}
             <input id="cp-g" maxlength="200" placeholder="Tags, comma-separated" aria-label="Tags">
             <button class="btn pri" type="submit">${icon('plus')}Log it</button>
           </div>
@@ -528,8 +535,76 @@ async function renderCpd(box) {
         ${[...byWeek].map(([wk, es]) => `<h3 class="jh-h">Week of ${new Date(`${wk}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<span class="muted"> · ${es.reduce((n, e) => n + (e.hours || 0), 0) || '–'} h</span></h3>${es.map(e => `<div class="jh-cpd ${e.processed ? '' : 'new'}"><div class="m"><div class="h"><span class="d">${new Date(`${e.date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}</span><span class="ty">${esc(types[e.type] || e.type)}</span>${e.project ? `<span class="pj">${esc(e.project)}</span>` : ''}${e.hours ? `<span class="hr">${e.hours} h</span>` : ''}${e.processed ? '' : '<span class="nw">new</span>'}</div><div class="tx">${esc(e.text)}</div>${(e.tags || []).length ? `<div class="tg">${e.tags.map(t => `#${esc(t)}`).join(' ')}</div>` : ''}</div><button class="text-btn dim" data-cpddel="${e.id}" aria-label="Delete entry">${icon('x')}</button></div>`).join('')}`).join('') || '<p class="note">Nothing logged yet. A line a day is enough: what you worked on, what you found out, what you got better at.</p>'}`;
     $('[data-cpd]', box).onsubmit = async ev => {
         ev.preventDefault(); const t = $('#cp-t', box).value.trim(); if (!t) return; const pj = $('#cp-p', box).value.trim();
-        try { await C.api('/api/jobs/cpd', { method: 'POST', body: { text: t, date: $('#cp-d', box).value, type: $('#cp-y', box).value, project: pj, meId: projects.find(p => p.title === pj)?.id, hours: $('#cp-h', box).value, tags: $('#cp-g', box).value } }); renderCpd(box); } catch (x) { C.toast(x.message, true); }
+        try { await C.api('/api/jobs/cpd', { method: 'POST', body: { text: t, date: $('#cp-d', box).value, type: $('#cp-y', box).value, project: pj, meId: projects.find(p => p.title === pj)?.id, hours: $('#cp-h', box).value, tags: $('#cp-g', box).value, milestone: $('#cp-m', box)?.value || undefined } }); renderCpd(box); } catch (x) { C.toast(x.message, true); }
     };
+    wirePlan(box, pl, mk, wk);
     $('[data-cpdup]', box).onclick = () => runAgent('/api/jobs/cpd/update', {}, 'An agent is reading your new log entries into Me. Its proposals appear under "To confirm" on the Me tab.');
     $$('[data-cpddel]', box).forEach(x => x.onclick = async () => { if (await C.confirmDialog({ title: 'Delete this entry?', text: 'It is removed from the log. Anything already added to Me stays.', action: 'Delete' })) { await C.api(`/api/jobs/cpd/${x.dataset.cpddel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderCpd(box); } });
+}
+
+// ---------- my plan ----------
+const MS = { todo: 'To do', doing: 'Doing', done: 'Done' };
+const IMP = { must: 'Must have', important: 'Important', nice: 'Nice to have' };
+function wantsHtml(pl, wk) {
+    const { esc, icon } = C; const ws = pl?.wants || [];
+    return `<div class="jh-wants"><div class="jh-wants-h"><span class="lbl">What matters to me</span><button class="text-btn" data-wedit>${ws.length ? 'Change' : 'Add'}</button></div>${ws.length ? `<div class="jh-wchips">${ws.map(w => `<span class="jh-wchip ${w.importance}" title="${esc(IMP[w.importance])}">${esc(wk[w.kind] || w.kind)}${w.detail ? `: ${esc(w.detail)}` : ''}</span>`).join('')}</div>` : '<p class="muted small">Money, travel, remote, where you live, hours… Every job is weighed against these.</p>'}</div>`;
+}
+function planCard(pl, mk, wk) {
+    const { esc, icon } = C;
+    if (!pl) return `<div class="jh-plancard empty"><h3>My plan</h3><p class="muted">A goal and the steps towards it, or simply what you want from work. Start from a wish's "where you stand" (Jobs tab), or here.</p><div class="jh-ask-row"><textarea data-pgoal rows="1" placeholder="A goal, e.g. become a detection engineer in 2 years"></textarea><button class="jh-ask-go" data-pstart aria-label="Start the plan">${icon('check')}</button></div><button class="btn jh-nogoal" data-wedit>No set goal: I know what I want (money, travel, remote…)</button></div>`;
+    if (!pl.goal) return `<div class="jh-plancard">${wantsHtml(pl, wk)}<div class="jh-ask-row" style="margin-top:12px"><textarea data-pgoal rows="1" placeholder="Add a goal later if you like"></textarea><button class="jh-ask-go" data-pstart aria-label="Add the goal">${icon('check')}</button></div></div>`;
+    const done = pl.milestones.filter(m => m.status === 'done').length; const pct = pl.milestones.length ? Math.round(done / pl.milestones.length * 100) : 0;
+    return `<div class="jh-plancard">
+        <div class="jh-planhead"><div class="g"><span class="lbl">My plan</span><h3>${esc(pl.goal)}</h3>${pl.standing ? `<span class="st">${esc(STANDING[pl.standing] || pl.standing)}${pl.level ? ` · ${esc(pl.level)}` : ''}</span>` : ''}</div><button class="jh-iconbtn" data-pedit aria-label="Edit the goal">${icon('pencil')}</button></div>
+        <div class="jh-prog" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Milestones done"><span style="width:${pct}%"></span></div><div class="jh-progt">${done} of ${pl.milestones.length} milestones done</div>
+        ${pl.summary ? `<p class="jh-plans">${esc(pl.summary)}</p>` : ''}
+        ${wantsHtml(pl, wk)}
+        <ol class="jh-ms">${pl.milestones.map(m => `<li class="${m.status}"><button class="jh-msb" data-ms="${m.id}" aria-label="${esc(m.title)}: ${MS[m.status]}. Tap to change.">${m.status === 'done' ? icon('check') : m.status === 'doing' ? '<span class="half"></span>' : ''}</button><div class="m"><div class="t">${esc(m.title)}</div><div class="s">${esc([mk[m.kind] || m.kind, m.due && `by ${m.due}`, m.note].filter(Boolean).join(' · '))}</div>${m.detail ? `<div class="d">${esc(m.detail)}</div>` : ''}</div><button class="jh-iconbtn" data-msedit="${m.id}" aria-label="Edit milestone">${icon('more')}</button></li>`).join('')}</ol>
+        <div class="jh-planacts"><button class="btn" data-msadd>${icon('plus')}Add a milestone</button><button class="btn pri" data-pupdate>${icon('claude')}Update my plan</button></div>
+        <p class="muted small">Update my plan has an agent tick off what your log and Me now show, and refine the next steps.${pl.history?.length ? ` Last change: ${esc(pl.history[pl.history.length - 1].what)}.` : ''}</p>
+    </div>`;
+}
+function wirePlan(box, pl, mk, wk) {
+    const { $, $$, esc, icon } = C;
+    const st = $('[data-pstart]', box); if (st) st.onclick = async () => { const g = $('[data-pgoal]', box).value.trim(); if (!g) return; try { await C.api('/api/jobs/plan', { method: 'POST', body: { goal: g, milestones: pl?.milestones || [] } }); renderCpd(box); } catch (e) { C.toast(e.message, true); } };
+    $$('[data-wedit]', box).forEach(b => b.onclick = () => wantsDialog(pl, wk, () => renderCpd(box)));
+    if (!pl || !pl.goal) return;
+    const next = { todo: 'doing', doing: 'done', done: 'todo' };
+    $$('[data-ms]', box).forEach(x => x.onclick = async () => { const m = pl.milestones.find(y => y.id === x.dataset.ms); try { await C.api(`/api/jobs/plan/milestone/${m.id}`, { method: 'POST', body: { status: next[m.status] } }); renderCpd(box); } catch (e) { C.toast(e.message, true); } });
+    const edit = m => {
+        const { panel, close } = C.openDialog(`<h2>${icon('pencil')}${m ? 'Milestone' : 'Add a milestone'}</h2>
+            <div class="field"><label for="ms-t">What</label><input id="ms-t" maxlength="200" value="${esc(m?.title || '')}" placeholder="e.g. Pass CompTIA Security+"></div>
+            <div class="field"><label for="ms-d">How</label><textarea id="ms-d" rows="3">${esc(m?.detail || '')}</textarea></div>
+            <div class="jh-two"><div class="field"><label for="ms-k">Kind</label><select id="ms-k">${Object.entries(mk).map(([k, l]) => `<option value="${k}" ${m?.kind === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div><div class="field"><label for="ms-u">By</label><input id="ms-u" type="month" value="${esc((m?.due || '').slice(0, 7))}"></div></div>
+            <div class="field"><label for="ms-s">Status</label><select id="ms-s">${Object.entries(MS).map(([k, l]) => `<option value="${k}" ${(m?.status || 'todo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div class="buttons">${m ? '<button class="danger" data-del>Delete</button>' : ''}<button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+        $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/plan/milestone/${m ? m.id : 'new'}`, { method: 'POST', body: { title: $('#ms-t', panel).value, detail: $('#ms-d', panel).value, kind: $('#ms-k', panel).value, due: $('#ms-u', panel).value, status: $('#ms-s', panel).value } }); close(); renderCpd(box); } catch (e) { C.toast(e.message, true); } };
+        const del = $('[data-del]', panel); if (del) del.onclick = async () => { await C.api(`/api/jobs/plan/milestone/${m.id}`, { method: 'POST', body: { delete: true } }).catch(e => C.toast(e.message, true)); close(); renderCpd(box); };
+    };
+    $$('[data-msedit]', box).forEach(x => x.onclick = () => edit(pl.milestones.find(y => y.id === x.dataset.msedit)));
+    $('[data-msadd]', box).onclick = () => edit(null);
+    $('[data-pedit]', box).onclick = () => {
+        const { panel, close } = C.openDialog(`<h2>${icon('pencil')}My plan</h2><div class="field"><label for="pl-g">Goal</label><textarea id="pl-g" rows="2">${esc(pl.goal)}</textarea></div><div class="field"><label for="pl-s">Where I stand</label><textarea id="pl-s" rows="3">${esc(pl.summary || '')}</textarea></div><div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+        $('[data-ok]', panel).onclick = async () => { try { await C.api('/api/jobs/plan', { method: 'POST', body: { goal: $('#pl-g', panel).value, summary: $('#pl-s', panel).value, why: 'Edited by you' } }); close(); renderCpd(box); } catch (e) { C.toast(e.message, true); } };
+    };
+    $('[data-pupdate]', box).onclick = () => runAgent('/api/jobs/plan/update', {}, 'An agent is updating your plan from your log and Me.');
+}
+
+// What matters to me: quick chips for each kind, a detail and how much it matters.
+function wantsDialog(pl, wk, done) {
+    const { $, $$, esc, icon } = C; let ws = (pl?.wants || []).map(w => ({ ...w }));
+    const { panel, close } = C.openDialog(`<h2>${icon('pin')}What matters to me</h2><p class="muted">Add what you want from work. Must-haves weigh most when jobs are scored, and you don't need a career goal for this.</p>
+        <div class="jh-wadd">${Object.entries(wk).map(([k, l]) => `<button class="chip" data-wk="${k}">+ ${esc(l)}</button>`).join('')}</div>
+        <div class="jh-wlist"></div>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+    const hint = { money: 'e.g. £40k+, or enough to save £500 a month', travel: 'e.g. travel abroad for work, or live somewhere new each year', remote: 'e.g. fully remote, or 2 days in the office at most', location: 'e.g. Leeds or Manchester, near family', hours: 'e.g. no weekends, 4-day week', stability: 'e.g. permanent contract', growth: 'e.g. training budget, a path to senior', purpose: 'e.g. public sector, climate, health', people: 'e.g. small team, good mentoring', other: 'Anything else' };
+    const draw = () => {
+        $('.jh-wlist', panel).innerHTML = ws.map((w, i) => `<div class="jh-wrow"><div class="h"><b>${esc(wk[w.kind])}</b><select data-wi="${i}" aria-label="How much it matters">${Object.entries(IMP).map(([k, l]) => `<option value="${k}" ${w.importance === k ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="jh-iconbtn" data-wx="${i}" aria-label="Remove">${icon('x')}</button></div><input data-wd="${i}" maxlength="300" value="${esc(w.detail || '')}" placeholder="${esc(hint[w.kind] || '')}"></div>`).join('') || '<p class="muted">Tap what matters above.</p>';
+        $$('[data-wi]', panel).forEach(x => x.onchange = () => { ws[x.dataset.wi].importance = x.value; });
+        $$('[data-wd]', panel).forEach(x => x.oninput = () => { ws[x.dataset.wd].detail = x.value; });
+        $$('[data-wx]', panel).forEach(x => x.onclick = () => { ws.splice(Number(x.dataset.wx), 1); draw(); });
+    };
+    $$('[data-wk]', panel).forEach(b => b.onclick = () => { ws.push({ kind: b.dataset.wk, detail: '', importance: 'important' }); draw(); const ins = $$('[data-wd]', panel); ins[ins.length - 1]?.focus(); });
+    draw();
+    $('[data-ok]', panel).onclick = async () => { try { await C.api('/api/jobs/wants', { method: 'POST', body: { wants: ws } }); close(); done(); } catch (e) { C.toast(e.message, true); } };
 }

@@ -893,6 +893,26 @@ phone's Update button. Mechanism:
   updating, duplicates already on the board are merged once (`dedupeBoard`): the copy with an application, a further
   status, a score or notes is kept, and the others' applications, drafts, advice, assessments and reviews move to it.
 
+- **2.19.0**: Job Hunt checks where you stand before it searches, and keeps a plan.
+  - **Reality check:** a wish now starts by comparing what you ask for with Me (confirmed items, notes, the plan):
+    in-field, adjacent or a career change, and the level you could enter at now (`set_wish_plan`, kept on the wish as
+    `plan`: standing, level, summary, routes, gaps, steps). The search follows that: your level and one above in your
+    field, sideways steps when adjacent, and entry routes (trainee, apprentice, junior, schemes, courses) for a career
+    change, with a few goal jobs for reference. Jobs carry a `route` (realistic, stretch, entry, goal) shown on the card,
+    with "Apply now" and "Ways in" filters. The board shows "Where you stand" for running and finished wishes.
+  - **My plan** (`/Jobs/plan.json`, top of the CPD tab): goal, standing, level, gaps and milestones (skill, experience,
+    qualification, applications, people, other; to do, doing, done; optional month; notes). Start it from a wish ("Make
+    this my plan") or by writing a goal; tap a milestone to move it on. CPD entries can be linked to a milestone. **Update
+    my plan** has an agent tick off milestones that Me or the log evidence (never without evidence), refine the next
+    steps and re-assess where you stand; CPD updates also tick milestones they evidence. Agents get show_plan, save_plan,
+    set_wish_plan and set_route.
+  - **What matters to me** (`plan.json` `wants`): money, travel, remote, a place, hours, stability, growth, purpose,
+    people, other; each must, important or nice, with a detail. A plan can be just this, with no career goal. Scoring adds
+    `match.wants` (score and note) shown as ♥ on cards and in the job sheet; wishes search for jobs that give these when
+    there is no goal.
+  - **Documents are read into Me by themselves** (`autoRead`, default on): one at a time, up to 20 a day, resumed 30 s
+    after the server starts.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

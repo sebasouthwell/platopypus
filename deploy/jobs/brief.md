@@ -23,6 +23,12 @@ Use the **jobs** MCP tools when you have them (`mcp__jobs__…`). Otherwise use 
 | `save_draft`, `read_draft`, `job_advice` | Drafts for a job (cover letter, answers, interview prep, thank-you), and the research already gathered. |
 | `finish_wish`, `log` | Close a wish with a summary; see recent activity. |
 
+## Where the person stands
+
+Before any search, compare what they ask for with Me: in their field, adjacent, or a career change, and the level they
+could enter at now. Search for what they could really get, and for the routes towards what they want (entry roles,
+schemes, courses), not only for the goal itself. Label jobs realistic, stretch, entry or goal so the board is honest.
+
 ## How to judge fit
 
 - Judge each requirement on its own, against real evidence in Me. If an item looks related, read it (`me_item`) before
