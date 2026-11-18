@@ -96,7 +96,8 @@ elevate.setShellLookup(name => shells.shellMeta(name)?.cwd || null);
 // What a restricted (agent-user shell) session may call: the box CLIs and nothing else.
 // Job Hunt's one-shot agents (automatic assessments, CPD and document reading) start through this.
 async function jobsRunner(prompt, base) { const st = jobs.settings(); const name = `${base}-${Math.random().toString(36).slice(2, 4)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true }); return name; }
-setTimeout(() => { try { if (jobs.ready()) { jobs.setAgentRunner(jobsRunner); jobs.queueDocReads(); } } catch { /* Job Hunt not set up */ } }, 30_000);
+setTimeout(() => { try { if (jobs.ready()) { jobs.setAgentRunner(jobsRunner); jobs.queueDocReads(); jobs.queueCodeReads(); } } catch { /* Job Hunt not set up */ } }, 30_000);
+setInterval(() => { try { if (jobs.ready()) { jobs.setAgentRunner(jobsRunner); jobs.takeRequests(jobsRunner); } } catch { /* Job Hunt not set up */ } }, 20_000);
 const AGENT_ROUTES = [
     ['GET', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}$/], ['POST', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}\/[a-z_]{2,40}$/],   // app tools (kit/tools.js); each app checks the shell
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
@@ -864,6 +865,13 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'cpd/update' && method === 'POST') { jobs.writeBrief(); const st = jobs.settings(); const name = `cpd-${Math.random().toString(36).slice(2, 6)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.cpdPrompt(), oneshot: true }); jobs.log({ kind: 'cpd', by: 'phone', what: 'Updating Me from the CPD log' }); return send(res, 201, { shell: name }); }
             if (rest === 'notes' && method === 'POST') return send(res, 201, jobs.addNote(await body(), 'phone'));
             if ((jm = rest.match(/^notes\/(n[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeNote(jm[1]));
+            if (rest === 'code' && method === 'GET') return send(res, 200, { code: jobs.codes(), identities: jobs.settings().gitIdentities || '' });
+            if (rest === 'code' && method === 'POST') {
+                const ids = url.searchParams.get('identities') || ''; if (ids) jobs.setSettings({ gitIdentities: ids });
+                if ((req.headers['content-type'] || '').startsWith('application/json')) { const b = await body(); if (b.identities) jobs.setSettings({ gitIdentities: b.identities }); return send(res, 201, await jobs.addCodeGit(b, 'phone')); }
+                return send(res, 201, await jobs.addCodeZip(req, { name: url.searchParams.get('name') || 'code.zip', identities: ids }, 'phone'));
+            }
+            if ((jm = rest.match(/^code\/(k[0-9a-f]{6})\/(delete|read)$/)) && method === 'POST') { if (jm[2] === 'delete') return send(res, 200, jobs.removeCode(jm[1])); const list = jobs.codes(); const k = list.find(x => x.id === jm[1]); if (!k) return send(res, 404, { error: 'No such code.' }); jobs.writeBrief(); const name = await jobsRunner(jobs.codePrompt(k), `code-${k.id.slice(1)}`); return send(res, 201, { shell: name }); }
             if (rest === 'docs' && method === 'GET') return send(res, 200, { docs: jobs.docs() });
             if (rest === 'docs' && method === 'POST') return send(res, 201, jobs.addDoc(await body(56 * 1024 * 1024), 'phone'));
             if ((jm = rest.match(/^docs\/(d[0-9a-f]{6})\/(delete|file|read)$/))) {

@@ -919,6 +919,19 @@ phone's Update button. Mechanism:
   stay). Deleted jobs' fingerprints are kept in `board.dismissed`, so hunts and agents skip them (hunts report how many);
   adding one yourself brings it back. A document read interrupted by a restart is retried after 30 minutes.
 
+- **2.20.0**: Job Hunt reads your code.
+  - **My code** (Me tab): a zip (streamed, up to 400 MB; node_modules, venvs, build folders skipped) or an https Git link,
+    plus your git names and emails (`gitIdentities` in settings). Unpacked to `/Jobs/code/<id>/src` (owned by the agent
+    user); every `.git/config` is replaced with a minimal one and hooks are removed before anything reads it, and git
+    runs with pager, fsmonitor and hooks disabled. The box writes `summary.json`: files, languages, manifests, README,
+    per-author commits and lines, and the commits matching your identities (group work flagged). An agent then reads
+    the code (never running it), judges the project and, for group work, only your part (citing commit ids), proposes
+    the project and the skills your commits show, and `mark_code_read` deletes the code copy. Read automatically like
+    documents (`autoRead`). Tools: code_summary, mark_code_read.
+  - **Find me online** now opens and reads the PDFs and documents linked from your own sites.
+  - **Requests from the box** (root only): `jobhunt request findme --name "…" --links "…" --hints "…"`, `wish --text`,
+    `code --url --identities`, `cpd`, `plan`, `docs`. Files in `<state>/jobs-requests/`, picked up every 20 s.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

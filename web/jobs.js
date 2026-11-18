@@ -202,7 +202,7 @@ async function jobDialog(id) {
 
 // ---------- Me: a map of everything you have done ----------
 async function renderMe(box) {
-    const { esc, icon, $, $$ } = C; const [me, dl] = await Promise.all([C.api('/api/jobs/me'), C.api('/api/jobs/docs')]); const kinds = S.ov.kinds;
+    const { esc, icon, $, $$ } = C; const [me, dl, cd] = await Promise.all([C.api('/api/jobs/me'), C.api('/api/jobs/docs'), C.api('/api/jobs/code')]); const kinds = S.ov.kinds;
     const gaps = me.gaps.filter(g => g.status === 'open'); const props = me.items.filter(i => i.status === 'proposed');
     box.innerHTML = `
         <p class="r-sub">Everything you have done, in one place: agents check every job against it, and ask you for examples when a job wants something it cannot find here.</p>
@@ -220,6 +220,10 @@ async function renderMe(box) {
         <p class="note">Reports, papers, a dissertation, slides: anything that shows what you did. An agent breaks each one into the project, the skills it shows and the results, citing the page.</p>
         ${dl.docs.map(d => `<div class="row"><span class="ico">${icon('file-text')}</span><div class="main"><div class="title">${esc(d.name)}</div><div class="sub muted">${esc([d.kind, d.original, d.read ? 'read into Me' : 'not read yet'].filter(Boolean).join(' · '))}</div></div><a class="text-btn" href="/api/jobs/docs/${d.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-docread="${d.id}">${d.read ? 'Read again' : 'Read into Me'}</button><button class="text-btn dim" data-docdel="${d.id}">Remove</button></div>`).join('')}
         <div class="r-actions"><label class="btn">${icon('upload')}Add documents<input type="file" multiple accept=".pdf,.docx,.odt,.pptx,.md,.txt,.tex" data-docup hidden></label></div>
+        <h3 class="jh-h">My code</h3>
+        <p class="note">A zip of a project (with its .git folder if you have it) or a Git link. An agent reads the code to see what it is and what it uses, and in group work checks which commits were yours. The code copy is deleted once read.</p>
+        ${cd.code.map(k => `<div class="row"><span class="ico">${icon('file-code')}</span><div class="main"><div class="title">${esc(k.name)}</div><div class="sub muted">${esc([k.source === 'git' ? 'Git link' : 'zip', (k.languages || []).slice(0, 3).join(', '), k.commits ? `${k.mine ?? 0} of ${k.commits} commits yours${k.group ? ' (group)' : ''}` : 'no git history', k.read ? 'read into Me' : k.queued ? 'reading…' : 'waiting'].filter(Boolean).join(' · '))}</div></div>${k.read ? '' : `<button class="text-btn" data-coderead="${k.id}">Read now</button>`}<button class="text-btn dim" data-codedel="${k.id}">Remove</button></div>`).join('')}
+        <div class="r-actions"><button class="btn" data-codeadd>${icon('file-code')}Add code</button></div>
         <div class="jh-melist" ${S.meView === 'map' ? 'hidden' : ''}>${Object.entries(kinds).map(([k, l]) => { const its = me.items.filter(i => i.kind === k); return its.length ? `<h3 class="jh-h" style="--k:${KIND_COLOR[k]}"><span class="kdot"></span>${esc(l)}</h3>${its.map(i => `<button class="row" data-me="${i.id}"><div class="main"><div class="title">${esc(i.title)}${i.status === 'proposed' ? ' <span class="jh-def" style="color:var(--brass);border-color:rgba(240,184,64,.4)">to confirm</span>' : ''}</div><div class="sub muted">${esc([i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`, i.level, (i.sources || []).length ? `${i.sources.length} source${i.sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '))}</div></div></button>`).join('')}` : ''; }).join('')}</div>`;
     $('[data-talk]', box).onclick = async () => { try { const r = await C.api('/api/jobs/me/interview', { method: 'POST', body: {} }); C.openTerminal(r.shell, 'Job Hunt'); } catch (e) { C.toast(e.message, true); } };
     $('[data-add]', box).onclick = () => meDialog(null, kinds);
@@ -234,6 +238,9 @@ async function renderMe(box) {
         panel.querySelector('[data-close]').addEventListener('click', () => renderMe(box));
         $('[data-ok]', panel).onclick = async () => { close(); for (const d of added) { try { await C.api(`/api/jobs/docs/${d.id}/read`, { method: 'POST', body: {} }); } catch (x) { C.toast(x.message, true); } } C.toast(`Reading ${added.length} document${added.length === 1 ? '' : 's'}: proposals appear under "To confirm".`); renderMe(box); };
     };
+    $('[data-codeadd]', box).onclick = () => codeDialog(cd.identities, () => renderMe(box));
+    $$('[data-coderead]', box).forEach(x => x.onclick = () => runAgent(`/api/jobs/code/${x.dataset.coderead}/read`, {}, 'An agent is reading the code. Its proposals appear under "To confirm".'));
+    $$('[data-codedel]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/code/${x.dataset.codedel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderMe(box); });
     $$('[data-docread]', box).forEach(x => x.onclick = () => runAgent(`/api/jobs/docs/${x.dataset.docread}/read`, {}, 'An agent is reading the document. Its proposals appear under "To confirm".'));
     $$('[data-docdel]', box).forEach(x => x.onclick = async () => { if (await C.confirmDialog({ title: 'Remove this document?', text: 'The file is deleted from the box. Me items found in it stay.', action: 'Remove' })) { await C.api(`/api/jobs/docs/${x.dataset.docdel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderMe(box); } });
     $('[data-findme]', box).onclick = findMeDialog;
@@ -633,4 +640,23 @@ async function deleteJobs(ids, done) {
             <div class="buttons"><button class="danger" data-ok>Delete</button><button data-close>Cancel</button></div>`, { size: 'small' });
         C.$('[data-ok]', panel).onclick = async () => { try { const r = await C.api('/api/jobs/board/delete', { method: 'POST', body: { ids, confirm: true } }); close(); C.toast(`Deleted ${r.deleted} job${r.deleted === 1 ? '' : 's'}`); done(); } catch (x) { C.toast(x.message, true); } };
     }
+}
+
+// Add code: a zip (streamed up) or a Git link, and the names and emails your commits use.
+function codeDialog(ids, done) {
+    const { $, icon, esc } = C;
+    const { panel, close } = C.openDialog(`<h2>${icon('file-code')}Add code</h2><p class="muted">The agent only reads it, never runs it. Leave out node_modules and build folders to keep the zip small.</p>
+        <div class="field"><label>A zip</label><input type="file" accept=".zip,application/zip" data-czip></div>
+        <div class="field"><label for="cd-u">or a Git link (https)</label><input id="cd-u" type="url" placeholder="https://github.com/you/project"></div>
+        <div class="field"><label for="cd-i">Your git names and emails (comma-separated)</label><input id="cd-i" value="${esc(ids || '')}" placeholder="Your Name, you@example.com, your-github-handle"><p class="muted small" style="margin:6px 0 0">Used to tell your commits from your team's.</p></div>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Add</button></div>`);
+    $('[data-ok]', panel).onclick = async e => {
+        const btn = e.currentTarget; const f = $('[data-czip]', panel).files[0]; const u = $('#cd-u', panel).value.trim(); const idv = $('#cd-i', panel).value.trim();
+        if (!f && !u) return C.toast('Choose a zip or give a link.', true); btn.disabled = true; btn.textContent = f ? 'Uploading…' : 'Cloning…';
+        try {
+            if (f) { const r = await fetch(`/api/jobs/code?name=${encodeURIComponent(f.name)}&identities=${encodeURIComponent(idv)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/zip' }, body: f }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.statusText); }
+            else await C.api('/api/jobs/code', { method: 'POST', body: { url: u, identities: idv } });
+            close(); C.toast('Added. An agent reads it next; proposals appear under "To confirm".'); done();
+        } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.textContent = 'Add'; }
+    };
 }

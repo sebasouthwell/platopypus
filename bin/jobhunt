@@ -12,5 +12,14 @@ if (process.argv[2] === 'setup') {
     console.log('CV PDFs are built with LaTeX: add the Research app if it is not there yet.');
     process.exit(0);
 }
+if (process.argv[2] === 'request') {
+    // jobhunt request findme --name "…" [--links "…"] [--hints "…"] | wish --text "…" | code --url https://… [--identities "…"] | cpd | plan | docs
+    const [type, ...rest] = process.argv.slice(3); const o = { type }; for (let i = 0; i < rest.length; i += 2) o[String(rest[i]).replace(/^--/, '')] = rest[i + 1];
+    if (!['findme', 'wish', 'code', 'cpd', 'plan', 'docs'].includes(type)) { console.error('usage: jobhunt request findme|wish|code|cpd|plan|docs [--field value …]'); process.exit(2); }
+    const { config } = await import(path.join(here, '..', 'server', 'lib', 'config.js')); const fs = await import('node:fs');
+    const dir = path.join(config.state, 'jobs-requests'); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dir, `${Date.now()}-${type}.json`), JSON.stringify(o), { mode: 0o600 });
+    console.log(`Queued: ${type}. PlatOpypus starts it within 20 seconds (see Job Hunt → Activity).`); process.exit(0);
+}
 const r = spawnSync(process.execPath, [path.join(here, 'plato-tool'), 'jobs', ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, PLATO_TOOL_AS: 'jobhunt' } });
 process.exit(r.status ?? 1);
