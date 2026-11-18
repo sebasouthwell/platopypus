@@ -343,7 +343,7 @@ export function overview() {
     const today = new Date().toISOString().slice(0, 10);
     return { settings: settings(), counts: { jobs: b.jobs.filter(j => j.status !== 'hidden').length, new: b.jobs.filter(j => j.status === 'new').length, shortlisted: b.jobs.filter(j => j.status === 'shortlisted').length, scored: b.jobs.filter(j => j.match).length,
         applied: apps.filter(a => a.history.some(h => h.stage === 'applied')).length, inProgress: live.filter(a => a.stage !== 'preparing').length, toApply: b.jobs.filter(j => ['shortlisted', 'applying'].includes(j.status) && (!j.deadline || j.deadline >= today)).length,
-        me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, cvs: cvs().length }, upcoming: upcoming(30).slice(0, 8), eventTypes: EVENT_TYPES };
+        me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, proposed: me().items.filter(i => i.status === 'proposed').length, cvs: cvs().length }, upcoming: upcoming(30).slice(0, 8), eventTypes: EVENT_TYPES };
 }
 
 // ---------- My CV: a LaTeX template with swappable sections ----------

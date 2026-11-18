@@ -53,7 +53,7 @@ svg.i { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-widt
 .ring.small { width: 34px; height: 34px; border-width: 4px; margin: 0; box-shadow: inset 0 0 0 1px #7A5F27; }
 .ring.small span { left: 6px; top: 5px; width: 7px; height: 3px; }
 
-input[type=text], input[type=password], input[type=number], input[type=search], textarea, select {
+input[type=text], input[type=password], input[type=number], input[type=search], input[type=url], input[type=email], input[type=date], input[type=time], input:not([type]), textarea, select {
   width: 100%; background: var(--hull); color: var(--foam); border: 1px solid var(--rail); border-radius: 12px;
   padding: 13px 14px; font-size: 16px; font-family: inherit; appearance: none;
 }
@@ -1326,3 +1326,121 @@ textarea.mono { font-family: var(--mono); font-size: 12.5px; }
 .jh-cpd .pj { color: var(--dock); } .jh-cpd .hr { font-family: var(--mono); } .jh-cpd .nw { color: var(--brass); font-weight: 600; }
 .jh-cpd .tx { white-space: pre-wrap; line-height: 1.45; } .jh-cpd .tg { color: var(--dim); font-size: 12.5px; margin-top: 3px; }
 .jh-h .muted { font-weight: 400; margin: 0 !important; font-size: 12px !important; }
+
+/* ---------- Job Hunt: mobile first ---------- */
+#page-jobs .icon-btn.on { color: var(--brass); background: rgba(240,184,64,.12); }
+#jobs-seg { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; overflow: visible; margin: 6px 0 14px; padding: 3px; }
+#jobs-seg button { min-height: 42px; padding: 0 2px; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 3px; flex: none; white-space: nowrap; }
+#jobs-seg em { margin-left: 1px; padding: 0 5px; }
+@media (max-width: 719px) { #jobs-body input, #jobs-body select, #jobs-body textarea, .dialog-panel input, .dialog-panel select, .dialog-panel textarea { font-size: 16px; } }
+.jh-ask { background: linear-gradient(180deg, var(--hull-2), var(--hull)); border: 1px solid var(--rail); border-radius: var(--radius); padding: 14px; }
+.jh-ask-l { display: block; font-size: 17px; font-weight: 600; margin: 0 0 10px 2px; }
+.jh-ask-row { display: flex; gap: 8px; align-items: flex-end; background: var(--sea); border: 1px solid var(--rail); border-radius: 14px; padding: 5px 5px 5px 12px; }
+.jh-ask-row:focus-within { border-color: var(--brass); }
+.jh-ask-row textarea { flex: 1; min-width: 0; min-height: 0; border: 0; background: none; resize: none; padding: 10px 0; line-height: 1.4; font-size: 16px; font-family: var(--font); outline: none; box-shadow: none; }
+.jh-ask-go { flex: none; width: 44px; height: 44px; border-radius: 11px; background: var(--brass); color: var(--brass-ink); display: grid; place-items: center; }
+.jh-ask-go svg.i { width: 20px; height: 20px; }
+.jh-ask-h { font-size: 12.5px; color: var(--mist); margin: 8px 2px 0; line-height: 1.4; }
+.jh-live, .jh-last, .jh-note1 { margin-top: 8px; border-radius: 12px; font-size: 14px; }
+.jh-live { display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 12px; background: rgba(240,184,64,.08); border: 1px solid rgba(240,184,64,.3); min-height: 48px; }
+.jh-live .dot, .jh-last .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--brass); }
+.jh-live .dot { animation: jh-pulse 1.6s ease-in-out infinite; }
+.jh-live .t, .jh-last .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jh-live .text-btn { min-height: 40px; padding: 0 10px; }
+.jh-last { background: var(--hull); border: 1px solid var(--rail); }
+.jh-last summary { display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 48px; cursor: pointer; list-style: none; }
+.jh-last summary::-webkit-details-marker { display: none; }
+.jh-last summary::after { content: '›'; color: var(--mist); font-size: 18px; transition: transform .15s; }
+.jh-last[open] summary::after { transform: rotate(90deg); }
+.jh-last.done .dot { background: var(--kelp); } .jh-last.failed .dot, .jh-last.ended .dot { background: var(--mist); }
+.jh-last .jh-wishsum { padding: 0 12px 12px 30px; margin: 0; }
+.jh-note1 { display: flex; align-items: center; gap: 8px; padding: 2px 2px 2px 12px; background: var(--hull); border: 1px dashed var(--rail); color: var(--mist); }
+.jh-note1 > svg.i { color: var(--brass); flex: none; } .jh-note1 span { flex: 1; font-size: 13.5px; line-height: 1.35; padding: 8px 0; }
+.jh-note1 .text-btn { min-height: 40px; padding: 0 8px; }
+.jh-iconbtn { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--mist); }
+.jh-iconbtn:hover { color: var(--foam); background: var(--hull-2); }
+/* Coming up: a swipeable row on phones, a list on wider screens */
+#jobs-body > .jh-h + .jh-up, #jobs-body .jh-up { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px 4px; padding: 0 16px 2px; }
+.jh-up::-webkit-scrollbar { display: none; }
+.jh-upi { flex: 0 0 min(78%, 300px); scroll-snap-align: start; grid-template-columns: 1fr; gap: 2px; min-height: 64px; }
+.jh-upi .d { grid-row: auto; }
+@media (min-width: 720px) { #jobs-body .jh-up { display: grid; overflow: visible; margin: 0 0 4px; padding: 0; } .jh-upi { grid-template-columns: 120px 1fr; } .jh-upi .d { grid-row: span 2; } }
+/* Filters carry the counts */
+.jh-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 16px -16px 0; padding: 0 16px; }
+.jh-chips::-webkit-scrollbar { display: none; }
+.jh-chips button { flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; background: var(--hull); border: 1px solid var(--rail); color: var(--mist); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 7px; }
+.jh-chips button span { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.jh-chips button.on { background: var(--foam); border-color: var(--foam); color: #0B1424; } .jh-chips button.on span { color: #4A5873; }
+.jh-bar2 { display: flex; gap: 6px; align-items: center; margin: 10px 0 12px; }
+.jh-bar2 select { flex: 1; min-width: 0; min-height: 44px; }
+.jh-tbtn { flex: none; min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 12px; background: var(--hull); border: 1px solid var(--rail); display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.jh-tbtn span { display: none; } .jh-tbtn.busy { opacity: .55; }
+@media (min-width: 520px) { .jh-tbtn span { display: inline; } }
+.jh-job { padding: 14px; gap: 12px; min-height: 76px; }
+.jh-job .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+.jh-job .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jh-job .jh-fit { width: 44px; height: 44px; } .jh-job .jh-fit b { font-size: 14px; }
+/* Sheets: the job and the application. Full screen on phones, a tall card on tablets, the side panel on desktop. */
+.dialog.tall .dialog-panel { padding-top: 0; }
+@media (max-width: 1023px) {
+  .dialog.tall { align-items: stretch; }
+  .dialog.tall .dialog-panel { width: 100%; max-width: 760px; margin: 0 auto; height: 100%; max-height: none; border-radius: 0; border: 0; padding: 0 16px calc(16px + var(--sab)); }
+}
+@media (min-width: 720px) and (max-width: 1023px) { .dialog.tall .dialog-panel { height: 94%; margin-top: auto; border-radius: 22px 22px 0 0; border: 1px solid var(--rail); border-bottom: 0; } }
+.jh-sh { position: sticky; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 -16px 8px; padding: calc(8px + var(--sat)) 12px 0 4px; background: color-mix(in srgb, var(--hull) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--rail); }
+@media (min-width: 720px) and (max-width: 1023px) { .jh-sh { padding-top: 8px; } }
+@media (min-width: 1024px) { .dialog.tall .dialog-panel { padding-top: 0; } .jh-sh { margin: 0 -26px 8px; padding: calc(10px + var(--sat)) 18px 0 12px; } .jh-secnav, .jh-footbar { margin-left: -26px !important; margin-right: -26px !important; padding-left: 26px !important; padding-right: 26px !important; } }
+.jh-sh .t { flex: 1; min-width: 0; padding: 4px 0; }
+.dialog-panel .jh-sh h2 { display: block; font-size: 17px; line-height: 1.25; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jh-sh p { margin: 1px 0 0; font-size: 13px; color: var(--mist); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jh-sh p a { color: var(--brass); }
+.jh-sh > .jh-fit { width: 40px; height: 40px; } .jh-sh > .jh-fit b { font-size: 13px; }
+.jh-sh .jh-fit::before { background: var(--hull); }
+.jh-secnav { flex: 0 0 100%; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 4px -12px 0 -4px; padding: 6px 12px 10px 16px; }
+.jh-secnav::-webkit-scrollbar { display: none; }
+.jh-secnav button { flex: none; min-height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--mist); background: var(--sea-2); }
+.jh-secnav button.on { background: var(--foam); color: #0B1424; }
+.dialog.tall [id^="js-"] { scroll-margin-top: 128px; }
+.jh-path { font-family: var(--mono); font-size: 12px !important; overflow-wrap: anywhere; }
+/* The job's actions, at the bottom where a thumb reaches */
+.dialog.tall .jh-footbar { position: sticky; bottom: calc(-16px - var(--sab)); z-index: 3; display: flex; gap: 8px; margin: 18px -16px 0; padding: 10px 16px calc(10px + var(--sab)); background: color-mix(in srgb, var(--hull) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--rail); }
+.jh-footbar .btn { flex: 1; justify-content: center; min-height: 48px; }
+.jh-footbar .btn.pri { flex: 1.6; } .jh-footbar .btn.jh-sq { flex: 0 0 48px; padding: 0; }
+.jh-footbar .btn.on { color: var(--brass); border-color: rgba(240,184,64,.5); }
+@media (min-width: 1024px) { .dialog.tall .jh-footbar { bottom: -24px; } }
+/* Bigger touch targets inside sheets */
+.jh-checks label { min-height: 40px; }
+.jh-checks input, .jh-topics input, .jh-check input { width: 20px; height: 20px; flex: none; }
+.jh-stages button { min-height: 40px; }
+.jh-prop .acts .btn, .jh-gap .text-btn { min-height: 40px; }
+@media (max-width: 719px) {
+  .jh-checks { grid-template-columns: 1fr; }
+  .jh-money { grid-template-columns: 1fr 1fr; }
+  .jh-fwt { font-size: 12.5px; } .jh-fwt td .why { display: none; }
+  .jh-fwt tr:active td .why, .jh-fwt tr:focus-within td .why { display: block; }
+  .jh-apps .jh-app .stg { font-size: 12px; }
+  .jh-props .acts { flex-direction: row; } .jh-props .acts .btn { flex: 1; }
+  .jh-cprow #cp-p { flex-basis: 100%; } .jh-cprow #cp-g { flex: 1 1 0; }
+}
+@media (prefers-reduced-motion: reduce) { .jh-last summary::after { transition: none; } }
+.jh-jobs, .jh-apps, .jh-tl, .jh-props, .jh-lines { grid-template-columns: minmax(0, 1fr); }
+.jh-job, .jh-app { min-width: 0; }
+.jh-ask-row textarea { overflow: hidden; }
+#jobs-seg em { font-size: 10px; line-height: 15px; padding: 0 4px; border-radius: 6px; }
+#jobs-seg { box-shadow: 0 -12px 0 var(--sea), 0 8px 16px -6px rgba(3,8,16,.6); }
+.jh-stages button.on .i { background: #0B1424; color: var(--foam); }
+.jh-meacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 4px; }
+.jh-meacts .btn { justify-content: center; min-height: 48px; padding: 8px 10px; font-size: 14px; text-align: center; }
+.jh-meacts .btn.pri { grid-column: 1 / -1; }
+.jh-meacts .jh-meview { grid-column: 1 / -1; margin: 4px 0 0; min-width: 0; }
+@media (min-width: 720px) { .jh-meacts { grid-template-columns: repeat(4, auto) 1fr; } .jh-meacts .btn.pri { grid-column: auto; } .jh-meacts .jh-meview { grid-column: auto; justify-self: end; min-width: 160px; margin: 0; } }
+.jh-props .jh-h { flex-wrap: wrap; row-gap: 2px; } .jh-props .jh-h .muted { flex-basis: 100%; }
+
+input[type=date], input[type=time] { color-scheme: dark; }
+.jh-cprow input, .jh-cprow select { min-height: 44px; }
+.jh-cprow .btn.pri { justify-content: center; min-height: 44px; }
+@media (max-width: 719px) {
+  .jh-cprow .btn.pri { flex-basis: 100%; }
+  .jh-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .jh-stats div { padding: 8px 10px; } .jh-stats b { font-size: 18px; } .jh-stats span { font-size: 11.5px; line-height: 1.25; display: block; }
+}

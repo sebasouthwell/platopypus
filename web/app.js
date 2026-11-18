@@ -107,13 +107,13 @@ function showCopySheet(text, title = 'Copy') {
 
 function openDialog(html, { size = null } = {}) {
     const dlg = $('#dialog'), panel = $('.dialog-panel', dlg);
-    panel.innerHTML = html; dlg.hidden = false; dlg.classList.toggle('small', size === 'small');
+    panel.innerHTML = html; dlg.hidden = false; dlg.classList.toggle('small', size === 'small'); dlg.classList.toggle('tall', size === 'sheet');
     forgetSheet();
     const close = () => { dlg.hidden = true; panel.innerHTML = ''; forgetSheet(); };
     $('.dialog-backdrop', dlg).onclick = close;
     $$('[data-close]', panel).forEach(b => (b.onclick = close));
     const first = $('input, textarea', panel);
-    if (first) setTimeout(() => first.focus(), 60);
+    if (first && size !== 'sheet') setTimeout(() => first.focus(), 60);
     return { panel, close };
 }
 function confirmDialog({ title, text, action, danger = true }) {
@@ -3820,7 +3820,8 @@ $('#cases-back').addEventListener('click', () => go('apps'));
 $('#files-settings').addEventListener('click', async () => { await loadFilePrefs(); filesSettingsDialog(); });
 $('#case-back').addEventListener('click', () => openCases());
 $('#jobs-back').addEventListener('click', () => go('apps'));
-$('#jobs-refresh').addEventListener('click', () => jobsUI().then(m => m.loadJobs()).catch(e => toast(e.message, true)));
+$('#jobs-activity').addEventListener('click', () => jobsUI().then(m => m.loadJobs('log')).catch(e => toast(e.message, true)));
+$('#jobs-setup').addEventListener('click', () => jobsUI().then(m => m.loadJobs('setup')).catch(e => toast(e.message, true)));
 $('#case-refresh').addEventListener('click', () => casesUI().then(m => m.loadCase()).catch(e => toast(e.message, true)));
 $('#eng-back').addEventListener('click', () => openLab());
 $('#eng-refresh').addEventListener('click', () => loadEng().catch(e => toast(e.message, true)));

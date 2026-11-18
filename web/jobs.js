@@ -5,7 +5,7 @@
 // Applications (a folder and tracker per application), Activity, Setup (what to search, keys, money assumptions).
 
 let C = null;
-const S = { tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: 'map' };
+const S = { tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
 const STAGE_TXT = { preparing: 'Preparing', applied: 'Applied', assessment: 'Assessment', interview: 'Interview', final: 'Final round', offer: 'Offer', accepted: 'Accepted', rejected: 'Rejected', withdrawn: 'Withdrawn' };
 const KIND_COLOR = { project: '#F0B840', role: '#6FB1F0', skill: '#3FD39A', education: '#B38CFF', cert: '#2EC4B6', achievement: '#FF7AA8', interest: '#93A4BA' };
@@ -26,8 +26,9 @@ export async function loadJobs(tab) {
     const { $, $$ } = C;
     S.ov = await C.api('/api/jobs');
     const c = S.ov.counts;
-    const tabs = [['board', `Board${c.new ? `<em>${c.new}</em>` : ''}`], ['me', `Me${c.gaps ? `<em>${c.gaps}</em>` : ''}`], ['cpd', 'CPD'], ['cv', 'CV'], ['apps', 'Applications'], ['log', 'Activity'], ['setup', 'Setup']];
+    const tabs = [['board', 'Jobs'], ['apps', `Applied${c.inProgress ? `<em>${c.inProgress}</em>` : ''}`], ['me', `Me${c.gaps + (c.proposed || 0) ? `<em>${c.gaps + (c.proposed || 0)}</em>` : ''}`], ['cv', 'CV'], ['cpd', 'CPD']];
     $('#jobs-seg').innerHTML = tabs.map(([k, l]) => `<button data-jt="${k}" class="${S.tab === k ? 'on' : ''}" role="tab" aria-selected="${S.tab === k}">${l}</button>`).join('');
+    $$('#page-jobs .icon-btn').forEach(x => x.classList.toggle('on', (x.id === 'jobs-activity' && S.tab === 'log') || (x.id === 'jobs-setup' && S.tab === 'setup')));
     $$('#jobs-seg [data-jt]').forEach(b => b.onclick = () => loadJobs(b.dataset.jt).catch(e => C.toast(e.message, true)));
     const fn = { board: renderBoard, me: renderMe, cpd: renderCpd, cv: renderCv, apps: renderApps, log: renderLog, setup: renderSetup }[S.tab];
     await fn($('#jobs-body'));
@@ -36,46 +37,49 @@ const reload = () => loadJobs().catch(e => C.toast(e.message, true));
 
 // ---------- Board ----------
 async function renderBoard(box) {
-    const { esc, icon, $, $$ } = C; const ov = S.ov; const c = ov.counts;
+    const { esc, icon, $, $$ } = C; const ov = S.ov;
     const [b, w] = await Promise.all([C.api('/api/jobs/board'), C.api('/api/jobs/wishes')]);
     const keyed = Object.entries(ov.settings.keys).filter(([, k]) => k.needs.length);
-    const noKeys = keyed.every(([, k]) => !k.ready);
-    const live = w.wishes.filter(x => x.status === 'started');
+    const noKeys = keyed.every(([, k]) => !k.ready) && localStorage.getItem('jh.keysBanner') !== 'off';
+    const live = w.wishes.filter(x => x.status === 'started'); const last = w.wishes.find(x => x.status !== 'started');
+    const count = st => b.jobs.filter(j => (st === 'active' ? !['hidden', 'applied'].includes(j.status) : j.status === st)).length;
+    const filters = [['active', 'Active'], ['new', 'New'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']];
     box.innerHTML = `
-        <form class="jh-wish" data-wish>
-          <label for="jh-wish-t">What job do you want?</label>
-          <textarea id="jh-wish-t" rows="2" maxlength="600" placeholder="A junior security analyst job in Leeds or remote, from £28k"></textarea>
-          <div class="jh-wish-row"><span class="muted">An agent sets the search, hunts job sites and the web, then scores the best against Me.</span><button class="btn pri" type="submit">${icon('search')}Find jobs</button></div>
+        <form class="jh-ask" data-wish>
+          <label for="jh-wish-t" class="jh-ask-l">What job do you want?</label>
+          <div class="jh-ask-row"><textarea id="jh-wish-t" rows="1" maxlength="600" placeholder="e.g. junior SOC analyst in Leeds"></textarea><button class="jh-ask-go" type="submit" aria-label="Find jobs">${icon('search')}</button></div>
+          <p class="jh-ask-h">An agent sets the search, hunts job sites and the web, then scores the best against Me.</p>
         </form>
-        ${noKeys ? `<div class="jh-banner"><b>Do you have job-search API keys?</b> Adzuna, Reed and Jooble give far more UK jobs (all free to sign up). Without them the hunt uses Remotive and Arbeitnow only. <button class="text-btn" data-go-setup>Add keys</button></div>` : ''}
-        ${w.wishes.length ? `<div class="jh-wishes">${w.wishes.slice(0, 4).map(x => `<div class="jh-wishline ${x.status}"><span class="dot"></span><div class="main"><div>${esc(x.text)}</div>${x.summary ? `<div class="jh-wishsum">${md(x.summary)}</div>` : `<div class="muted">${x.status === 'started' ? `Working on it · started ${ago(x.at)}` : esc(x.status)}</div>`}</div>${x.status === 'started' ? `<button class="text-btn" data-watch="wish-${esc(x.id.slice(1))}">Watch</button>` : ''}</div>`).join('')}</div>` : ''}
-        <div class="jh-stats">
-          ${[['Jobs', c.jobs], ['Shortlisted', c.shortlisted], ['To apply', c.toApply], ['Applied', c.applied], ['In progress', c.inProgress]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}
-        </div>
+        ${live.map(x => `<div class="jh-live"><span class="dot"></span><span class="t">Working on: ${esc(x.text)}</span><button class="text-btn" data-watch="wish-${esc(x.id.slice(1))}">Watch</button></div>`).join('')}
+        ${last ? `<details class="jh-last ${last.status}"><summary><span class="dot"></span><span class="t">${last.status === 'done' ? 'Latest result' : 'Last run ended'}: ${esc(last.text)}</span></summary><div class="jh-wishsum">${md(last.summary || '')}</div></details>` : ''}
+        ${noKeys ? `<div class="jh-note1">${icon('key')}<span>Job-site keys (Adzuna, Reed, Jooble) find far more UK jobs.</span><button class="text-btn" data-go-setup>Add</button><button class="jh-iconbtn" data-nokeys aria-label="Dismiss">${icon('x')}</button></div>` : ''}
         ${upcomingList(ov.upcoming || [])}
-        <div class="jh-tools">
-          <div class="seg jh-filter">${[['active', 'Active'], ['new', 'New'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']].map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-          <div class="jh-toolrow">
-            <select data-sort aria-label="Sort">${[['match', 'Best match'], ['left', 'Most left over'], ['new', 'Newest'], ['deadline', 'Deadline']].map(([k, l]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-            <button class="btn" data-hunt>${icon('refresh')}Search job sites</button><button class="btn" data-web>${icon('globe')}Search the web</button><button class="btn" data-add>${icon('plus')}Add a job</button>
-          </div>
+        <div class="jh-chips" role="tablist" aria-label="Filter jobs">${filters.map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? 'on' : ''}" role="tab" aria-selected="${S.filter === k}">${l}<span>${count(k)}</span></button>`).join('')}</div>
+        <div class="jh-bar2">
+          <select data-sort aria-label="Sort">${[['match', 'Best match'], ['left', 'Most left over'], ['new', 'Newest'], ['deadline', 'Closing soonest']].map(([k, l]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <button class="jh-tbtn" data-hunt title="Search the job sites">${icon('refresh')}<span>Job sites</span></button>
+          <button class="jh-tbtn" data-web title="Search the web">${icon('globe')}<span>Web</span></button>
+          <button class="jh-tbtn" data-add title="Add a job">${icon('plus')}<span>Add</span></button>
         </div>
-        <div class="jh-jobs">${jobCards(b.jobs) || `<p class="note">${b.jobs.length ? 'Nothing here with this filter.' : 'No jobs yet. Tell it what you want above, or set the search in Setup and search the job sites.'}</p>`}</div>`;
+        <div class="jh-jobs">${jobCards(b.jobs) || `<p class="note">${b.jobs.length ? 'Nothing here with this filter.' : 'No jobs yet. Say what you want above, or set the search in Setup and search the job sites.'}</p>`}</div>`;
+    const ta = $('#jh-wish-t', box); const grow = () => { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`; }; ta.oninput = grow;
+    ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('[data-wish]', box).requestSubmit(); } };
     $('[data-wish]', box).onsubmit = async e => {
-        e.preventDefault(); const t = $('#jh-wish-t', box).value.trim(); if (!t) return;
-        try { const r = await C.api('/api/jobs/wish', { method: 'POST', body: { text: t } }); C.toast('An agent is on it. New jobs appear here as it finds them.'); S.tab = 'board'; await loadJobs(); void r; } catch (x) { C.toast(x.message, true); }
+        e.preventDefault(); const t = ta.value.trim(); if (!t) return ta.focus();
+        try { await C.api('/api/jobs/wish', { method: 'POST', body: { text: t } }); C.toast('An agent is on it. New jobs appear here as it finds them.'); await loadJobs(); } catch (x) { C.toast(x.message, true); }
     };
     const gs = $('[data-go-setup]', box); if (gs) gs.onclick = () => loadJobs('setup');
+    const nk = $('[data-nokeys]', box); if (nk) nk.onclick = () => { localStorage.setItem('jh.keysBanner', 'off'); nk.parentElement.remove(); };
     $$('[data-watch]', box).forEach(x => x.onclick = () => C.openTerminal(x.dataset.watch, 'Job Hunt').catch(e => C.toast(e.message, true)));
     $$('[data-f]', box).forEach(x => x.onclick = () => { S.filter = x.dataset.f; renderBoard(box); });
     $('[data-sort]', box).onchange = e => { S.sort = e.target.value; renderBoard(box); };
-    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Searching…'; try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new jobs (${r.found} seen)${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; } };
-    $('[data-add]', box).onclick = addJobDialog;
+    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.classList.add('busy'); try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new jobs (${r.found} seen)${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.classList.remove('busy'); } };
     $('[data-web]', box).onclick = () => runAgent('/api/jobs/websearch', {}, 'An agent is searching career pages and job boards. New jobs appear here.');
+    $('[data-add]', box).onclick = addJobDialog;
     $$('[data-job]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.job));
     $$('[data-upjob]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.upjob));
     $$('[data-upapp]', box).forEach(x => x.onclick = async () => { const { apps } = await C.api('/api/jobs/apps'); appDialog(apps.find(a => a.id === x.dataset.upapp)); });
-    if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden) renderBoard(box).catch(() => {}); }, 20_000);
+    if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden && document.activeElement !== ta) renderBoard(box).catch(() => {}); }, 20_000);
 }
 function jobCards(jobs) {
     const { esc } = C; const today = new Date().toISOString().slice(0, 10);
@@ -114,15 +118,16 @@ async function jobDialog(id) {
     const m = j.money; const est = d.estimate;
     const running = d.advice.some(p => p.status === 'running');
     const plan = j.plan || { stage: 'research', done: {} }; const cur = d.plan.find(s => s.id === plan.stage) || d.plan[0];
+    const sc0 = j.match?.score; const tone0 = sc0 === undefined ? 'none' : sc0 >= 70 ? 'hi' : sc0 >= 45 ? 'mid' : 'lo';
     const { panel, close } = C.openDialog(`
-        <h2>${icon('file-text')}${esc(j.title)}</h2>
-        <p class="muted">${esc([j.company, j.location, j.salary].filter(Boolean).join(' · '))}${j.url ? ` · <a href="${esc(j.url)}" target="_blank" rel="noopener">the advert</a>` : ''}</p>
-        <div class="jh-actions">
-          ${j.status !== 'shortlisted' ? `<button class="btn" data-st="shortlisted">${icon('pin')}Shortlist</button>` : `<button class="btn" data-st="new">Unshortlist</button>`}
-          ${['applying', 'applied'].includes(j.status) ? '' : `<button class="btn pri" data-apply>${icon('folder-plus')}Start an application</button>`}
-          ${j.status !== 'hidden' ? `<button class="btn" data-st="hidden">${icon('eye')}Hide</button>` : `<button class="btn" data-st="new">Show again</button>`}
+        <header class="jh-sh"><button class="jh-iconbtn" data-close aria-label="Close">${icon('back')}</button><div class="t"><h2>${esc(j.title)}</h2><p>${esc([j.company, j.location, j.salary].filter(Boolean).join(' · '))}${j.url ? ` · <a href="${esc(j.url)}" target="_blank" rel="noopener">advert</a>` : ''}</p></div><span class="jh-fit ${tone0}" style="--v:${sc0 ?? 0}"><b>${sc0 ?? '–'}</b></span>
+          <nav class="jh-secnav" aria-label="Sections">${[['project', 'Project'], ['fit', 'Fit'], ['assess', 'Assessment'], ['money', 'Money'], ['advice', 'Advice'], ...(j.description ? [['advert', 'Advert']] : []), ['notes', 'Notes']].map(([k, l]) => `<button data-sec="${k}">${l}</button>`).join('')}</nav></header>
+        <div class="jh-actions jh-footbar">
+          ${j.status !== 'shortlisted' ? `<button class="btn" data-st="shortlisted">${icon('pin')}Shortlist</button>` : `<button class="btn on" data-st="new">${icon('pin')}Shortlisted</button>`}
+          ${['applying', 'applied'].includes(j.status) ? '' : `<button class="btn pri" data-apply>${icon('folder-plus')}Apply</button>`}
+          ${j.status !== 'hidden' ? `<button class="btn jh-sq" data-st="hidden" aria-label="Hide this job" title="Hide">${icon('eye')}</button>` : `<button class="btn" data-st="new">Show again</button>`}
         </div>
-        <h3 class="jh-h">This job as a project</h3>
+        <h3 class="jh-h" id="js-project">This job as a project</h3>
         <div class="jh-stages" role="tablist">${d.plan.map((s, i) => { const n = s.items.filter(([k]) => plan.done[`${s.id}.${k}`]).length; return `<button data-stage="${s.id}" class="${s.id === cur.id ? 'on' : ''} ${n === s.items.length ? 'full' : ''}" role="tab" aria-selected="${s.id === cur.id}"><span class="i">${i + 1}</span>${esc(s.title)}<span class="c">${n}/${s.items.length}</span></button>`; }).join('')}</div>
         <div class="jh-stagebox">
           <div class="jh-checks">${cur.items.map(([k, l]) => `<label><input type="checkbox" data-item="${cur.id}.${k}" ${plan.done[`${cur.id}.${k}`] ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div>
@@ -132,18 +137,18 @@ async function jobDialog(id) {
           ${['tailor', 'apply'].includes(cur.id) ? `<a class="btn" href="/letter.html?job=${esc(id)}" target="_blank" rel="noopener">${icon('pencil')}Cover letter editor</a>` : ''}
           ${d.drafts.length ? `<div class="jh-drafts">${d.drafts.map(x => `<button class="chip" data-draft="${esc(x.name)}">${icon('file-text')}${esc(x.name)}</button>`).join('')}</div>` : ''}
         </div>
-        <h3 class="jh-h">Fit</h3>
+        <h3 class="jh-h" id="js-fit">Fit</h3>
         ${j.match ? `<div class="jh-matchhead"><span class="jh-fit big ${j.match.score >= 70 ? 'hi' : j.match.score >= 45 ? 'mid' : 'lo'}" style="--v:${j.match.score}"><b>${j.match.score}</b></span><div>${j.match.level ? `<b>Comes in at: ${esc(j.match.level)}</b><br>` : ''}${esc(j.match.summary || '')}<div class="muted">by ${esc(j.match.by)} · ${ago(j.match.at)}</div></div></div>
             <div class="jh-lines">${j.match.lines.map(l => `<div class="jh-line ${l.verdict}"><span class="v">${VERDICT[l.verdict]}</span><div><div>${esc(l.requirement)}</div>${l.note ? `<div class="muted">${esc(l.note)}</div>` : ''}${l.evidence.length ? `<div class="jh-ev">${l.evidence.map(e => byId.get(e)).filter(Boolean).map(i => `<span style="--k:${KIND_COLOR[i.kind]}">${esc(i.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>`
             : `<p class="note">Not scored yet. ${d.candidates.length ? 'Likely evidence from Me is listed below; ' : ''}an agent scores it when it works a wish, or ask for it now.</p>${d.candidates.length ? `<div class="jh-lines">${d.candidates.map(r => `<div class="jh-line ${r.candidates.length ? 'partly' : 'gap'}"><span class="v">${r.candidates.length ? 'Maybe' : 'Nothing'}</span><div>${esc(r.requirement)}${r.candidates.length ? `<div class="jh-ev">${r.candidates.map(x => `<span style="--k:${KIND_COLOR[x.kind]}">${esc(x.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>` : ''}<div class="r-actions"><button class="btn" data-score>${icon('claude')}Score it against Me</button></div>`}
-        <h3 class="jh-h">How they will assess you</h3>
+        <h3 class="jh-h" id="js-assess">How they will assess you</h3>
         ${frameworkSection(j, d)}
-        <h3 class="jh-h">Money, per year</h3>
+        <h3 class="jh-h" id="js-money">Money, per year</h3>
         <div class="jh-money">
           ${[['Gross', m?.gross ?? est?.gross], ['Take-home', m?.takeHome ?? est?.takeHome], ['Living costs', m?.living], ['Left over', m?.left]].map(([l, v], i) => `<div class="${i === 3 ? 'left' : ''}"><span>${l}</span><b>${money(v, m?.currency || 'GBP')}</b></div>`).join('')}
         </div>
         <p class="muted jh-assume">${esc(m?.assumptions || est?.assumptions || 'No figures yet: an agent works them out (tax and living costs under the rules where the job is, in its currency) when it scores the job.')}</p>
-        <h3 class="jh-h">Advice</h3>
+        <h3 class="jh-h" id="js-advice">Advice</h3>
         <div class="jh-advice-ask">
           <div class="jh-topics">${S.ov.advice.map(a => `<label><input type="checkbox" value="${a.tag}" ${['company', 'role'].includes(a.tag) ? 'checked' : ''}>${esc(a.title)}</label>`).join('')}</div>
           <textarea data-extra rows="2" maxlength="800" placeholder="Anything else? e.g. I would need a Skilled Worker visa; what should I say about my gap year?"></textarea>
@@ -151,9 +156,12 @@ async function jobDialog(id) {
           <p class="muted">Each topic goes to its own agent at once (it sees only the job and the question, never Me), and searches the web.</p>
         </div>
         <div class="jh-probes">${d.advice.map(p => `<details class="jh-probe ${p.status}" ${p.status === 'done' ? '' : 'open'}><summary><span class="dot"></span>${esc(S.ov.advice.find(a => a.tag === p.tag)?.title || p.subject)}<span class="muted">${p.status === 'running' ? 'researching…' : `${esc(p.agent)} · ${ago(p.finished || p.at)}`}</span></summary><div class="jh-answer">${p.status === 'running' ? '' : md(p.answer)}</div></details>`).join('')}</div>
-        ${j.description ? `<details class="jh-desc"><summary>The advert</summary><div>${esc(j.description)}</div></details>` : ''}
-        <div class="field"><label for="jd-notes">Your notes</label><textarea id="jd-notes" rows="3">${esc(j.notes || '')}</textarea></div>
-        <div class="buttons"><button data-close>Close</button><button class="primary" data-save>Save notes</button></div>`);
+        ${j.description ? `<details class="jh-desc" id="js-advert"><summary>The advert</summary><div>${esc(j.description)}</div></details>` : ''}
+        <div class="field" id="js-notes"><label for="jd-notes">Your notes</label><textarea id="jd-notes" rows="3">${esc(j.notes || '')}</textarea></div>
+        <div class="buttons"><button class="primary" data-save>Save notes</button></div>`, { size: 'sheet' });
+    { const fb = panel.querySelector('.jh-footbar'); if (fb) panel.appendChild(fb); }
+    $$('[data-sec]', panel).forEach(x => x.onclick = () => { const el = panel.querySelector(`#js-${x.dataset.sec}`); if (el) { if (el.tagName === 'DETAILS') el.open = true; el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); } });
+    { const secs = [...panel.querySelectorAll('[id^="js-"]')]; const io = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) $$('[data-sec]', panel).forEach(b => b.classList.toggle('on', `js-${b.dataset.sec}` === e.target.id)); }, { root: panel, rootMargin: '-120px 0px -60% 0px' }); secs.forEach(x => io.observe(x)); }
     $$('[data-stage]', panel).forEach(x => x.onclick = async () => { try { await C.api(`/api/jobs/job/${id}/plan`, { method: 'POST', body: { stage: x.dataset.stage } }); close(); jobDialog(id); } catch (e) { C.toast(e.message, true); } });
     $$('[data-item]', panel).forEach(x => x.onchange = () => C.api(`/api/jobs/job/${id}/plan`, { method: 'POST', body: { item: x.dataset.item, done: x.checked } }).catch(e => C.toast(e.message, true)));
     const wk = $('[data-work]', panel); if (wk) wk.onclick = async () => {
@@ -184,9 +192,9 @@ async function renderMe(box) {
     const gaps = me.gaps.filter(g => g.status === 'open'); const props = me.items.filter(i => i.status === 'proposed');
     box.innerHTML = `
         <p class="r-sub">Everything you have done, in one place: agents check every job against it, and ask you for examples when a job wants something it cannot find here.</p>
-        <div class="r-actions"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button><button class="btn" data-import>${icon('file-text')}Build from my CV</button><button class="btn" data-findme>${icon('globe')}Find me online</button>
+        <div class="jh-meacts"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button><button class="btn" data-import>${icon('file-text')}Build from my CV</button><button class="btn" data-findme>${icon('globe')}Find me online</button>
           <div class="seg jh-meview">${[['map', 'Map'], ['list', 'List']].map(([k, l]) => `<button data-mv="${k}" class="${S.meView === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-        ${props.length ? `<div class="jh-props"><h3 class="jh-h">To confirm <span class="muted">· found by agents; not used for matching until you confirm</span></h3>${props.map(i => `<div class="jh-prop ${esc(i.confidence || 'medium')}"><div class="main"><div class="t"><span class="kdot" style="--k:${KIND_COLOR[i.kind]}"></span>${esc(i.title)}<span class="conf">${esc(i.confidence || 'medium')}</span></div><div class="muted">${esc([kinds[i.kind], i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`].filter(Boolean).join(' · '))}</div>${i.summary ? `<div class="s">${esc(i.summary)}</div>` : ''}${i.why ? `<div class="why">${esc(i.why)}</div>` : ''}<div class="src">${(i.sources || []).map(x => x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : `<span>${esc(x.title)}</span>`).join('')}</div></div><div class="acts"><button class="btn pri" data-ok-me="${i.id}">${icon('check')}It's me</button><button class="btn" data-me="${i.id}">Edit</button><button class="btn" data-no-me="${i.id}">${icon('x')}No</button></div></div>`).join('')}${props.length > 1 ? '<div class="r-actions"><button class="text-btn" data-ok-high>Confirm all high-confidence</button></div>' : ''}</div>` : ''}
+        ${props.length ? `<div class="jh-props"><h3 class="jh-h">To confirm <span class="muted">Found by agents; not used for matching until you confirm.</span></h3>${props.map(i => `<div class="jh-prop ${esc(i.confidence || 'medium')}"><div class="main"><div class="t"><span class="kdot" style="--k:${KIND_COLOR[i.kind]}"></span>${esc(i.title)}<span class="conf">${esc(i.confidence || 'medium')}</span></div><div class="muted">${esc([kinds[i.kind], i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`].filter(Boolean).join(' · '))}</div>${i.summary ? `<div class="s">${esc(i.summary)}</div>` : ''}${i.why ? `<div class="why">${esc(i.why)}</div>` : ''}<div class="src">${(i.sources || []).map(x => x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : `<span>${esc(x.title)}</span>`).join('')}</div></div><div class="acts"><button class="btn pri" data-ok-me="${i.id}">${icon('check')}It's me</button><button class="btn" data-me="${i.id}">Edit</button><button class="btn" data-no-me="${i.id}">${icon('x')}No</button></div></div>`).join('')}${props.length > 1 ? '<div class="r-actions"><button class="text-btn" data-ok-high>Confirm all high-confidence</button></div>' : ''}</div>` : ''}
         ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}
         ${me.items.length ? (S.meView === 'map' ? `<div class="jh-map">${meMap(me.items, kinds)}</div>` : '') : '<p class="note">Nothing here yet. The quickest start: talk to an agent about your projects and jobs, or add your CV on the CV tab and ask the agent to read it.</p>'}
         ${S.meView === 'list' || !me.items.length ? '' : '<p class="muted jh-maphint">Tap a dot to open it. Lines join related things.</p>'}
@@ -374,7 +382,7 @@ async function appDialog(a0) {
     const events = (a.events || []).slice().sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')) || y.created - x.created);
     const attached = new Set(events.flatMap(e => e.files || []));
     const loose = f.files.filter(x => !attached.has(x.path));
-    const { panel, close } = C.openDialog(`<h2>${icon('folder')}${esc(a.title)}</h2><p class="muted">${esc(a.company)} · ${esc(f.folder)}</p>
+    const { panel, close } = C.openDialog(`<header class="jh-sh"><button class="jh-iconbtn" data-close aria-label="Close">${icon('back')}</button><div class="t"><h2>${esc(a.title)}</h2><p>${esc(a.company)} · ${STAGE_TXT[a.stage]}</p></div></header><p class="muted jh-path">${esc(f.folder)}</p>
         <div class="jh-two"><div class="field"><label for="ap-st">Stage</label><select id="ap-st">${S.ov.stages.map(s => `<option value="${s}" ${a.stage === s ? 'selected' : ''}>${STAGE_TXT[s]}</option>`).join('')}</select></div><div class="field"><label for="ap-pr">Priority</label><select id="ap-pr">${['low', 'normal', 'high'].map(p => `<option ${a.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div></div>
         <div class="jh-two"><div class="field"><label for="ap-nx">Next step</label><input id="ap-nx" maxlength="200" value="${esc(a.next || '')}" placeholder="Online test"></div><div class="field"><label for="ap-nd">By</label><input id="ap-nd" type="date" value="${esc(a.nextDate || '')}"></div></div>
         <div class="field"><label for="ap-no">Notes</label><textarea id="ap-no" rows="3">${esc(a.notes || '')}</textarea></div>
@@ -397,7 +405,7 @@ async function appDialog(a0) {
         <div class="jh-files2">${loose.map(x => fileChip(x.path)).join('') || '<span class="muted">No other files.</span>'}</div>
         <div class="r-actions"><button class="btn" data-files>${icon('folder-open')}Open in Files</button><label class="btn">${icon('upload')}Add files<input type="file" multiple data-up hidden></label>${t.template ? `<button class="btn" data-tailor>${icon('file-pdf')}Put my current CV in it</button>` : ''}</div>
         <h3 class="jh-h">Stage history</h3><div class="jh-hist">${a.history.map(h => `<div><b>${STAGE_TXT[h.stage]}</b><span class="muted"> · ${new Date(h.at).toLocaleDateString('en-GB')} · ${esc(h.by)}</span></div>`).join('')}</div>
-        <div class="buttons"><button data-close>Close</button></div>`);
+        <div class="buttons"><button data-close>Close</button></div>`, { size: 'sheet' });
     const reopen = () => { close(); appDialog(a); };
     const stageFolder = () => `Stages/${STAGE_TXT[$('#ap-st', panel).value] || 'Other'}`;
     const upload = async (file, sub, event = null) => C.api(`/api/jobs/apps/${a.id}/file`, { method: 'POST', body: { name: file.name || `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`, data: await b64(file), sub, event } });
@@ -514,7 +522,7 @@ async function renderCpd(box) {
             <button class="btn pri" type="submit">${icon('plus')}Log it</button>
           </div>
         </form>
-        <div class="jh-stats">${[['Entries', entries.length], ['Day streak', streak], ['Hours, last 12 months', Math.round(yearHours * 10) / 10], ['Hours in total', Math.round(hours * 10) / 10], ['Not yet in Me', fresh]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}</div>
+        <div class="jh-stats">${[['Entries', entries.length], ['Day streak', streak], ['Hours, 12 months', Math.round(yearHours * 10) / 10], ['Hours in total', Math.round(hours * 10) / 10], ['Not yet in Me', fresh]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}</div>
         <div class="r-actions"><button class="btn" data-cpdup ${fresh ? '' : 'disabled'}>${icon('claude')}Update Me from my log${fresh ? ` (${fresh} new)` : ''}</button><a class="btn" href="/api/jobs/cpd.csv">${icon('download')}Export CSV</a></div>
         <p class="note">New entries feed Me: an agent turns them into new skills, fresh evidence for your projects and notes, as proposals you confirm. Once 5 or more are new it does this by itself (at most once a day; the switch is in Setup). A changed Me marks job assessments for re-checking.</p>
         ${[...byWeek].map(([wk, es]) => `<h3 class="jh-h">Week of ${new Date(`${wk}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<span class="muted"> · ${es.reduce((n, e) => n + (e.hours || 0), 0) || '–'} h</span></h3>${es.map(e => `<div class="jh-cpd ${e.processed ? '' : 'new'}"><div class="m"><div class="h"><span class="d">${new Date(`${e.date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}</span><span class="ty">${esc(types[e.type] || e.type)}</span>${e.project ? `<span class="pj">${esc(e.project)}</span>` : ''}${e.hours ? `<span class="hr">${e.hours} h</span>` : ''}${e.processed ? '' : '<span class="nw">new</span>'}</div><div class="tx">${esc(e.text)}</div>${(e.tags || []).length ? `<div class="tg">${e.tags.map(t => `#${esc(t)}`).join(' ')}</div>` : ''}</div><button class="text-btn dim" data-cpddel="${e.id}" aria-label="Delete entry">${icon('x')}</button></div>`).join('')}`).join('') || '<p class="note">Nothing logged yet. A line a day is enough: what you worked on, what you found out, what you got better at.</p>'}`;

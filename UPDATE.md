@@ -871,6 +871,19 @@ phone's Update button. Mechanism:
   shell). Job Hunt's and Research's agent pickers include it. A wish whose agent ends without a summary now shows the
   agent's last words, and says plainly when the agent is not signed in.
 
+- **2.18.2**: Job Hunt, designed for the phone first.
+  - Five equal tabs that fit a phone (Jobs, Applied, Me, CV, CPD); Activity and Setup are icons in the header. The tab
+    bar sticks while you scroll.
+  - Jobs: a one-line wish box that grows as you type (Enter sends), running agents as one line with Watch, the latest
+    result folded away, a dismissible one-line keys hint, Coming up as a swipeable row, filter chips that carry the counts
+    (the stat boxes are gone from this tab), and a compact toolbar (sort, job sites, web, add). Cards no longer overflow.
+  - The job and the application open as a full-screen sheet on phones (a tall card on tablets, the side panel on
+    desktop) with a sticky header (back, title, fit ring), section pills that follow your scrolling, and the actions
+    (Shortlist, Apply, Hide) in a bar at the bottom. Openers pass `size: 'sheet'` to openDialog (class `tall`); sheets
+    don't steal focus on open.
+  - Me: actions in a compact grid, list view by default on narrow screens. Touch targets of 40–48 px, 16 px inputs on
+    phones (no zoom on focus), and date, URL and untyped inputs now get the app's input style everywhere.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
