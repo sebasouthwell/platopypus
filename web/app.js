@@ -250,6 +250,7 @@ function push(page) {
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
     if (page === 'cases') casesUI().then(m => m.loadCases()).catch(e => toast(e.message, true));
+    if (page === 'jobs') jobsUI().then(m => m.loadJobs()).catch(e => toast(e.message, true));
     if (page === 'agents') loadAgents().catch(e => toast(e.message, true));
     if (page === 'github') loadGithub().catch(e => toast(e.message, true));
 }
@@ -600,6 +601,7 @@ function newShellDialog(folder = '', preferredKind = 'agent', presetName = null,
 function sessionTypeDialog(folder) {
     return new Promise(resolve => {
         if (/^\/?Research\/[^/]+/.test(folder || '')) return resolve('research');
+        if (/^\/?Jobs(\/|$)/.test(folder || '')) return resolve('jobs');   // the Job Hunt folder
         if (/^\/?Cases\/[^/]+/.test(folder || '')) return resolve('case');   // inside a Conspiracy case
         if (/^\/?Lab\/[^/]+/.test(folder || '')) return resolve('lab');   // inside a research topic: that is what it is
         const last = localStorage.getItem('porthole.sessionType') || 'project';
@@ -3492,7 +3494,7 @@ async function loadApps() {
     </div>`).join('') + '<p class="note app-more">More apps are on the way.</p>';
     for (const a of apps) {
         const card = $(`[data-app="${a.id}"]`, box);
-        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : a.id === 'lab' ? openLab() : a.id === 'cases' ? openCases() : null);
+        const open = $('[data-open]', card); if (open) open.onclick = () => (a.id === 'research' ? openResearch() : a.id === 'lab' ? openLab() : a.id === 'cases' ? openCases() : a.id === 'jobs' ? openJobs() : null);
         const add = $('[data-add]', card); if (add) add.onclick = async () => { add.disabled = true; try { await api(`/api/addons/${a.id}/add`, { method: 'POST', body: {} }); toast(`Adding ${a.title}…`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const rm = $('[data-remove]', card); if (rm) rm.onclick = async () => { if (!(await confirmDialog({ title: `Remove ${a.title}?`, text: `${a.title} disappears from PlatOpypus. Your ${a.id === 'research' ? 'topics, papers and sources stay on the box' : 'data stays on the box'}, and so do the installed packages; add it again any time.`, action: 'Remove app' }))) return; try { await api(`/api/addons/${a.id}/remove`, { method: 'POST', body: {} }); toast(`${a.title} removed`); } catch (ex) { toast(ex.message, true); } loadApps().catch(() => {}); };
         const show = $('[data-showlog]', card); if (show) show.onclick = async () => { const pre = $('[data-log]', card); pre.hidden = false; pre.textContent = (await api(`/api/addons/${a.id}/log`)).log || '(nothing was written)'; };
@@ -3513,6 +3515,13 @@ async function casesUI() {
     return casesMod;
 }
 function openCases() { go('apps'); push('cases'); }
+// ---------- Job Hunt (web/jobs.js, loaded when first opened) ----------
+let jobsMod = null;
+async function jobsUI() {
+    if (!jobsMod) { jobsMod = await import(`/jobs.js?v=${ASSET_V}`); jobsMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, openTerminal, agentTitle, enterSubmits, $, $$ }); }
+    return jobsMod;
+}
+function openJobs() { go('apps'); push('jobs'); }
 // ---------- AI prompts (web/prompts.js, loaded when first opened) ----------
 let promptsMod = null;
 async function promptsUI() { if (!promptsMod) { promptsMod = await import(`/prompts.js?v=${ASSET_V}`); promptsMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, $, $$ }); } return promptsMod; }
@@ -3810,6 +3819,8 @@ $('#lab-back').addEventListener('click', () => go('apps'));
 $('#cases-back').addEventListener('click', () => go('apps'));
 $('#files-settings').addEventListener('click', async () => { await loadFilePrefs(); filesSettingsDialog(); });
 $('#case-back').addEventListener('click', () => openCases());
+$('#jobs-back').addEventListener('click', () => go('apps'));
+$('#jobs-refresh').addEventListener('click', () => jobsUI().then(m => m.loadJobs()).catch(e => toast(e.message, true)));
 $('#case-refresh').addEventListener('click', () => casesUI().then(m => m.loadCase()).catch(e => toast(e.message, true)));
 $('#eng-back').addEventListener('click', () => openLab());
 $('#eng-refresh').addEventListener('click', () => loadEng().catch(e => toast(e.message, true)));

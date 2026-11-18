@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+// jobhunt: the Job Hunt tools from a shell (the same tools agents get over MCP; run `jobhunt --help`).
+// `jobhunt setup` (run by Apps → Job Hunt) creates the Job Hunt folder.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+const here = path.dirname(fileURLToPath(import.meta.url));
+if (process.argv[2] === 'setup') {
+    const J = await import(path.join(here, '..', 'server', 'lib', 'jobs.js'));
+    J.setup(); console.log(`Job Hunt is ready in ${J.ROOT}.`);
+    console.log('Job-site keys (optional): Adzuna, Reed, Jooble; add them in the app (Job Hunt → Setup). Remotive and Arbeitnow need none.');
+    console.log('CV PDFs are built with LaTeX: add the Research app if it is not there yet.');
+    process.exit(0);
+}
+const r = spawnSync(process.execPath, [path.join(here, 'plato-tool'), 'jobs', ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, PLATO_TOOL_AS: 'jobhunt' } });
+process.exit(r.status ?? 1);

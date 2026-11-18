@@ -1,0 +1,33 @@
+#!/usr/bin/env node
+// plato-mcp <app>: any PlatOpypus app's agent tools as an MCP server (stdio). The tools are declared once on the server
+// (server/lib/kit/tools.js); this only relays them, so every call is checked there (the shell's token, a process of
+// that shell, what the shell may act on). Needs the shell's environment (PORTHOLE_TOKEN).
+import readline from 'node:readline';
+const APP = process.argv[2]; if (!/^[a-z][a-z0-9-]{1,30}$/.test(APP || '')) { console.error('usage: plato-mcp <app>'); process.exit(2); }
+const base = () => `http://127.0.0.1:${process.env.PLATO_PORT || process.env.PORTHOLE_PORT || '7331'}`;
+let cookie = null;
+async function call(p, method = 'GET', body) {
+    const headers = { 'Content-Type': 'application/json', 'X-Plato': '1' };
+    if (!cookie) {
+        const token = process.env.PLATO_TOKEN || process.env.PORTHOLE_TOKEN || ''; if (!token) throw new Error('No PlatOpypus token in this environment: start the agent from a PlatOpypus shell (and let it pass PORTHOLE_TOKEN to MCP servers).');
+        const l = await fetch(`${base()}/api/login/token`, { method: 'POST', headers, body: JSON.stringify({ token }) }); if (!l.ok) throw new Error('PlatOpypus did not accept this shell\'s token.');
+        cookie = (l.headers.get('set-cookie') || '').split(';')[0];
+    }
+    const r = await fetch(base() + p, { method, headers: { ...headers, cookie }, body: method === 'GET' ? undefined : JSON.stringify({ ...(body || {}), pid: process.pid }), signal: AbortSignal.timeout(16 * 60_000) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d;
+}
+const send = m => process.stdout.write(JSON.stringify(m) + '\n');
+readline.createInterface({ input: process.stdin }).on('line', async line => {
+    let m; try { m = JSON.parse(line); } catch { return; }
+    if (m.id === undefined) return;
+    try {
+        if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: APP, version: '1.0.0' } } });
+        if (m.method === 'ping') return send({ jsonrpc: '2.0', id: m.id, result: {} });
+        if (m.method === 'tools/list') { const d = await call(`/api/agent/tools/${APP}`); return send({ jsonrpc: '2.0', id: m.id, result: { tools: d.tools } }); }
+        if (m.method === 'tools/call') {
+            try { const d = await call(`/api/agent/tools/${APP}/${encodeURIComponent(m.params?.name || '')}`, 'POST', { args: m.params?.arguments || {} }); return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: d.text }] } }); }
+            catch (e) { return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true } }); }
+        }
+        send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Method not found: ${m.method}` } });
+    } catch (e) { send({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: e.message } }); }
+});

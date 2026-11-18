@@ -30,6 +30,8 @@ export const REGISTRY = [
     { id: 'research-brief', app: 'Research', title: 'Research session brief', file: deploy('research', 'brief.md'), used: 'Copied into each new research topic (.platopypus/research.md).' },
     { id: 'lab-brief', app: 'Security Lab', title: 'Engagement brief', file: deploy('lab', 'brief.md'), used: 'Copied into each new engagement (.platopypus/lab.md).' },
     { id: 'case-brief', app: 'Conspiracy', title: 'Case brief (the lead agent)', file: deploy('cases', 'brief.md'), used: 'Copied into each new case (.platopypus/case.md), with the case facts added.' },
+    { id: 'jobs-playbook', app: 'Job Hunt', title: 'Job Hunt playbook (research, tailor, apply, interview, follow up)', file: deploy('jobs', 'playbook.md'), used: 'Added after the Job Hunt brief; agents follow it for each stage of a job.' },
+    { id: 'jobs-brief', app: 'Job Hunt', title: 'Job Hunt brief (agents in the Job Hunt folder)', file: deploy('jobs', 'brief.md'), used: 'Written to /Jobs/.platopypus/jobs.md; every Job Hunt agent reads it first.' },
     { id: 'case-probe', app: 'Conspiracy', title: 'Probe instructions (each sub-agent)', builtin: PROBE_DEFAULT, used: 'The system prompt of every zero-trust probe. Applies to the next probe.' },
     { id: 'case-ask', app: 'Conspiracy', title: 'Ask instructions', builtin: ASK_DEFAULT, used: 'The system prompt for questions asked on a case’s Ask page. Applies to the next question.' },
 ];

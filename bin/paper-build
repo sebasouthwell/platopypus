@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+// paper-build <folder>: build <folder>/paper/main.tex with latexmk (no shell escape), render page images and write
+// paper/build/build.json. Used by the editor's workspaces; PlatOpypus runs it as the agent user.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const R = await import(path.join(here, '..', 'server', 'lib', 'researchtools.js'));
+const dir = path.resolve(process.argv[2] || '.');
+try { const r = await R.build(dir); console.log(r.ok ? `built: ${r.pages} pages` : `failed: ${(r.errors || []).slice(0, 3).join(' | ')}`); process.exit(r.ok ? 0 : 2); }
+catch (e) { console.error(e.message); process.exit(1); }

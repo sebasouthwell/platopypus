@@ -151,13 +151,15 @@ export const SLEUTH_TOOLS = ['case_status', 'send_probe', 'list_probes', 'show_p
 export const RESEARCH_TOOLS = ['research_status', 'add_source', 'find', 'read', 'transcript', 'frames', 'see_frames', 'source_meta', 'cite', 'build_paper', 'ask_user', 'wait_answer', 'user_answers', 'reply_question'];
 // The MCP server for a session type: sleuth for a Conspiracy case, research for a Research topic.
 export const LAB_TOOLS = ['lab_status', 'lab_tools', 'run_tool', 'show_run'];
-export const MCP_FOR = { case: { name: 'sleuth', command: 'sleuth-mcp', tools: SLEUTH_TOOLS }, research: { name: 'research', command: 'research-mcp', tools: RESEARCH_TOOLS }, lab: { name: 'lab', command: 'lab-mcp', tools: LAB_TOOLS } };
+export const JOB_TOOLS = ['me_summary', 'me_item', 'add_me', 'set_search', 'hunt', 'list_jobs', 'show_job', 'add_job', 'set_requirements', 'compatibility', 'save_match', 'uk_estimate', 'save_money', 'add_gap', 'cv_sections', 'cv_section_text', 'suggest_cv_section', 'save_draft', 'read_draft', 'job_advice', 'finish_wish', 'log'];
+export const MCP_FOR = { jobs: { name: 'jobs', command: 'plato-mcp', args: ['jobs'], tools: JOB_TOOLS }, case: { name: 'sleuth', command: 'sleuth-mcp', tools: SLEUTH_TOOLS }, research: { name: 'research', command: 'research-mcp', tools: RESEARCH_TOOLS }, lab: { name: 'lab', command: 'lab-mcp', tools: LAB_TOOLS } };
 const PASS_ENV = '["PORTHOLE_TOKEN","PLATO_TOKEN","PORTHOLE_PORT","PLATO_PORT","PORTHOLE_PROJECT_ROOT","PORTHOLE_SESSION","HOME","PATH"]';
 export function mcpArgs(agent, session) {
     const m = MCP_FOR[session]; if (!m) return '';
     // Long tools (a transcript, waiting on the user) may run for minutes: 15 minutes before the agent gives up on one.
-    if (agent === 'codex') return `-c 'mcp_servers.${m.name}.command="${m.command}"' -c 'mcp_servers.${m.name}.env_vars=${PASS_ENV}' -c 'mcp_servers.${m.name}.tool_timeout_sec=900'`;
-    if (agent === 'claude') return `--mcp-config '{"mcpServers":{"${m.name}":{"command":"${m.command}","args":[]}}}' --allowedTools ${m.tools.map(t => `mcp__${m.name}__${t}`).join(',')}`;
+    const args = JSON.stringify(m.args || []);
+    if (agent === 'codex') return `-c 'mcp_servers.${m.name}.command="${m.command}"' -c 'mcp_servers.${m.name}.args=${args}' -c 'mcp_servers.${m.name}.env_vars=${PASS_ENV}' -c 'mcp_servers.${m.name}.tool_timeout_sec=900'`;
+    if (agent === 'claude') return `--mcp-config '{"mcpServers":{"${m.name}":{"command":"${m.command}","args":${args}}}}' --allowedTools ${m.tools.map(t => `mcp__${m.name}__${t}`).join(',')}`;
     return '';
 }
 export const sleuthMcpArgs = agent => mcpArgs(agent, 'case');

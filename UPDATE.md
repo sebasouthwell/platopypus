@@ -759,6 +759,56 @@ phone's Update button. Mechanism:
   - **Strength errors** no longer name the command's flags. They list the case's primary and reputable sources, so an
     agent using the tools can cite a better source or lower the strength (in tests, agents gave up on strings without this).
 
+- **2.16.0**: Job Hunt, a new app (Apps tab), and a shared kit so apps stop repeating each other's plumbing.
+  - **Job Hunt** keeps everything in `/Jobs`: `.platopypus/jobs.json` (search, agent, money assumptions), `me.json` (Me
+    items and open gaps), `board.json`, `wishes.json`, `cvs/` (uploaded CVs and `cvs.json`), `cv/` (the LaTeX template
+    in `cv/paper/main.tex`, `cv.json` with section variants and saved versions under `cv/versions/<id>/`),
+    `applications/NNN-<company>/` (CV & Cover Letter, Application, Notes) with `applications.json`, `advice/<job>/probes/`
+    and `log.jsonl`. Nothing existing is touched; `jobhunt setup` (run by Apps → Job Hunt) creates the folder.
+  - Board: a wish ("a junior security job in Leeds or remote") starts a one-shot agent (agent user, session `jobs`)
+    that sets the search, runs the hunt (Remotive and Arbeitnow without keys; Adzuna, Reed and Jooble with keys saved
+    into the Vault from Setup), adds jobs from the web, and scores the best: per requirement meets/partly/gap with Me
+    evidence ids, the level they would come in at, and a money line (take-home, living costs, left over, assumptions).
+    `ukEstimate` gives a rough UK take-home as a starting point. Gaps become questions on the Me tab.
+  - Ask for advice on a job: company and values, the role and what to say, visa and sponsorship, pay and cost of living.
+    Each topic is a zero-trust probe (it sees the job and the question, never Me) and they run at once.
+  - Me: a radial map (and list) of projects, roles, skills, education, qualifications, achievements and interests,
+    with levels, evidence and links; "Talk to an agent about me" opens an interview shell that fills it in.
+  - CV: a LaTeX template whose sections are marked `% @section{Name}` … `% @end`. Each section keeps variants
+    (the original, yours, and agent suggestions tagged with a job); pick one per section or leave it out, preview the
+    PDF, save versions with categories, or put the current CV into an application folder. Sections may not use
+    `\input`, `\include` or `\write18`; builds run as the agent user without shell escape. Uploaded CV files are kept
+    by category with a default per category.
+  - Applications: one folder and tracker row per application (stage history, next step and date, notes, files);
+    the totals are Applied, In progress and To apply.
+  - **Kit** (`server/lib/kit/`):
+    - `tools.js`: an app declares its agent tools once (name, description, JSON schema, handler, and which shells may
+      use them). `GET/POST /api/agent/tools/<app>[/<tool>]` serve them with the usual agent checks (token, a process of
+      that shell). `bin/plato-mcp <app>` relays them as an MCP server and `bin/plato-tool <app> <tool> --field value`
+      runs one from a shell; `jobhunt` is `plato-tool jobs`. `MCP_FOR` entries can now carry `args`.
+    - `workspaces.js`: the LaTeX editor (`editor.html?ws=<id>`) on any registered folder holding `paper/main.tex`:
+      files, read and write (with the agent-changed check), build (`bin/paper-build` as the agent user), page images,
+      PDF and spelling under `/api/ws/<id>/…`. Research-only panes are hidden in workspace mode. Job Hunt registers
+      `jobs-cv`.
+    - `probes.js`: zero-trust probes kept as `<folder>/probes/pN.json` for any app (Job Hunt advice uses it).
+  - **Each job as a project:** five stages (Research, Tailor, Apply, Interview, Follow up) with a checklist each, kept on
+    the job as `plan` in board.json. Research fans out probes; Tailor, Interview and Follow up start a one-shot agent
+    that writes CV section suggestions and drafts (cover letter, application answers, interview prep with STAR stories,
+    thank-you, offer checklist) to `/Jobs/drafts/<job>/*.md`, copied into the job's application folder when there is one.
+    The agents follow a new editable prompt, `jobs-playbook` (what to research about an employer, CV and UK cover-letter
+    tailoring, STAR preparation, assessment centres, sponsorship checks on the Register of Licensed Sponsors, follow-up
+    and offers); `/Jobs/.platopypus/jobs.md` is the brief plus the playbook, rewritten before each agent starts.
+  - New links in /usr/local/bin: `plato-mcp`, `plato-tool`, `jobhunt`, `paper-build`. New AI prompts `jobs-brief` and
+    `jobs-playbook`.
+  - **Other countries:** Setup takes Adzuna countries (`countries`, e.g. "gb, de, nl"; one search per country) and the
+    passports held (`nationality`, sent only to the visa probe). Money lines carry a `currency`; agents work out tax,
+    social security and living costs under the rules where the job is (`uk_estimate` is UK-only), and the visa probe
+    covers EU free movement, the EU Blue Card and national permits as well as UK sponsorship. The hunt keeps only jobs
+    whose title or category contains a search word. A wish whose agent ends without `finish_wish` shows as ended.
+  - **Fix:** Claude agents started with a first message and MCP tools (Conspiracy, Research and Lab one-shots, and
+    interactive sessions) lost the message: `--allowedTools` takes several values and swallowed it. The prompt now
+    follows `--`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

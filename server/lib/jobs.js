@@ -1,0 +1,568 @@
+// Job Hunt: an autonomous job board around one person. Everything lives in /Jobs on the box (never pushed anywhere):
+//
+//   .platopypus/jobs.json   settings: what to look for, where, salary floor, money assumptions
+//   me.json                 "Me": every project, role, skill, qualification and achievement, with levels and evidence
+//   board.json              jobs found (from job-site APIs and agents), each with its match against Me and a money line
+//   cvs/                    CV files, cvs.json: their categories and which is the default for each
+//   applications/<id>/      one folder per application (CV used, cover letter, notes, correspondence); applications.json
+//   log.jsonl               what was found, scored, applied for, and by whom
+//
+// Matching: the box ranks Me items against a job's requirements (words in common); an agent then judges each
+// requirement (level, evidence, gaps) and stores the result. Money: the agent works it out (take-home, living costs,
+// what is left) and stores the figures with its assumptions; a rough UK estimate is offered as a starting point.
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { config } from './config.js';
+import { record } from './audit.js';
+import * as agentUser from './agentuser.js';
+import * as vault from './vault.js';
+import * as ws from './kit/workspaces.js';
+import * as prompts from './prompts.js';
+
+export const ROOT = path.join(config.root, 'Jobs');
+const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
+const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+const share = f => { const a = agentUser.info(); try { if (a && process.getuid?.() === 0) fs.chownSync(f, 0, a.gid); fs.chmodSync(f, fs.statSync(f).isDirectory() ? 0o2770 : 0o660); } catch { /* best effort */ } };
+const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = f + '.tmp'; fs.writeFileSync(t, JSON.stringify(v, null, 2)); fs.renameSync(t, f); share(f); };
+const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+const id6 = (p) => `${p}${crypto.randomBytes(3).toString('hex')}`;
+const P = (...x) => path.join(ROOT, ...x);
+export const ready = () => fs.existsSync(P('.platopypus', 'jobs.json'));
+export function inJobs(dir) { const rel = path.relative(ROOT, path.resolve(String(dir || ''))); return !rel.startsWith('..') && !path.isAbsolute(rel) && ready(); }
+
+// ---------- set up and settings ----------
+const DEFAULTS = { keywords: '', locations: '', countries: 'gb', nationality: '', remote: true, salaryMin: null, currency: 'GBP', exclude: '', sources: ['remotive', 'arbeitnow', 'adzuna', 'reed'], money: { region: 'England', studentLoan: 'plan2', pension: 5, notes: '' }, home: '', created: null };
+export function setup() {
+    for (const d of ['.platopypus', 'cvs', 'applications', 'files']) fs.mkdirSync(P(d), { recursive: true });
+    if (!ready()) writeJson(P('.platopypus', 'jobs.json'), { ...DEFAULTS, created: Date.now() });
+    for (const [f, v] of [['me.json', { items: [], gaps: [] }], ['board.json', { jobs: [] }], ['cvs', null], ['applications.json', { apps: [] }]]) if (v && !fs.existsSync(P(f))) writeJson(P(f), v);
+    if (!fs.existsSync(P('cvs', 'cvs.json'))) writeJson(P('cvs', 'cvs.json'), { cvs: [] });
+    writeBrief();
+    for (const d of [ROOT, P('.platopypus'), P('cvs'), P('applications'), P('files')]) share(d);
+    agentUser.prepareFolder(ROOT).catch(() => {});
+    return settings();
+}
+export function settings() {
+    const s = { ...DEFAULTS, ...(readJson(P('.platopypus', 'jobs.json'), {}) || {}) };
+    return { ...s, keys: keyStatus(), ready: ready() };
+}
+export function setSettings(b = {}) {
+    if (!ready()) setup();
+    const s = readJson(P('.platopypus', 'jobs.json'), {}) || {};
+    for (const k of ['keywords', 'locations', 'countries', 'nationality', 'exclude', 'home', 'currency', 'agent', 'model']) if (b[k] !== undefined) s[k] = clip(b[k], 400);
+    if (b.remote !== undefined) s.remote = !!b.remote;
+    if (b.salaryMin !== undefined) { const n = Number(b.salaryMin); s.salaryMin = Number.isFinite(n) && n > 0 ? Math.round(n) : null; }
+    if (Array.isArray(b.sources)) s.sources = b.sources.filter(x => SOURCES[x]);
+    if (b.money && typeof b.money === 'object') s.money = { ...DEFAULTS.money, ...(s.money || {}), ...Object.fromEntries(Object.entries(b.money).map(([k, v]) => [k, typeof v === 'number' ? v : clip(v, 200)])) };
+    writeJson(P('.platopypus', 'jobs.json'), s); log({ kind: 'settings', by: 'phone', what: 'Search settings changed' });
+    return settings();
+}
+
+// ---------- job-site keys (in the Vault) ----------
+// Each source: the Vault fields it needs (none for the free ones) and how to fetch a page of jobs.
+const SOURCES = {
+    remotive: { title: 'Remotive (remote jobs, no key)', keys: [] },
+    arbeitnow: { title: 'Arbeitnow (no key)', keys: [] },
+    adzuna: { title: 'Adzuna', keys: ['ADZUNA_APP_ID', 'ADZUNA_APP_KEY'], signup: 'https://developer.adzuna.com/' },
+    reed: { title: 'Reed (UK)', keys: ['REED_API_KEY'], signup: 'https://www.reed.co.uk/developers' },
+    jooble: { title: 'Jooble', keys: ['JOOBLE_API_KEY'], signup: 'https://jooble.org/api/about' },
+};
+async function keyValues() { try { return await vault.envFor(ROOT, { project: 'none' }); } catch { return {}; } }
+function keyStatus() {
+    let names = new Set(); try { for (const it of vault.list()) for (const f of it.fields || []) if (f.env && !f.missing) names.add(f.env); } catch { /* vault locked or empty */ }
+    return Object.fromEntries(Object.entries(SOURCES).map(([k, s]) => [k, { title: s.title, needs: s.keys, signup: s.signup || null, ready: s.keys.every(n => names.has(n)) }]));
+}
+export const sources = () => keyStatus();
+
+// ---------- the log ----------
+export function log(ev) { try { fs.appendFileSync(P('log.jsonl'), JSON.stringify({ t: Date.now(), ...ev }) + '\n'); share(P('log.jsonl')); } catch { /* not set up */ } }
+export function readLog(limit = 300) { try { return fs.readFileSync(P('log.jsonl'), 'utf8').trim().split('\n').filter(Boolean).slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse(); } catch { return []; } }
+
+// ---------- Me ----------
+export const ME_KINDS = { project: 'Project', role: 'Job or role', skill: 'Skill', education: 'Education', cert: 'Qualification or certificate', achievement: 'Achievement', interest: 'Interest' };
+const LEVELS = ['aware', 'working', 'strong', 'expert'];
+const meFile = () => P('me.json');
+export function me() { const m = readJson(meFile(), { items: [], gaps: [] }) || { items: [], gaps: [] }; m.items ||= []; m.gaps ||= []; return m; }
+function saveMe(m) { writeJson(meFile(), m); }
+export function addMe(b, by = 'phone') {
+    const m = me(); const kind = ME_KINDS[b.kind] ? b.kind : 'project'; const title = clip(b.title, 160); if (title.length < 2) throw httpError(400, 'Give it a title.');
+    const same = m.items.find(i => i.kind === kind && i.title.toLowerCase() === title.toLowerCase());
+    const it = same || { id: id6('m'), kind, title, created: Date.now(), by };
+    if (b.summary !== undefined) it.summary = clip(b.summary, 3000);
+    if (b.level !== undefined) it.level = LEVELS.includes(b.level) ? b.level : it.level;
+    for (const k of ['org', 'from', 'to', 'where']) if (b[k] !== undefined) it[k] = clip(b[k], 120);
+    if (b.tags !== undefined) it.tags = [...new Set((Array.isArray(b.tags) ? b.tags : String(b.tags).split(',')).map(t => clip(t, 40).toLowerCase()).filter(Boolean))].slice(0, 30);
+    if (b.evidence !== undefined) it.evidence = (Array.isArray(b.evidence) ? b.evidence : [b.evidence]).map(e => clip(e, 500)).filter(Boolean).slice(0, 20);
+    if (b.links !== undefined) it.links = (Array.isArray(b.links) ? b.links : String(b.links).split(',')).map(x => x.trim()).filter(x => m.items.some(i => i.id === x)).slice(0, 40);
+    it.updated = Date.now();
+    if (!same) m.items.push(it); saveMe(m); log({ kind: 'me', by, what: `${same ? 'Updated' : 'Added'} ${ME_KINDS[kind].toLowerCase()}: ${title}` });
+    return it;
+}
+export function removeMe(id) { const m = me(); const n = m.items.length; m.items = m.items.filter(i => i.id !== id); for (const i of m.items) i.links = (i.links || []).filter(x => x !== id); if (m.items.length === n) throw httpError(404, 'No such item.'); saveMe(m); return { removed: id }; }
+// Gaps: what a job asked for that Me has no evidence of. The user answers (adds an example) or dismisses them.
+export function addGap(b, by = 'phone') { const m = me(); const text = clip(b.text, 400); if (text.length < 4) throw httpError(400, 'Describe the gap.'); const g = m.gaps.find(x => x.text.toLowerCase() === text.toLowerCase() && x.status === 'open') || { id: id6('g'), text, job: b.job || null, status: 'open', by, at: Date.now() }; if (!m.gaps.includes(g)) m.gaps.push(g); saveMe(m); return g; }
+export function closeGap(id, { answer = '', status = 'answered' } = {}) { const m = me(); const g = m.gaps.find(x => x.id === id); if (!g) throw httpError(404, 'No such gap.'); g.status = ['answered', 'dismissed'].includes(status) ? status : 'answered'; g.answer = clip(answer, 2000); g.closed = Date.now(); saveMe(m); return g; }
+
+// ---------- matching ----------
+const STOP = new Set('a an and the of to in for on with or as at by from is are be this that you your our we will can able experience years year work working team skills skill strong good knowledge understanding using use etc including within across role'.split(' '));
+const words = t => String(t || '').toLowerCase().replace(/[^a-z0-9+#.\s-]/g, ' ').split(/\s+/).map(w => w.replace(/^[.-]+|[.-]+$/g, '')).filter(w => w.length > 1 && !STOP.has(w));
+// For each requirement, the Me items sharing the most words with it (the agent judges the real fit).
+export function candidates(requirements, { per = 4 } = {}) {
+    const items = me().items.map(i => ({ i, w: new Set(words([i.title, i.summary, (i.tags || []).join(' '), i.org].join(' '))) }));
+    return requirements.map(r => {
+        const rw = words(r);
+        const scored = items.map(({ i, w }) => ({ id: i.id, kind: i.kind, title: i.title, level: i.level || null, hits: rw.filter(x => w.has(x)) })).filter(x => x.hits.length).sort((a, b) => b.hits.length - a.hits.length).slice(0, per);
+        return { requirement: r, candidates: scored };
+    });
+}
+
+// ---------- the board ----------
+const boardFile = () => P('board.json');
+export function board() { const b = readJson(boardFile(), { jobs: [] }) || { jobs: [] }; b.jobs ||= []; return b; }
+const saveBoard = b => writeJson(boardFile(), b);
+const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export const STATUSES = ['new', 'shortlisted', 'applying', 'applied', 'hidden'];
+function upsertJob(b, j, by) {
+    const url = clip(j.url, 800); const key = url || `${norm(j.title)}|${norm(j.company)}`;
+    let it = b.jobs.find(x => (url && x.url === url) || `${norm(x.title)}|${norm(x.company)}` === `${norm(j.title)}|${norm(j.company)}`);
+    const fresh = !it; if (!it) { it = { id: id6('j'), status: 'new', found: Date.now(), by }; b.jobs.push(it); }
+    for (const k of ['title', 'company', 'location', 'salary', 'deadline', 'source', 'contract', 'posted']) if (j[k]) it[k] = clip(j[k], k === 'title' ? 200 : 160);
+    if (url) it.url = url; if (j.description) it.description = String(j.description).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000);
+    if (Number.isFinite(+j.salaryMin)) it.salaryMin = Math.round(+j.salaryMin); if (Number.isFinite(+j.salaryMax)) it.salaryMax = Math.round(+j.salaryMax);
+    if (Array.isArray(j.requirements)) it.requirements = j.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
+    if (j.category) it.category = clip(j.category, 60);
+    it.key = key; it.updated = Date.now();
+    return { it, fresh };
+}
+export function addJob(body, by = 'phone') {
+    const b = board(); if (!clip(body.title, 10)) throw httpError(400, 'A job needs a title.');
+    const { it, fresh } = upsertJob(b, body, by); saveBoard(b);
+    if (fresh) log({ kind: 'job', by, what: `Found: ${it.title}${it.company ? ` at ${it.company}` : ''}${it.source ? ` (${it.source})` : ''}` });
+    return it;
+}
+export function getJob(id) { const j = board().jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.'); return j; }
+export function updateJob(id, body, by = 'phone') {
+    const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
+    if (body.status !== undefined) { if (!STATUSES.includes(body.status)) throw httpError(400, `Status: ${STATUSES.join(', ')}.`); j.status = body.status; log({ kind: 'status', by, what: `${j.title}: ${body.status}` }); }
+    for (const k of ['title', 'company', 'location', 'salary', 'deadline', 'category', 'notes']) if (body[k] !== undefined) j[k] = clip(body[k], k === 'notes' ? 3000 : 200);
+    if (Array.isArray(body.requirements)) j.requirements = body.requirements.map(r => clip(r, 300)).filter(Boolean).slice(0, 30);
+    j.updated = Date.now(); saveBoard(b); return j;
+}
+// The agent's judgement of fit: an overall score, a line per requirement, the evidence it used and the gaps.
+export function setMatch(id, body, by = 'phone') {
+    const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
+    const score = Math.round(Number(body.score)); if (!(score >= 0 && score <= 100)) throw httpError(400, 'Score: 0 to 100.');
+    const ids = new Set(me().items.map(i => i.id));
+    j.match = { score, summary: clip(body.summary, 1500), level: clip(body.level, 40), by, at: Date.now(),
+        lines: (Array.isArray(body.lines) ? body.lines : []).slice(0, 30).map(l => ({ requirement: clip(l.requirement, 300), verdict: ['meets', 'partly', 'gap'].includes(l.verdict) ? l.verdict : 'partly', evidence: (Array.isArray(l.evidence) ? l.evidence : String(l.evidence || '').split(',')).map(x => x.trim()).filter(x => ids.has(x)).slice(0, 6), note: clip(l.note, 400) })),
+        cv: body.cv ? clip(body.cv, 20) : null };
+    for (const l of j.match.lines) if (l.verdict === 'gap') addGap({ text: l.requirement, job: j.id }, by);
+    j.updated = Date.now(); saveBoard(b); log({ kind: 'match', by, what: `${j.title}${j.company ? ` at ${j.company}` : ''}: ${score}/100` });
+    return j;
+}
+// Money: the agent's figures and assumptions (all yearly, in the job's currency).
+export function setMoney(id, body, by = 'phone') {
+    const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
+    const num = v => (v === undefined || v === null || v === '' ? null : Math.round(Number(v)));
+    j.money = { currency: clip(body.currency || '', 8).toUpperCase() || null, gross: num(body.gross), takeHome: num(body.takeHome), living: num(body.living), left: num(body.left ?? (num(body.takeHome) !== null && num(body.living) !== null ? num(body.takeHome) - num(body.living) : null)), assumptions: clip(body.assumptions, 1200), by, at: Date.now() };
+    j.updated = Date.now(); saveBoard(b); return j;
+}
+// A rough UK starting point (England, 2026/27 bands as published for 2025/26): income tax, NI, student loan, pension.
+export function ukEstimate(gross, { studentLoan = 'plan2', pension = 5 } = {}) {
+    const g = Math.max(0, Number(gross) || 0); const pen = g * (Number(pension) || 0) / 100; const taxable = g - pen;
+    let pa = 12570; if (taxable > 100000) pa = Math.max(0, pa - (taxable - 100000) / 2);
+    const band = (lo, hi, r) => Math.max(0, Math.min(taxable, hi) - lo) * r;
+    const tax = band(pa, 50270, 0.2) + band(50270, 125140, 0.4) + band(125140, Infinity, 0.45);
+    const ni = Math.max(0, Math.min(g, 50270) - 12570) * 0.08 + Math.max(0, g - 50270) * 0.02;
+    const plans = { plan1: [26065, 0.09], plan2: [28470, 0.09], plan4: [32745, 0.09], plan5: [25000, 0.09], postgrad: [21000, 0.06], none: [Infinity, 0] };
+    const [th, rate] = plans[studentLoan] || plans.plan2; const sl = Math.max(0, g - th) * rate;
+    return { gross: Math.round(g), pension: Math.round(pen), tax: Math.round(tax), ni: Math.round(ni), studentLoan: Math.round(sl), takeHome: Math.round(g - pen - tax - ni - sl), assumptions: `Rough UK estimate (England): ${pension}% pension, student loan ${studentLoan}, standard tax code. Check the real figures.` };
+}
+
+// ---------- hunting: job-site APIs ----------
+async function getJson(url, opts = {}) { const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'PlatOpypus-JobHunt/1.0', Accept: 'application/json', ...(opts.headers || {}) } }); if (!r.ok) throw new Error(`${r.status}`); return r.json(); }
+const FETCH = {
+    async remotive(q) { const d = await getJson(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q.keywords)}&limit=40`); return (d.jobs || []).map(j => ({ title: j.title, company: j.company_name, location: j.candidate_required_location || 'Remote', salary: j.salary, url: j.url, description: j.description, posted: j.publication_date, category: j.category, source: 'Remotive' })); },
+    async arbeitnow(q) { const d = await getJson('https://www.arbeitnow.com/api/job-board-api'); const kw = words(q.keywords); return (d.data || []).filter(j => !kw.length || kw.some(w => `${j.title} ${(j.tags || []).join(' ')}`.toLowerCase().includes(w))).slice(0, 40).map(j => ({ title: j.title, company: j.company_name, location: j.remote ? `${j.location} (remote)` : j.location, url: j.url, description: j.description, posted: j.created_at ? new Date(j.created_at * 1000).toISOString().slice(0, 10) : '', source: 'Arbeitnow' })); },
+    async adzuna(q, k) { const where = q.location ? `&where=${encodeURIComponent(q.location)}` : ''; const cc = /^[a-z]{2}$/.test(q.country || '') ? q.country : 'gb'; const d = await getJson(`https://api.adzuna.com/v1/api/jobs/${cc}/search/1?app_id=${encodeURIComponent(k.ADZUNA_APP_ID)}&app_key=${encodeURIComponent(k.ADZUNA_APP_KEY)}&results_per_page=40&what=${encodeURIComponent(q.keywords)}${where}${q.salaryMin ? `&salary_min=${q.salaryMin}` : ''}&content-type=application/json`); return (d.results || []).map(j => ({ title: j.title, company: j.company?.display_name, location: j.location?.display_name, salaryMin: j.salary_min, salaryMax: j.salary_max, salary: j.salary_min ? `${cc === 'gb' ? '£' : ''}${Math.round(j.salary_min).toLocaleString()}${j.salary_max && j.salary_max !== j.salary_min ? `–${Math.round(j.salary_max).toLocaleString()}` : ''}${cc === 'gb' ? '' : ` (${cc.toUpperCase()} local currency)`}` : '', country: cc, url: j.redirect_url, description: j.description, posted: (j.created || '').slice(0, 10), contract: j.contract_time, category: j.category?.label, source: 'Adzuna' })); },
+    async reed(q, k) { const d = await getJson(`https://www.reed.co.uk/api/1.0/search?keywords=${encodeURIComponent(q.keywords)}${q.location ? `&locationName=${encodeURIComponent(q.location)}` : ''}${q.salaryMin ? `&minimumSalary=${q.salaryMin}` : ''}&resultsToTake=40`, { headers: { Authorization: `Basic ${Buffer.from(`${k.REED_API_KEY}:`).toString('base64')}` } }); return (d.results || []).map(j => ({ title: j.jobTitle, company: j.employerName, location: j.locationName, salaryMin: j.minimumSalary, salaryMax: j.maximumSalary, salary: j.minimumSalary ? `£${Math.round(j.minimumSalary).toLocaleString()}${j.maximumSalary && j.maximumSalary !== j.minimumSalary ? `–£${Math.round(j.maximumSalary).toLocaleString()}` : ''}` : '', url: j.jobUrl, description: j.jobDescription, deadline: j.expirationDate, posted: j.date, source: 'Reed' })); },
+    async jooble(q, k) { const d = await getJson(`https://jooble.org/api/${encodeURIComponent(k.JOOBLE_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: q.keywords, location: q.location || '' }) }); return (d.jobs || []).slice(0, 40).map(j => ({ title: j.title, company: j.company, location: j.location, salary: j.salary, url: j.link, description: j.snippet, posted: (j.updated || '').slice(0, 10), source: 'Jooble' })); },
+};
+let hunting = null;
+export async function hunt(by = 'phone') {
+    if (hunting) throw httpError(409, 'A hunt is already running.');
+    const s = settings(); if (!s.keywords.trim()) throw httpError(400, 'Set what to look for first (Setup: keywords).');
+    const kv = await keyValues(); const ks = keyStatus();
+    const locs = (s.locations || '').split(/[;,]/).map(x => x.trim()).filter(Boolean); const exclude = words(s.exclude); const want = words(s.keywords);
+    hunting = { started: Date.now() }; const out = { found: 0, added: 0, bySource: {}, errors: {} };
+    try {
+        const b = board();
+        for (const src of s.sources) {
+            if (!FETCH[src] || !ks[src]?.ready) continue;
+            const countries = src === 'adzuna' ? (s.countries || 'gb').toLowerCase().split(/[\s,;]+/).filter(x => /^[a-z]{2}$/.test(x)) : [''];
+            for (const country of (countries.length ? countries : ['gb'])) for (const location of (locs.length ? locs : [''])) {
+                try {
+                    const list = await FETCH[src]({ keywords: s.keywords, location, salaryMin: s.salaryMin, country }, kv);
+                    for (const j of list) {
+                        if (!j.title) continue; if (want.length && !want.some(w => `${j.title} ${j.category || ''}`.toLowerCase().includes(w))) continue; if (exclude.some(w => `${j.title} ${j.company || ''}`.toLowerCase().includes(w))) continue;
+                        out.found++; const { fresh } = upsertJob(b, j, `hunt (${src})`); if (fresh) { out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
+                    }
+                } catch (e) { out.errors[src] = e.message; }
+                if (src === 'arbeitnow' || src === 'remotive') break;   // these do not take a location
+            }
+        }
+        saveBoard(b);
+        log({ kind: 'hunt', by, what: `Hunt: ${out.found} seen, ${out.added} new${Object.keys(out.errors).length ? `; errors: ${Object.entries(out.errors).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`, ms: Date.now() - hunting.started });
+        record('activity', 'jobs-hunt', { actor: by, what: `${out.added} new jobs (${out.found} seen)` });
+        return out;
+    } finally { hunting = null; }
+}
+
+// ---------- CVs ----------
+const cvFile = () => P('cvs', 'cvs.json');
+export function cvs() { return (readJson(cvFile(), { cvs: [] }) || { cvs: [] }).cvs; }
+export function addCv({ name, file, data, categories = [], notes = '' }, by = 'phone') {
+    const list = cvs(); const n = clip(name || file, 120); if (!n) throw httpError(400, 'Give the CV a name.');
+    const ext = path.extname(String(file || '')).toLowerCase(); if (!['.pdf', '.docx', '.doc', '.md', '.txt', '.odt', '.tex'].includes(ext)) throw httpError(400, 'A CV is a PDF, Word, ODT, LaTeX, Markdown or text file.');
+    const buf = Buffer.from(String(data || ''), 'base64'); if (!buf.length || buf.length > 15 * 1024 * 1024) throw httpError(400, 'The file is empty or over 15 MB.');
+    const id = id6('c'); const f = `${id}${ext}`; fs.writeFileSync(P('cvs', f), buf); share(P('cvs', f));
+    const cv = { id, name: n, file: f, original: clip(file, 160), categories: [...new Set((Array.isArray(categories) ? categories : String(categories).split(',')).map(x => clip(x, 40)).filter(Boolean))], notes: clip(notes, 1000), added: Date.now(), by };
+    list.push(cv); writeJson(cvFile(), { cvs: list }); log({ kind: 'cv', by, what: `CV added: ${n}${cv.categories.length ? ` (${cv.categories.join(', ')})` : ''}` });
+    return cv;
+}
+export function updateCv(id, b) {
+    const list = cvs(); const cv = list.find(x => x.id === id); if (!cv) throw httpError(404, 'No such CV.');
+    if (b.name !== undefined) cv.name = clip(b.name, 120); if (b.notes !== undefined) cv.notes = clip(b.notes, 1000);
+    if (b.categories !== undefined) cv.categories = [...new Set((Array.isArray(b.categories) ? b.categories : String(b.categories).split(',')).map(x => clip(x, 40)).filter(Boolean))];
+    if (b.defaultFor !== undefined) { const cat = clip(b.defaultFor, 40); for (const x of list) x.defaultFor = (x.defaultFor || []).filter(c => c !== cat); cv.defaultFor = [...new Set([...(cv.defaultFor || []), cat])]; }
+    writeJson(cvFile(), { cvs: list }); return cv;
+}
+export function removeCv(id) { const list = cvs(); const cv = list.find(x => x.id === id); if (!cv) throw httpError(404, 'No such CV.'); fs.rmSync(P('cvs', cv.file), { force: true }); writeJson(cvFile(), { cvs: list.filter(x => x.id !== id) }); return { removed: id }; }
+export const cvPath = id => { const cv = cvs().find(x => x.id === id); if (!cv) throw httpError(404, 'No such CV.'); return { file: P('cvs', cv.file), name: cv.original || cv.file }; };
+
+// ---------- applications ----------
+export const STAGES = ['preparing', 'applied', 'assessment', 'interview', 'final', 'offer', 'accepted', 'rejected', 'withdrawn'];
+const appFile = () => P('applications.json');
+export function applications() { return (readJson(appFile(), { apps: [] }) || { apps: [] }).apps; }
+const saveApps = apps => writeJson(appFile(), { apps });
+export function createApplication({ job, cv = null, notes = '' }, by = 'phone') {
+    const j = getJob(job); const apps = applications(); if (apps.some(a => a.job === j.id && !['rejected', 'withdrawn'].includes(a.stage))) throw httpError(409, 'There is already an application for this job.');
+    const n = apps.reduce((m, a) => Math.max(m, a.n || 0), 0) + 1; const id = id6('a'); const dir = P('applications', `${String(n).padStart(3, '0')}-${(j.company || j.title).replace(/[^A-Za-z0-9]+/g, '-').slice(0, 40)}`);
+    for (const d of ['', 'CV & Cover Letter', 'Application', 'Notes']) { fs.mkdirSync(path.join(dir, d), { recursive: true }); share(path.join(dir, d)); }
+    if (cv) { const c = cvPath(cv); fs.copyFileSync(c.file, path.join(dir, 'CV & Cover Letter', path.basename(c.name))); }
+    fs.writeFileSync(path.join(dir, 'Notes', 'job.md'), `# ${j.title}${j.company ? ` · ${j.company}` : ''}\n\n${j.url ? `${j.url}\n\n` : ''}${j.location ? `Location: ${j.location}\n` : ''}${j.salary ? `Salary: ${j.salary}\n` : ''}${j.deadline ? `Deadline: ${j.deadline}\n` : ''}\n${j.description || ''}\n`);
+    const a = { id, n, job: j.id, title: j.title, company: j.company || '', folder: dir, cv, stage: 'preparing', history: [{ stage: 'preparing', at: Date.now(), by }], next: '', nextDate: '', notes: clip(notes, 3000), priority: 'normal', created: Date.now() };
+    apps.push(a); saveApps(apps); updateJob(j.id, { status: 'applying' }, by);
+    log({ kind: 'application', by, what: `Application started: ${j.title}${j.company ? ` at ${j.company}` : ''}` });
+    return a;
+}
+export function updateApplication(id, b, by = 'phone') {
+    const apps = applications(); const a = apps.find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
+    if (b.stage !== undefined && b.stage !== a.stage) { if (!STAGES.includes(b.stage)) throw httpError(400, `Stage: ${STAGES.join(', ')}.`); a.stage = b.stage; a.history.push({ stage: b.stage, at: Date.now(), by }); if (b.stage === 'applied') { try { updateJob(a.job, { status: 'applied' }, by); } catch { /* job gone */ } } log({ kind: 'stage', by, what: `${a.title}${a.company ? ` at ${a.company}` : ''}: ${b.stage}` }); }
+    for (const k of ['next', 'nextDate', 'notes', 'priority', 'cv']) if (b[k] !== undefined) a[k] = clip(b[k], k === 'notes' ? 4000 : 200);
+    saveApps(apps); return a;
+}
+export function appFiles(id) {
+    const a = applications().find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
+    const out = []; const walk = (d, rel = '') => { let l = []; try { l = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of l) { if (e.isDirectory()) walk(path.join(d, e.name), `${rel}${e.name}/`); else out.push({ path: `${rel}${e.name}`, size: fs.statSync(path.join(d, e.name)).size }); } };
+    walk(a.folder); return { folder: a.folder, files: out };
+}
+export function saveAppFile(id, { name, data, sub = 'Application' }) {
+    const a = applications().find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
+    const safe = String(name || '').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120); if (!safe) throw httpError(400, 'Name the file.');
+    const folder = ['Application', 'CV & Cover Letter', 'Notes'].includes(sub) ? sub : 'Application';
+    const buf = Buffer.from(String(data || ''), 'base64'); if (!buf.length || buf.length > 25 * 1024 * 1024) throw httpError(400, 'The file is empty or over 25 MB.');
+    const f = path.join(a.folder, folder, safe); fs.writeFileSync(f, buf); share(f); return { saved: `${folder}/${safe}` };
+}
+
+// ---------- overview ----------
+export function overview() {
+    const b = board(); const apps = applications(); const live = apps.filter(a => !['rejected', 'withdrawn', 'accepted'].includes(a.stage));
+    const today = new Date().toISOString().slice(0, 10);
+    return { settings: settings(), counts: { jobs: b.jobs.filter(j => j.status !== 'hidden').length, new: b.jobs.filter(j => j.status === 'new').length, shortlisted: b.jobs.filter(j => j.status === 'shortlisted').length, scored: b.jobs.filter(j => j.match).length,
+        applied: apps.filter(a => a.history.some(h => h.stage === 'applied')).length, inProgress: live.filter(a => a.stage !== 'preparing').length, toApply: b.jobs.filter(j => ['shortlisted', 'applying'].includes(j.status) && (!j.deadline || j.deadline >= today)).length,
+        me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, cvs: cvs().length } };
+}
+
+// ---------- My CV: a LaTeX template with swappable sections ----------
+// The template is a .tex file whose sections are marked with comment lines:
+//     % @section{Experience}
+//     ...LaTeX...
+//     % @end
+// Each section keeps variants: "base" (what the template had), your own, and AI suggestions (tagged with the job they
+// were written for). A version picks one variant per section (or leaves a section out) and builds to PDF with latexmk.
+const CVD = (...x) => P('cv', ...x);
+const SECTION_RE = /^%\s*@section\{([^}]+)\}\s*\n([\s\S]*?)^%\s*@end\s*$/gm;
+export const DEFAULT_TEX = String.raw`\documentclass[10.5pt,a4paper]{article}
+\usepackage[margin=1.6cm]{geometry}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem,titlesec}
+\setlist{nosep,leftmargin=1.2em}
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titlespacing{\section}{0pt}{10pt}{5pt}
+\pagestyle{empty}
+\begin{document}
+% @section{Header}
+{\LARGE\bfseries Your Name}\\[2pt]
+City \textbullet{} email@example.com \textbullet{} 07000 000000 \textbullet{} \href{https://github.com/you}{github.com/you}
+% @end
+% @section{Summary}
+\section*{Profile}
+One or two lines on who you are and what you are looking for.
+% @end
+% @section{Experience}
+\section*{Experience}
+\textbf{Role} \hfill Company \textbullet{} 2024--now
+\begin{itemize}
+  \item What you did, and what changed because of it.
+\end{itemize}
+% @end
+% @section{Projects}
+\section*{Projects}
+\textbf{Project name} \hfill \href{https://example.com}{link}
+\begin{itemize}
+  \item What it does, what you built, what it uses.
+\end{itemize}
+% @end
+% @section{Skills}
+\section*{Skills}
+Languages: \dots \\ Tools: \dots
+% @end
+% @section{Education}
+\section*{Education}
+\textbf{Degree} \hfill University \textbullet{} 2021--2025
+% @end
+\end{document}
+`;
+const cvState = () => readJson(CVD('cv.json'), null);
+function parseTemplate(tex) {
+    const sections = []; let m; SECTION_RE.lastIndex = 0;
+    while ((m = SECTION_RE.exec(tex))) sections.push({ name: clip(m[1], 60), text: m[2].replace(/\s+$/, '') });
+    if (!sections.length) throw httpError(400, 'No sections found. Mark each one with a line "% @section{Name}" before it and "% @end" after it.');
+    if (new Set(sections.map(s => s.name.toLowerCase())).size !== sections.length) throw httpError(400, 'Two sections have the same name.');
+    return sections;
+}
+export function cvTemplate() {
+    const s = cvState(); if (!s) return { template: null };
+    return { template: { name: s.name, updated: s.updated }, sections: s.sections.map(x => ({ name: x.name, variants: x.variants.map(v => ({ id: v.id, label: v.label, by: v.by, job: v.job || null, at: v.at, text: v.text })) })), versions: s.versions || [], hasLatex: hasLatex() };
+}
+export function setTemplate({ tex, name = 'My CV' }, by = 'phone') {
+    const t = String(tex ?? DEFAULT_TEX); if (t.length > 300_000) throw httpError(400, 'That template is too large.');
+    const parsed = parseTemplate(t); const old = cvState();
+    const sections = parsed.map(p => { const prev = old?.sections.find(x => x.name.toLowerCase() === p.name.toLowerCase()); const base = { id: 'base', label: 'Original', text: p.text, by, at: Date.now() }; return { name: p.name, variants: prev ? [base, ...prev.variants.filter(v => v.id !== 'base')] : [base] }; });
+    fs.mkdirSync(CVD('versions'), { recursive: true }); share(CVD()); share(CVD('versions'));
+    fs.mkdirSync(CVD('paper'), { recursive: true }); share(CVD('paper')); fs.writeFileSync(CVD('paper', 'main.tex'), t); share(CVD('paper', 'main.tex'));
+    writeJson(CVD('cv.json'), { name: clip(name, 80), updated: Date.now(), sections, versions: old?.versions || [] });
+    log({ kind: 'cv', by, what: `CV template ${old ? 'replaced' : 'set'}: ${parsed.length} sections (${parsed.map(p => p.name).join(', ')})` });
+    return cvTemplate();
+}
+export function addVariant(section, { label, text, job = null }, by = 'phone') {
+    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
+    const sec = s.sections.find(x => x.name.toLowerCase() === String(section).toLowerCase()); if (!sec) throw httpError(404, `No section "${section}". Sections: ${s.sections.map(x => x.name).join(', ')}.`);
+    const t = String(text || '').replace(/\s+$/, ''); if (t.length < 3) throw httpError(400, 'The variant needs some LaTeX.'); if (t.length > 40_000) throw httpError(400, 'Keep a section under 40 000 characters.');
+    if (/\\(input|include|write18|openout|immediate)\b/.test(t)) throw httpError(400, 'A section cannot read or write files (\\input, \\include, \\write18…).');
+    const v = { id: id6('v'), label: clip(label || (job ? 'Suggested' : 'Mine'), 60), text: t, by, job: job || null, at: Date.now() };
+    sec.variants.push(v); s.updated = Date.now(); writeJson(CVD('cv.json'), s);
+    log({ kind: 'cv', by, what: `New ${sec.name} variant: ${v.label}${job ? ` (for a job)` : ''}` });
+    return v;
+}
+export function removeVariant(section, id) { const s = cvState(); const sec = s?.sections.find(x => x.name.toLowerCase() === String(section).toLowerCase()); if (!sec) throw httpError(404, 'No such section.'); if (id === 'base') throw httpError(400, 'The original stays; replace the template to change it.'); sec.variants = sec.variants.filter(v => v.id !== id); writeJson(CVD('cv.json'), s); return { removed: id }; }
+// Render a choice of variants ({section: variantId|null}) into a complete .tex document.
+export function renderCv(choice = {}) {
+    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
+    const tex = fs.readFileSync(CVD('paper', 'main.tex'), 'utf8');
+    return tex.replace(SECTION_RE, (all, name) => {
+        const sec = s.sections.find(x => x.name.toLowerCase() === name.trim().toLowerCase()); if (!sec) return all;
+        const pick = Object.prototype.hasOwnProperty.call(choice, sec.name) ? choice[sec.name] : 'base';
+        if (pick === null || pick === 'off') return `% (${sec.name} left out)\n`;
+        const v = sec.variants.find(x => x.id === pick) || sec.variants[0];
+        return `% @section{${sec.name}}\n${v.text}\n% @end`;
+    });
+}
+function hasLatex() { return ['/usr/bin/latexmk', '/usr/local/bin/latexmk'].some(f => fs.existsSync(f)); }
+// The template is edited in the LaTeX editor (workspace "jobs-cv"). After a save, the "Original" variant of each section
+// follows the file, sections that disappeared are dropped, and new ones appear.
+export function syncTemplate() {
+    const s = cvState(); if (!s) return; const parsed = parseTemplate(fs.readFileSync(CVD('paper', 'main.tex'), 'utf8'));
+    s.sections = parsed.map(p => { const prev = s.sections.find(x => x.name.toLowerCase() === p.name.toLowerCase()); const base = { id: 'base', label: 'Original', text: p.text, by: 'phone', at: Date.now() }; return { name: p.name, variants: prev ? [base, ...prev.variants.filter(v => v.id !== 'base')] : [base] }; });
+    s.updated = Date.now(); writeJson(CVD('cv.json'), s);
+}
+// Build a choice into <outDir>/<base>.pdf: rendered into a scratch paper folder, built as the agent user (LaTeX is code).
+export async function buildCv(choice, outDir, base = 'CV') {
+    const tex = renderCv(choice); fs.mkdirSync(outDir, { recursive: true }); share(outDir);
+    const tf = path.join(outDir, `${base}.tex`); fs.writeFileSync(tf, tex); share(tf);
+    if (!hasLatex()) return { tex: tf, pdf: null, note: 'LaTeX is not installed: the .tex is saved. Add the Research app to build PDFs.' };
+    const scratch = CVD('.build', crypto.randomBytes(4).toString('hex'));
+    fs.mkdirSync(path.join(scratch, 'paper'), { recursive: true }); for (const d of [CVD('.build'), scratch, path.join(scratch, 'paper')]) share(d);
+    for (const f of fs.readdirSync(CVD('paper'))) if (/\.(cls|sty|png|jpg|jpeg|pdf|bib)$/i.test(f) && f !== 'main.pdf') { fs.copyFileSync(CVD('paper', f), path.join(scratch, 'paper', f)); share(path.join(scratch, 'paper', f)); }
+    fs.writeFileSync(path.join(scratch, 'paper', 'main.tex'), tex); share(path.join(scratch, 'paper', 'main.tex'));
+    try {
+        const r = await ws.buildPaper(scratch); const pdf = path.join(scratch, 'paper', 'build', 'main.pdf');
+        if (!r.ok || !fs.existsSync(pdf)) throw httpError(422, `The CV did not build: ${(r.errors || []).slice(0, 3).join(' ') || 'see the LaTeX log'}`);
+        const out = path.join(outDir, `${base}.pdf`); fs.copyFileSync(pdf, out); share(out); return { tex: tf, pdf: out, pages: r.pages };
+    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+}
+export async function saveVersion({ name, choice, categories = [] }, by = 'phone') {
+    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
+    const n = clip(name, 80); if (n.length < 2) throw httpError(400, 'Name the version.');
+    const id = id6('cv'); const r = await buildCv(choice || {}, CVD('versions', id), 'CV');
+    const v = { id, name: n, choice: choice || {}, categories: [...new Set((Array.isArray(categories) ? categories : String(categories).split(',')).map(x => clip(x, 40)).filter(Boolean))], pdf: !!r.pdf, at: Date.now(), by };
+    s.versions = [...(s.versions || []), v]; writeJson(CVD('cv.json'), s); log({ kind: 'cv', by, what: `CV version saved: ${n}` });
+    return { ...v, note: r.note || null };
+}
+export function versionFile(id, ext = 'pdf') { const f = CVD('versions', id, `CV.${ext === 'tex' ? 'tex' : 'pdf'}`); if (!/^cv[0-9a-f]{6}$/.test(id) || !fs.existsSync(f)) throw httpError(404, 'No such file.'); return f; }
+export async function previewCv(choice) { const dir = CVD('preview'); const r = await buildCv(choice || {}, dir, 'preview'); return { pdf: !!r.pdf, note: r.note || null }; }
+export const previewFile = () => { const f = CVD('preview', 'preview.pdf'); if (!fs.existsSync(f)) throw httpError(404, 'No preview yet.'); return f; };
+// Put a tailored CV into an application's "CV & Cover Letter" folder.
+export async function cvForApplication(appId, choice, by = 'phone') {
+    const a = applications().find(x => x.id === appId); if (!a) throw httpError(404, 'No such application.');
+    const r = await buildCv(choice || {}, path.join(a.folder, 'CV & Cover Letter'), 'CV');
+    updateApplication(appId, { cv: 'tailored' }, by); log({ kind: 'cv', by, what: `Tailored CV made for ${a.title}${a.company ? ` at ${a.company}` : ''}` });
+    return { tex: path.relative(a.folder, r.tex), pdf: r.pdf ? path.relative(a.folder, r.pdf) : null, note: r.note || null };
+}
+
+// ---------- keys: saved straight into the Vault (general scope) ----------
+export function setKey(source, values) {
+    const s = SOURCES[source]; if (!s || !s.keys.length) throw httpError(400, 'That source needs no key.');
+    const items = vault.list();
+    for (const env of s.keys) {
+        const v = String(values?.[env] ?? '').trim(); if (!v) continue;
+        for (const it of items) if (it.scope === 'general' && it.fields.some(f => f.env === env && !f.missing)) vault.remove(it.id);
+        vault.create({ name: env.toLowerCase().replace(/_/g, ' '), provider: source, envName: env, value: v, scope: 'general', notes: 'Job Hunt' });
+    }
+    log({ kind: 'settings', by: 'phone', what: `Key saved for ${s.title}` }); return keyStatus();
+}
+
+// ---------- wishes, advice and company research (agents) ----------
+// A wish ("a data job in Leeds or remote") goes to a one-shot agent shell in /Jobs that has the jobs tools: it sets
+// the search, runs the hunt, adds jobs it finds on the web, and scores the best. Advice on a job fans out probes
+// (company values and news, visa or sponsorship, what to say) and keeps the answers on the job.
+import * as probesKit from './kit/probes.js';
+export const ADVICE = [
+    { tag: 'company', title: 'The company', q: j => `Research ${j.company || 'this employer'} for a job applicant: what they do, size, recent news, stated values and culture, what employees say, and anything an applicant should know. Cite sources.` },
+    { tag: 'role', title: 'The role and what to say', q: j => `A job: "${j.title}" at ${j.company || 'an employer'}${j.location ? ` in ${j.location}` : ''}.\n${(j.description || '').slice(0, 2500)}\n\nWhat will they be looking for, what should an applicant emphasise in a CV, cover letter and interview, what questions are likely, and what should the applicant ask them?` },
+    { tag: 'visa', title: 'Right to work, visa and moving', q: (j, s) => `A job: "${j.title}" at ${j.company || 'an employer'}${j.location ? ` in ${j.location}` : ''}.${s?.nationality ? ` The applicant holds: ${s.nationality}.` : ' The applicant\'s nationality is not given: cover the main cases (citizens of that country or bloc, and others).'} What does the applicant need to work there legally: is a permit or visa needed, which route applies (e.g. in the UK the Skilled Worker visa and whether the employer is on the Register of Licensed Sponsors for that route; in the EU the EU Blue Card or the country's national work permits, salary thresholds, recognition of qualifications), what the process involves, how long it takes and what it costs? Then what to know about relocating there: registering, tax ID, health insurance, bank account, language. Cite official government sources.` },
+    { tag: 'pay', title: 'Pay, tax and cost of living', q: j => `A job: "${j.title}"${j.salary ? ` paying ${j.salary}` : ''}${j.location ? ` in ${j.location}` : ''}. What is typical pay for this role there? Work out the yearly take-home for a single person under that country's rules: income tax (national and local), social security contributions, mandatory pension or health insurance, church or other taxes that apply by default, and any expat or new-resident regimes (e.g. the Netherlands' 30% ruling). Then the yearly cost of living there for one person: rent, local taxes, utilities, food, transport. Show each figure, the currency, the tax year and sources.` },
+];
+export function adviceFor(id) { const dir = P('advice', id); return probesKit.list(dir); }
+export async function askAdvice(id, { topics = ['company', 'role'], extra = '', agent, model } = {}, by = 'phone') {
+    const j = getJob(id); const s = settings(); const dir = P('advice', id); fs.mkdirSync(dir, { recursive: true }); share(P('advice')); share(dir);
+    const out = [];
+    for (const t of ADVICE.filter(a => topics.includes(a.tag))) {
+        out.push(await probesKit.start(dir, { subject: `${j.company || j.title} (${t.title})`, question: t.q(j, s) + (extra ? `\n\nAlso: ${clip(extra, 800)}` : ''), agent: agent || s.agent || 'claude', model: model ?? s.model ?? '', web: true, by, tag: t.tag,
+            onDone: p => log({ kind: 'advice', by: p.agent, what: `${t.title} for ${j.title}: ${p.status}`, ms: p.finished - p.at }) }));
+    }
+    if (extra && !topics.length) out.push(await probesKit.start(dir, { subject: j.company || j.title, question: `About the job "${j.title}" at ${j.company || 'an employer'}: ${clip(extra, 2000)}`, agent: agent || s.agent || 'claude', model: model ?? s.model ?? '', web: true, by, tag: 'question' }));
+    log({ kind: 'advice', by, what: `Advice asked for ${j.title}: ${out.map(p => p.tag).join(', ')}` });
+    return out;
+}
+// Wishes are kept so the board can show what was asked and what came of it.
+export function wishes() {
+    const list = (readJson(P('wishes.json'), { wishes: [] }) || { wishes: [] }).wishes; let changed = false;
+    for (const w of list) if (w.status === 'started' && fs.existsSync(path.join(config.state, 'oneshot', `wish-${w.id.slice(1)}.json`))) { w.status = 'ended'; w.summary = 'The agent finished without a summary. Its output is under Home → Temp → Results.'; w.finished = Date.now(); changed = true; }
+    if (changed) writeJson(P('wishes.json'), { wishes: list });
+    return list;
+}
+export function addWish(text, by = 'phone') {
+    const t = clip(text, 600); if (t.length < 4) throw httpError(400, 'Say what kind of job you want.');
+    const list = wishes(); const w = { id: id6('w'), text: t, at: Date.now(), by, status: 'started' }; list.unshift(w); writeJson(P('wishes.json'), { wishes: list.slice(0, 100) });
+    log({ kind: 'wish', by, what: `Wish: ${t}` }); return w;
+}
+export function finishWish(id, { status = 'done', summary = '' } = {}) { const list = wishes(); const w = list.find(x => x.id === id); if (!w) throw httpError(404, 'No such wish.'); w.status = status; w.summary = clip(summary, 2000); w.finished = Date.now(); writeJson(P('wishes.json'), { wishes: list }); return w; }
+export function wishPrompt(w) {
+    return `A job wish from the person this Job Hunt is for:\n\n"${w.text}"\n\nWish id: ${w.id}. Work it through with the jobs tools (MCP server "jobs", or the \`jobhunt\` command):\n` +
+        `1. Read Me (me_summary) so you know who this is for.\n2. Set the search from the wish (set_search: keywords, locations, remote, salary floor) and run hunt.\n` +
+        `3. Search the web too for strong matches the job sites miss, and add each with add_job (title, company, location, salary, url, requirements).\n` +
+        `4. For the 5 to 10 best new jobs: list_jobs, show_job, compatibility, then save_match (per requirement: meets/partly/gap with Me evidence ids) and save_money (take-home, living, left over, with assumptions).\n` +
+        `5. Finish with finish_wish (id ${w.id}) and a short summary: what you found, the best three and why, and gaps worth closing.\nNever invent experience the person does not have; gaps are useful.`;
+}
+
+// ---------- agent tools (one list: the jobs CLI and the jobs MCP server both come from it) ----------
+import * as kit from './kit/tools.js';
+const meLine = i => `${i.id} [${i.kind}${i.level ? `, ${i.level}` : ''}] ${i.title}${i.org ? ` (${i.org})` : ''}${i.from ? ` ${i.from}${i.to ? `–${i.to}` : ''}` : ''}`;
+const jobLine = j => `${j.id} ${j.status === 'new' ? '' : `[${j.status}] `}${j.title}${j.company ? ` · ${j.company}` : ''}${j.location ? ` · ${j.location}` : ''}${j.salary ? ` · ${j.salary}` : ''}${j.match ? ` · match ${j.match.score}` : ''}`;
+kit.registerApp('jobs', {
+    context(shell) { if (!shell?.cwd || !inJobs(shell.cwd)) { const e = new Error('Job Hunt tools work from a shell in the Job Hunt folder.'); e.status = 403; throw e; } return {}; },
+    tools: [
+        { name: 'me_summary', description: 'Everything about the person: projects, roles, skills, education, qualifications, achievements (id, kind, level, dates). Read this first.', inputSchema: kit.obj({ kind: kit.str('Only this kind: project, role, skill, education, cert, achievement, interest') }),
+            run: (c, a) => { const items = me().items.filter(i => !a.kind || i.kind === a.kind); return items.length ? items.map(meLine).join('\n') : 'Me is empty: ask the person about their experience (add_me) before judging fit.'; } },
+        { name: 'me_item', description: 'One Me item in full: summary, evidence, tags, links.', inputSchema: kit.obj({ id: kit.str('Me item id') }, ['id']), run: (c, a) => { const i = me().items.find(x => x.id === a.id); if (!i) throw httpError(404, 'No such item.'); return i; } },
+        { name: 'add_me', description: 'Add or update a Me item (same kind and title updates it). Only what the person told you or what their files show.', inputSchema: kit.obj({ kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), summary: kit.str('What it was and what they did'), level: kit.str('aware | working | strong | expert'), org: kit.str('Company, university or client'), from: kit.str('Start (YYYY or YYYY-MM)'), to: kit.str('End, or "now"'), tags: kit.arr('Skills and tools it shows'), evidence: kit.arr('Concrete evidence: results, numbers, links, files'), links: kit.arr('Ids of related Me items') }, ['kind', 'title']),
+            run: (c, a, by) => meLine(addMe(a, by)) },
+        { name: 'set_search', description: 'Set what the hunt looks for.', inputSchema: kit.obj({ keywords: kit.str('Job-site search words'), locations: kit.str('Places, comma-separated'), remote: kit.bool('Include remote jobs'), salaryMin: kit.num('Lowest yearly salary'), exclude: kit.str('Words that rule a job out, comma-separated') }),
+            run: (c, a) => { const s = setSettings(a); return `Search: "${s.keywords}" in ${s.locations || 'anywhere'}${s.remote ? ' (and remote)' : ''}${s.salaryMin ? `, from ${s.salaryMin}` : ''}`; } },
+        { name: 'hunt', description: 'Run the job-site search now (Adzuna, Reed, Jooble when keys are set; Remotive, Arbeitnow always). New jobs land on the board.', inputSchema: kit.obj({}), run: async (c, a, by) => hunt(by) },
+        { name: 'list_jobs', description: 'Jobs on the board.', inputSchema: kit.obj({ status: kit.str('new | shortlisted | applying | applied | hidden'), unscored: kit.bool('Only jobs without a match yet'), limit: kit.num('How many (default 40)') }),
+            run: (c, a) => board().jobs.filter(j => (a.status ? j.status === a.status : j.status !== 'hidden') && (!a.unscored || !j.match)).sort((x, y) => y.found - x.found).slice(0, a.limit || 40).map(jobLine).join('\n') || 'No jobs.' },
+        { name: 'show_job', description: 'One job in full (description, requirements, match, money).', inputSchema: kit.obj({ id: kit.str('Job id') }, ['id']), run: (c, a) => getJob(a.id) },
+        { name: 'add_job', description: 'Add a job you found (the same url or title and company updates it).', inputSchema: kit.obj({ title: kit.str('Job title'), company: kit.str('Employer'), location: kit.str('Where'), salary: kit.str('As advertised'), salaryMin: kit.num('Yearly, low end'), salaryMax: kit.num('Yearly, high end'), deadline: kit.str('YYYY-MM-DD'), url: kit.str('Link to the advert'), description: kit.str('The advert text'), requirements: kit.arr('Each requirement, one per item'), category: kit.str('A short category, e.g. "Data", "Security"') }, ['title']),
+            run: (c, a, by) => jobLine(addJob({ ...a, source: a.source || 'agent' }, by)) },
+        { name: 'set_requirements', description: 'Store the requirements you read from a job advert (one per item).', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements') }, ['id', 'requirements']), run: (c, a, by) => jobLine(updateJob(a.id, { requirements: a.requirements }, by)) },
+        { name: 'compatibility', description: 'For each requirement of a job, the Me items most likely to be evidence (by shared words). Judge each yourself, open items with me_item, and ask the person for an example when nothing fits.', inputSchema: kit.obj({ id: kit.str('Job id'), requirements: kit.arr('Requirements to check, if the job has none stored') }, ['id']),
+            run: (c, a) => { const j = getJob(a.id); const reqs = a.requirements?.length ? a.requirements : j.requirements || []; if (!reqs.length) return 'This job has no requirements stored: read the advert (show_job) and call set_requirements first.'; return candidates(reqs).map(r => `• ${r.requirement}\n${r.candidates.length ? r.candidates.map(x => `    ${x.id} ${x.title}${x.level ? ` (${x.level})` : ''} — shares: ${x.hits.join(', ')}`).join('\n') : '    (nothing in Me: a gap, or ask the person)'}`).join('\n'); } },
+        { name: 'save_match', description: 'Save your judgement of fit: score 0-100, a summary, the likely level (e.g. graduate, junior, mid), and per requirement meets/partly/gap with Me evidence ids. Gaps become questions for the person.', inputSchema: kit.obj({ id: kit.str('Job id'), score: kit.num('0 to 100'), summary: kit.str('Why, in two or three sentences'), level: kit.str('The level this person would come in at'), lines: kit.arr('Per requirement', kit.obj({ requirement: kit.str('Requirement'), verdict: kit.str('meets | partly | gap'), evidence: kit.arr('Me item ids'), note: kit.str('Why') })), cv: kit.str('Best CV id or version for it') }, ['id', 'score']),
+            run: (c, a, by) => jobLine(setMatch(a.id, a, by)) },
+        { name: 'uk_estimate', description: 'A rough UK take-home for a gross salary (tax, NI, student loan, pension). UK jobs only: for other countries work it out from that country\'s tax and social-security rules (search official sources).', inputSchema: kit.obj({ gross: kit.num('Yearly gross') }, ['gross']), run: (c, a) => ukEstimate(a.gross, settings().money) },
+        { name: 'save_money', description: 'Save the money line for a job (yearly, in the job\'s local currency): gross, take-home, living costs where the job is, what is left, and your assumptions (tax rules and year, sources).', inputSchema: kit.obj({ id: kit.str('Job id'), currency: kit.str('ISO code: GBP, EUR, CHF…'), gross: kit.num('Gross'), takeHome: kit.num('After tax, NI, loan, pension'), living: kit.num('Rent, bills, council tax, food, travel'), left: kit.num('Left over'), assumptions: kit.str('How you worked it out and the sources') }, ['id']),
+            run: (c, a, by) => { const j = setMoney(a.id, a, by); return `${jobLine(j)} · left ${j.money.left ?? '?'}`; } },
+        { name: 'add_gap', description: 'Note something jobs ask for that Me has no evidence of, for the person to answer.', inputSchema: kit.obj({ text: kit.str('The gap, as a question to the person'), job: kit.str('Job id') }, ['text']), run: (c, a, by) => addGap(a, by) },
+        { name: 'cv_sections', description: 'The person\'s CV template sections and the variants of each (ids and labels).', inputSchema: kit.obj({}), run: () => { const t = cvTemplate(); if (!t.template) return 'No CV template yet.'; return t.sections.map(s => `${s.name}: ${s.variants.map(v => `${v.id} "${v.label}"${v.job ? ` (for ${v.job})` : ''}`).join(', ')}`).join('\n'); } },
+        { name: 'cv_section_text', description: 'The LaTeX of one CV section variant.', inputSchema: kit.obj({ section: kit.str('Section name'), variant: kit.str('Variant id (default: base)') }, ['section']), run: (c, a) => { const t = cvTemplate(); const s = t.sections?.find(x => x.name.toLowerCase() === a.section.toLowerCase()); if (!s) throw httpError(404, 'No such section.'); return (s.variants.find(v => v.id === (a.variant || 'base')) || s.variants[0]).text; } },
+        { name: 'suggest_cv_section', description: 'Suggest a rewrite of one CV section (LaTeX, same style as the template) for a job. Only true things from Me. The person picks it in the CV builder.', inputSchema: kit.obj({ section: kit.str('Section name'), label: kit.str('Short label'), text: kit.str('The LaTeX'), job: kit.str('Job id it is for') }, ['section', 'text']),
+            run: (c, a, by) => addVariant(a.section, a, by) },
+        { name: 'save_draft', description: 'Save a draft for a job as Markdown (cover-letter, application-answers, interview-prep, thank-you, offer-checklist, or another short name). Also copied into the job\'s application folder if there is one.', inputSchema: kit.obj({ job: kit.str('Job id'), name: kit.str('Short name, e.g. cover-letter'), text: kit.str('The draft, in Markdown') }, ['job', 'name', 'text']),
+            run: (c, a, by) => saveDraft(a.job, a.name, a.text, by) },
+        { name: 'read_draft', description: 'Read a saved draft for a job.', inputSchema: kit.obj({ job: kit.str('Job id'), name: kit.str('Draft name') }, ['job', 'name']), run: (c, a) => readDraft(a.job, a.name) },
+        { name: 'job_advice', description: 'The research answers already gathered for a job (company, role, visa, pay).', inputSchema: kit.obj({ job: kit.str('Job id') }, ['job']), run: (c, a) => adviceFor(a.job).filter(p => p.status === 'done').map(p => `## ${p.subject}\n${p.answer}`).join('\n\n') || 'No research yet.' },
+        { name: 'finish_wish', description: 'Close a wish with a short summary for the person.', inputSchema: kit.obj({ id: kit.str('Wish id'), summary: kit.str('What you found, the best three and why, gaps to close') }, ['id', 'summary']), run: (c, a) => finishWish(a.id, { summary: a.summary }) },
+        { name: 'log', description: 'Recent Job Hunt activity.', inputSchema: kit.obj({}), run: () => readLog(40).map(e => `${new Date(e.t).toISOString().slice(0, 16)} ${e.by}: ${e.what}`).join('\n') },
+    ],
+});
+
+// ---------- the CV template as an editor workspace ----------
+ws.register({ id: 'jobs-cv', title: 'CV template', caps: ['build', 'spell'], dir: () => (fs.existsSync(CVD('paper', 'main.tex')) ? CVD() : null), afterWrite: rel => { if (rel === 'main.tex') syncTemplate(); } });
+
+// ---------- each job as a project: stages, checklists, drafts ----------
+// The stages follow the playbook (deploy/jobs/playbook.md, editable under AI prompts). Each stage has a checklist the
+// person ticks and work an agent can do: research fans out probes; tailor, interview and follow-up run a one-shot agent
+// in the Job Hunt folder that writes drafts (cover letter, answers, interview prep) and CV section suggestions.
+export const PLAN = [
+    { id: 'research', title: 'Research', ai: 'Research the employer', items: [['what', 'What they do, for whom'], ['values', 'Mission and values, with my examples'], ['news', 'Recent news'], ['people', 'Who leads the team'], ['market', 'Competitors and trends'], ['reviews', 'What working there is like'], ['visa', 'Right to work or sponsorship'], ['ask', 'Questions to ask them']] },
+    { id: 'tailor', title: 'Tailor', ai: 'Tailor my CV and draft the letter', items: [['reqs', 'Requirements mapped to Me'], ['cv', 'CV version chosen'], ['letter', 'Cover letter written'], ['answers', 'Application questions answered']] },
+    { id: 'apply', title: 'Apply', ai: null, items: [['deadline', 'Deadline checked'], ['sent', 'Application sent'], ['record', 'What I sent is in the folder'], ['tests', 'Online tests practised']] },
+    { id: 'interview', title: 'Interview', ai: 'Prepare me for the interview', items: [['stories', '6–8 STAR stories ready'], ['likely', 'Likely questions practised'], ['tech', 'Technical topics revised'], ['myq', 'My questions for them'], ['logistics', 'Format, people, time, what to bring']] },
+    { id: 'followup', title: 'Follow up', ai: 'Draft the follow-up', items: [['thanks', 'Thank-you sent'], ['feedback', 'Feedback asked for (if rejected)'], ['offer', 'Offer compared (if offered)']] },
+];
+export function setPlan(id, { stage, item, done } = {}, by = 'phone') {
+    const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
+    j.plan ||= { stage: 'research', done: {} };
+    if (stage !== undefined) { if (!PLAN.some(s => s.id === stage)) throw httpError(400, 'No such stage.'); j.plan.stage = stage; log({ kind: 'plan', by, what: `${j.title}: ${PLAN.find(s => s.id === stage).title}` }); }
+    if (item !== undefined) { const ok = PLAN.some(s => s.items.some(([k]) => `${s.id}.${k}` === item)); if (!ok) throw httpError(400, 'No such checklist item.'); if (done) j.plan.done[item] = Date.now(); else delete j.plan.done[item]; }
+    j.updated = Date.now(); saveBoard(b); return j.plan;
+}
+const DRAFT_NAME = /^[a-z0-9][a-z0-9-]{1,40}$/;
+const draftDir = id => P('drafts', id);
+export function drafts(id) { try { return fs.readdirSync(draftDir(id)).filter(f => f.endsWith('.md')).map(f => { const st = fs.statSync(path.join(draftDir(id), f)); return { name: f.slice(0, -3), size: st.size, at: st.mtimeMs }; }).sort((a, b) => b.at - a.at); } catch { return []; } }
+export function readDraft(id, name) { if (!DRAFT_NAME.test(name)) throw httpError(400, 'Bad draft name.'); getJob(id); try { return fs.readFileSync(path.join(draftDir(id), `${name}.md`), 'utf8'); } catch { throw httpError(404, 'No such draft.'); } }
+export function saveDraft(id, name, text, by = 'phone') {
+    const j = getJob(id); const n = String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (!DRAFT_NAME.test(n)) throw httpError(400, 'Name the draft (letters, digits, dashes), e.g. cover-letter.');
+    const t = String(text || ''); if (t.trim().length < 10 || t.length > 200_000) throw httpError(400, 'The draft is empty or too long.');
+    fs.mkdirSync(draftDir(id), { recursive: true }); share(P('drafts')); share(draftDir(id)); const f = path.join(draftDir(id), `${n}.md`); fs.writeFileSync(f, t); share(f);
+    const app = applications().find(a => a.job === id && !['rejected', 'withdrawn'].includes(a.stage));
+    if (app) { const sub = /letter|cv/.test(n) ? 'CV & Cover Letter' : 'Notes'; try { fs.writeFileSync(path.join(app.folder, sub, `${n}.md`), t); share(path.join(app.folder, sub, `${n}.md`)); } catch { /* folder gone */ } }
+    log({ kind: 'draft', by, what: `Draft "${n}" for ${j.title}${j.company ? ` at ${j.company}` : ''}` }); return { name: n, copiedTo: app ? path.relative(ROOT, app.folder) : null };
+}
+// The brief agents read: the Job Hunt brief, then the playbook (both editable under AI prompts).
+export function writeBrief() {
+    try { fs.mkdirSync(P('.platopypus'), { recursive: true }); fs.writeFileSync(P('.platopypus', 'jobs.md'), `${(prompts.text('jobs-brief') || '# Job Hunt').trim()}\n\n${(prompts.text('jobs-playbook') || '').trim()}\n`); share(P('.platopypus', 'jobs.md')); } catch { /* not set up */ }
+}
+export function stagePrompt(j, stage, extra = '') {
+    const head = `Job ${j.id}: "${j.title}"${j.company ? ` at ${j.company}` : ''}${j.location ? ` (${j.location})` : ''}. Follow the playbook in $PORTHOLE_SECURITY_FILE for this stage. Use the jobs tools (MCP server "jobs", or the \`jobhunt\` command). Read me_summary and show_job first.\n\n`;
+    const tail = `${extra ? `\nThe person adds: ${clip(extra, 1500)}\n` : ''}\nOnly true things from Me; record gaps with add_gap. Never contact the employer or send anything. Finish with a two-line summary of what you saved.`;
+    if (stage === 'tailor') return `${head}Stage: Tailor.\n1. If the job has no requirements stored, read the advert and call set_requirements (essential first).\n2. compatibility, then save_match if not scored yet.\n3. cv_sections and cv_section_text, then suggest_cv_section (job ${j.id}) for the two or three sections that matter most for this job, in the template's LaTeX style.\n4. save_draft name "cover-letter": a UK one-page cover letter as the playbook describes, using any research in the job's advice (show_job shows it).\n5. If the advert has application questions, save_draft "application-answers".${tail}`;
+    if (stage === 'interview') return `${head}Stage: Interview.\nsave_draft name "interview-prep" with: the likely format; 6–8 STAR stories from Me mapped to the job's competencies (Situation, Task, Action (most of it), Result, first person); 10–15 likely questions (motivation, competency, technical, scenario) each with notes on which story or points to use; technical topics to revise; 5 questions to ask them drawn from the research; and a short logistics checklist. Where Me lacks a story for a competency, add_gap.${tail}`;
+    if (stage === 'followup') return `${head}Stage: Follow up.\nsave_draft "thank-you": a short, specific thank-you message to send after the interview (leave [placeholders] for names and details the person must fill in). Also save_draft "offer-checklist": what to compare if an offer comes (pay, take-home vs living costs using save_money figures, pension, holiday, hybrid, training, progression, start date) and how to negotiate politely on facts.${tail}`;
+    throw httpError(400, 'That stage has no agent work.');
+}

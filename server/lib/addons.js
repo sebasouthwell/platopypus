@@ -44,6 +44,15 @@ export const CATALOG = [
         ready: async () => false,                 // only added from the Apps tab
         hasData: () => { try { return fs.readdirSync(path.join(config.root, 'Cases')).length > 0; } catch { return false; } },
     },
+    {
+        id: 'jobs', title: 'Job Hunt', icon: 'briefcase',
+        blurb: 'An AI-run job board around you: tell it the job you want and agents hunt job sites and the web, score each job against everything you have done, work out the money, research the company and advise you. Keeps your CVs (a LaTeX template with swappable sections) and a folder and tracker for every application.',
+        installs: ['Nothing extra (CV PDFs use the LaTeX from the Research app)'],
+        size: 'under 1 MB', time: 'a few seconds',
+        command: () => ['node', [path.resolve(here, '..', '..', 'bin', 'jobhunt'), 'setup']],
+        ready: async () => false,                 // only added from the Apps tab
+        hasData: () => { try { return fs.readdirSync(path.join(config.root, 'Jobs')).length > 0; } catch { return false; } },
+    },
 ];
 
 const jobs = new Map();   // id → { running, started, code, finished }

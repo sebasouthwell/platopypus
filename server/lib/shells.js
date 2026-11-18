@@ -16,6 +16,7 @@ import * as research from './research.js';
 import * as labLib from './lab.js';
 import * as clineLib from './cline.js';
 import * as casesLib from './cases.js';
+import * as jobsLib from './jobs.js';
 import * as secProfile from './profile.js';
 import { trustFolder } from './trust.js';
 import { tmux as tmuxCmd } from './tmux.js';
@@ -71,15 +72,15 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
         // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
         // A Conspiracy run works its case (as the agent user only: it is auto-approved; checked below).
-        if (session !== 'research' && session !== 'case') scratch = true;
+        if (session !== 'research' && session !== 'case' && session !== 'jobs') scratch = true;
     }
     // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
     if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
-    if (oneshot && session === 'case' && runAs !== 'agent') throw httpError(400, 'A Conspiracy one-shot runs as the agent user (it is auto-approved, so never as root).');
+    if (oneshot && (session === 'case' || session === 'jobs') && runAs !== 'agent') throw httpError(400, 'This one-shot runs as the agent user (it is auto-approved, so never as root).');
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
-    if (session !== null && !['control', 'project', 'research', 'lab', 'case'].includes(session)) throw httpError(400, 'session: control, project, research, lab or case.');
+    if (session !== null && !['control', 'project', 'research', 'lab', 'case', 'jobs'].includes(session)) throw httpError(400, 'session: control, project, research, lab, case or jobs.');
     // Autonomous testing with Claude: allowed, after the user has read the warning (the app asks; this enforces it).
     if (session === 'lab' && kind === 'agent' && (agent || 'claude') === 'claude' && !ackClaude) { const e = httpError(428, 'Using Claude as a Security Lab agent needs your confirmation first.'); e.needAck = 'claude-lab'; throw e; }
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
@@ -111,13 +112,13 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (mcpFlags) command += ` ${mcpFlags}`;
         // First message: Claude Code and Codex take it as an argument (from the environment, so no quoting issues);
         // Antigravity gets it typed in once it is up.
-        if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex' || agent === 'cline') command += ' "$PORTHOLE_FIRST_PROMPT"'; }
+        if (firstPrompt && firstPrompt.trim() && !login) { agentEnv.PORTHOLE_FIRST_PROMPT = firstPrompt.trim(); if (agent === 'claude' || agent === 'codex' || agent === 'cline') command += agent === 'claude' ? ' -- "$PORTHOLE_FIRST_PROMPT"' : ' "$PORTHOLE_FIRST_PROMPT"'; }   // claude: "--" ends --allowedTools/--mcp-config, which take several values and would swallow the prompt
         if (oneshot) {
             // Run once, non-interactively, then end: Claude print mode / codex exec, auto-approved because it has no root and a
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
             const mf = agents.modelArgs(agent, model).map(a => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
-            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"`;
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} ${mcpFlags} -- "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
             if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';
@@ -141,6 +142,9 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             const cdir = path.join(casesLib.ROOT, cslug);
             security = 'case'; sessionEnv = { PORTHOLE_SESSION: 'case', PORTHOLE_SECURITY_LEVEL: 'case', PORTHOLE_SECURITY_FILE: path.join(cdir, '.platopypus', 'case.md'), PORTHOLE_PROJECT_ROOT: cdir };
             caseStart = { slug: cslug, label: `${agents.catalog[agent]?.title || agent}${model ? ` (${model})` : ''}${oneshot ? ', one run' : ''}` };
+        } else if (session === 'jobs') {
+            if (!jobsLib.inJobs(dir)) throw httpError(400, 'A Job Hunt session starts in the Job Hunt folder: open it under Apps, Job Hunt.');
+            security = 'jobs'; sessionEnv = { PORTHOLE_SESSION: 'jobs', PORTHOLE_SECURITY_LEVEL: 'jobs', PORTHOLE_SECURITY_FILE: path.join(jobsLib.ROOT, '.platopypus', 'jobs.md'), PORTHOLE_PROJECT_ROOT: jobsLib.ROOT };
         } else if (session === 'research') {
             const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
             const tdir = path.join(research.ROOT, slug);
@@ -206,11 +210,12 @@ function finishOneshot(name, m) {
         let output = ''; try { output = fs.readFileSync(tmp, 'utf8'); fs.rmSync(tmp, { force: true }); } catch { /* nothing printed */ }
         fs.writeFileSync(path.join(oneshotDir, `${name}.json`), JSON.stringify({ name, agent: m.agent, prompt: m.prompt, started: m.created, finished: Date.now(), output: output.slice(-200_000) }), { mode: 0o600 });
         const agentScratch = agentUser.info() ? path.join(agentUser.info().home, 'scratch') : null;
-        if (m.cwd && (m.cwd.startsWith(scratchRoot + path.sep) || (agentScratch && m.cwd.startsWith(agentScratch + path.sep)))) fs.rmSync(m.cwd, { recursive: true, force: true });
+        const scratch = m.cwd && (m.cwd.startsWith(scratchRoot + path.sep) || (agentScratch && m.cwd.startsWith(agentScratch + path.sep)));
+        if (scratch) fs.rmSync(m.cwd, { recursive: true, force: true });
         // keep the 30 most recent results
         const all = fs.readdirSync(oneshotDir).filter(f => f.endsWith('.json')).map(f => ({ f, t: fs.statSync(path.join(oneshotDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
         for (const old of all.slice(30)) fs.rmSync(path.join(oneshotDir, old.f), { force: true });
-        log('shell', `one-shot "${name}" finished; output kept, folder removed`);
+        log('shell', `one-shot "${name}" finished; output kept${scratch ? ', scratch folder removed' : ''}`);
     } catch (e) { log('shell', `one-shot "${name}" cleanup failed: ${e.message}`); }
 }
 export async function reapOneshots() { if (Object.values(meta).some(m => m.oneshot)) await list(); }

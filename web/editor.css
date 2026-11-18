@@ -430,3 +430,7 @@ a.pill { color: var(--foam); text-decoration: none; }
 @media (min-width: 901px) { #ed { position: relative; } .gut-rail { right: auto; left: -5px; } #grid.norail .gut-rail { display: none; } }
 #refs li.sub { display: block; padding: 14px 14px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--dim); cursor: default; }
 #refs .k.t-plain { color: var(--foam); font: 13px var(--font); }
+
+/* Workspaces from other apps (?ws=): only editing, building, preview and spelling. */
+.ws-mode #newsec, .ws-mode #addsrc, .ws-mode #addpdf, .ws-mode #pdffile, .ws-mode #refs-wrap, .ws-mode #version, .ws-mode #dl-csv, .ws-mode #dl-bib,
+.ws-mode #tabs [data-pane="source"], .ws-mode #tabs [data-pane="checks"], .ws-mode #tabs [data-pane="changes"], .ws-mode #tabs [data-pane="agent"], .ws-mode #tabs [data-pane="both"], .ws-mode #cites { display: none !important; }

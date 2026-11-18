@@ -256,6 +256,9 @@
   <path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284" /></symbol>
 <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" />
   <path d="M20 21a8 8 0 0 0-16 0" /></symbol>
+<symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="13" rx="2" />
+  <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  <path d="M2.5 13h19" /></symbol>
 <symbol id="i-login" viewBox="0 0 24 24"><path d="m10 17 5-5-5-5" />
   <path d="M15 12H3" />
   <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /></symbol>

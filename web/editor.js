@@ -6,6 +6,11 @@
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const slug = new URLSearchParams(location.search).get('topic') || '';
     const enc = encodeURIComponent(slug);
+    // ?ws=<id>: a workspace from another app (for example the Job Hunt CV template): the editing, building, preview and
+    // spelling core only; references, sources, citation checks, versions and the agent pane belong to Research topics.
+    const WS = new URLSearchParams(location.search).get('ws') || '';
+    const BASE = WS ? `/api/ws/${encodeURIComponent(WS)}` : `/api/research/${enc}`;
+    if (WS) document.documentElement.classList.add('ws-mode');
     const S = { files: [], bib: new Map(), sources: [], cur: null, mtime: 0, dirty: false, conflict: false, detail: null, timer: null, links: null };
 
     async function api(path, { method = 'GET', body } = {}) {
@@ -37,8 +42,8 @@
 
     // ----- loading -----
     async function loadAll() {
-        const [d, f] = await Promise.all([api(`/api/research/${enc}`), api(`/api/research/${enc}/files`)]);
-        S.detail = d; S.files = f.files; S.bib = new Map(f.bib.map(e => [e.key, e])); S.sources = d.sources;
+        const [d, f] = await Promise.all([api(`${BASE}`), api(`${BASE}/files`)]);
+        S.detail = d; S.files = f.files; S.bib = new Map(f.bib.map(e => [e.key, e])); S.sources = d.sources || [];
         $('#title').textContent = d.title; document.title = d.title + ' · editor'; $('#back').href = '/';
         S.langs = f.langs; $('#lang').innerHTML = Object.entries(f.langs).map(([k, v]) => `<option value="${esc(k)}" ${k === f.lang ? 'selected' : ''}>${esc(v)}</option>`).join(''); applyLang(f.lang);
         renderFiles(); renderRefs();
@@ -49,7 +54,7 @@
     }
     async function openFile(p) {
         if (S.dirty) await save();
-        const r = await api(`/api/research/${enc}/file?path=${encodeURIComponent(p)}`);
+        const r = await api(`${BASE}/file?path=${encodeURIComponent(p)}`);
         S.cur = p; S.mtime = r.mtime; S.dirty = false; S.conflict = false; $('#code').value = r.text; paint(); gutter(); state(); renderFiles(); cites(); view('edit');
     }
     function gutter() { const n = $('#code').value.split('\n').length; $('#gutter').textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n'); $('#gutter').scrollTop = $('#code').scrollTop; }
@@ -63,15 +68,15 @@
         if (!S.cur || (!S.dirty && !S.conflict)) return true;
         clearTimeout(S.timer);
         try {
-            const r = await api(`/api/research/${enc}/file`, { method: 'POST', body: { path: S.cur, text: $('#code').value, baseMtime: S.conflict ? 0 : S.mtime } });
+            const r = await api(`${BASE}/file`, { method: 'POST', body: { path: S.cur, text: $('#code').value, baseMtime: S.conflict ? 0 : S.mtime } });
             S.mtime = r.mtime; S.dirty = false; S.conflict = false; state();
-            if (S.cur === 'refs.bib') { const f = await api(`/api/research/${enc}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); renderRefs(); cites(); const fresh = await api(`/api/research/${enc}/file?path=refs.bib`); if (fresh.text !== code.value) { const at = code.selectionStart; code.value = fresh.text; code.setSelectionRange(Math.min(at, fresh.text.length), Math.min(at, fresh.text.length)); paint(); gutter(); } S.mtime = fresh.mtime; }
+            if (S.cur === 'refs.bib') { const f = await api(`${BASE}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); renderRefs(); cites(); const fresh = await api(`${BASE}/file?path=refs.bib`); if (fresh.text !== code.value) { const at = code.selectionStart; code.value = fresh.text; code.setSelectionRange(Math.min(at, fresh.text.length), Math.min(at, fresh.text.length)); paint(); gutter(); } S.mtime = fresh.mtime; }
             return true;
         } catch (e) { if (e.status === 409) { S.conflict = true; state(); toast(e.message, true); } else toast(e.message, true); return false; }
     }
     async function build() {
         const b = $('#build'); if (!(await save())) return; b.disabled = true; b.textContent = 'Building…';
-        try { const r = await api(`/api/research/${enc}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); }
+        try { const r = await api(`${BASE}/build`, { method: 'POST' }); toast(r.ok ? `Built: ${r.pages} page${r.pages === 1 ? "" : "s"}` : 'The build failed', !r.ok); }
         catch (e) { toast(e.message, true); }
         b.disabled = false; b.textContent = 'Build';
         await refreshPreview();
@@ -100,7 +105,7 @@
     // A third layer under the coloured text carries only the backgrounds and underlines.
     S.cred = null; S.marks = []; S.marksOn = localStorage.getItem('editor.marks') !== '0';
     const VERDICT = { partly: 'Partly supported', unsupported: 'Not supported', unclear: 'Could not check' };
-    async function loadCred() { try { const d = await api(`/api/research/${enc}/citecheck`); S.cred = d.report ? { items: d.report.items, uncited: d.report.uncited } : null; } catch { S.cred = null; } paint(); cites(); }
+    async function loadCred() { if (WS) return; try { const d = await api(`${BASE}/citecheck`); S.cred = d.report ? { items: d.report.items, uncited: d.report.uncited } : null; } catch { S.cred = null; } paint(); cites(); }
     function sentenceStart(text, i, floor) { let j = i; while (j > floor) { const c = text[j - 1]; if ((c === '.' || c === '?' || c === '!') && /\s/.test(text[j] || '')) break; if (c === '\n') { const prev = text.slice(text.lastIndexOf('\n', j - 2) + 1, j - 1).trim(); if (!prev || prev.startsWith('\\') || prev.startsWith('%')) break; } j--; } while (j < i && /\s/.test(text[j])) j++; return j; }
     function computeMarks(text, force = false) {
         const out = []; if (!S.cred || (!S.marksOn && !force) || !S.cur) return out;
@@ -167,7 +172,7 @@
     document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) setMenu(false); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); more.focus(); } });
     $$('#checkseg button').forEach(b => b.onclick = () => pane(b.dataset.check));
-    $('#dl-csv').href = `/api/research/${enc}/export/csv`; $('#dl-bib').href = `/api/research/${enc}/export/bib`;
+    $('#dl-csv').href = `${BASE}/export/csv`; $('#dl-bib').href = `${BASE}/export/bib`;
 
     // ----- resizable columns: drag a border, double-click it to go back to the default -----
     (() => {
@@ -252,19 +257,19 @@
         $('#refs').innerHTML = html || '<li class="muted" style="cursor:default">No references yet. Add a source, or ask the agent.</li>';
         $$('#refs [data-cite]').forEach(b => b.onclick = () => insert(`\\cite{${b.dataset.cite}}`));
         $$('#refs [data-view]').forEach(b => b.onclick = () => openSource(b.dataset.view, ''));
-        $$('#refs [data-add]').forEach(b => b.onclick = async () => { try { const r = await api(`/api/research/${enc}/cite`, { method: 'POST', body: { id: b.dataset.add } }); await reloadBib(); insert(r.latex); } catch (e) { toast(e.message, true); } });
+        $$('#refs [data-add]').forEach(b => b.onclick = async () => { try { const r = await api(`${BASE}/cite`, { method: 'POST', body: { id: b.dataset.add } }); await reloadBib(); insert(r.latex); } catch (e) { toast(e.message, true); } });
     }
     $('#refq').oninput = renderRefs;
-    async function reloadBib() { const f = await api(`/api/research/${enc}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); S.files = f.files; renderRefs(); renderFiles(); if (S.cur === 'refs.bib' && !S.dirty) await openFile('refs.bib'); }
+    async function reloadBib() { const f = await api(`${BASE}/files`); S.bib = new Map(f.bib.map(e => [e.key, e])); S.files = f.files; renderRefs(); renderFiles(); if (S.cur === 'refs.bib' && !S.dirty) await openFile('refs.bib'); }
     function insert(text) {
         if (!S.cur || S.cur === 'refs.bib') { toast('Open a section or main.tex to insert a citation.', true); return; }
         code.focus(); code.setRangeText(text, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); view('edit');
     }
-    $('#newsec').onclick = async () => { const n = prompt('Section file name (for example methods)'); if (!n) return; try { const r = await api(`/api/research/${enc}/section`, { method: 'POST', body: { name: n } }); await loadAll(); await openFile(r.path); } catch (e) { toast(e.message, true); } };
+    $('#newsec').onclick = async () => { const n = prompt('Section file name (for example methods)'); if (!n) return; try { const r = await api(`${BASE}/section`, { method: 'POST', body: { name: n } }); await loadAll(); await openFile(r.path); } catch (e) { toast(e.message, true); } };
     $('#addsrc').onclick = async () => {
         const u = prompt('Address of a web page, PDF or YouTube video'); if (!u) return;
         toast('Fetching…');
-        try { const r = await api(`/api/research/${enc}/sources`, { method: 'POST', body: { url: u } }); await loadAll(); toast(`Added ${r.meta?.id || 'source'}`); } catch (e) { toast(e.message, true); }
+        try { const r = await api(`${BASE}/sources`, { method: 'POST', body: { url: u } }); await loadAll(); toast(`Added ${r.meta?.id || 'source'}`); } catch (e) { toast(e.message, true); }
     };
 
     // Files from this device become sources (stored on the box, in the topic's local history, never pushed).
@@ -273,7 +278,7 @@
         for (const f of list) {
             toast(`Uploading ${f.name}…`);
             try {
-                const res = await fetch(`/api/research/${enc}/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' });
+                const res = await fetch(`${BASE}/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/octet-stream' }, body: f, credentials: 'same-origin' });
                 const r = await res.json().catch(() => ({})); if (!res.ok) throw new Error(r.error || res.statusText);
                 toast(r.kind === 'references' ? `Imported ${r.imported} reference${r.imported === 1 ? '' : 's'}${r.skipped ? ` (${r.skipped} already here)` : ''}` : r.doi ? `Added ${r.id}: details from DOI ${r.doi}` : r.needsMeta ? `Added ${r.id}. No DOI found: the agent can fill in author and year.` : `Added ${r.id} (${r.kind})`);
             } catch (e) { toast(e.message, true); }
@@ -285,20 +290,20 @@
     addEventListener('drop', e => { const l = [...(e.dataTransfer?.files || [])]; if (l.length) { e.preventDefault(); uploadPdfs(l); } });
     $('#version').onclick = async () => {
         if (!(await save())) return;
-        try { const r = await api(`/api/research/${enc}/commit`, { method: 'POST', body: { message: 'Saved from the editor' } }); toast(r.paper || r.research ? 'Version saved' : 'Nothing has changed since the last version'); } catch (e) { toast(e.message, true); }
+        try { const r = await api(`${BASE}/commit`, { method: 'POST', body: { message: 'Saved from the editor' } }); toast(r.paper || r.research ? 'Version saved' : 'Nothing has changed since the last version'); } catch (e) { toast(e.message, true); }
     };
 
     // ----- language and spelling -----
     // The browser underlines as you type in the topic's language; "Check spelling" asks the box, which understands LaTeX.
     function applyLang(l) { S.lang = l; code.lang = l; document.documentElement.lang = l; code.spellcheck = false; code.spellcheck = true; }
-    $('#lang').onchange = async e => { try { await api(`/api/research/${enc}/language`, { method: 'POST', body: { lang: e.target.value } }); applyLang(e.target.value); if (!$('#spelling').hidden) checkSpelling(); } catch (ex) { toast(ex.message, true); } };
+    $('#lang').onchange = async e => { try { await api(`${BASE}/language`, { method: 'POST', body: { lang: e.target.value } }); applyLang(e.target.value); if (!$('#spelling').hidden) checkSpelling(); } catch (ex) { toast(ex.message, true); } };
     async function checkSpelling() {
         const box = $('#spelling'); box.innerHTML = '<div class="empty">Checking…</div>';
-        let r; try { r = await api(`/api/research/${enc}/spell`, { method: 'POST', body: { text: code.value } }); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        let r; try { r = await api(`${BASE}/spell`, { method: 'POST', body: { text: code.value } }); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         if (!r.words.length) { box.innerHTML = `<div class="empty">No spelling problems in ${esc(S.cur || 'this file')}.</div>`; return; }
         box.innerHTML = `<div class="build">${r.words.length} word${r.words.length === 1 ? '' : 's'} to look at in ${esc(S.cur || '')} · ${esc(S.langs?.[r.lang] || r.lang)}</div>` + r.words.map(w => `<div class="sp"><b>${esc(w.word)}</b><span class="n">${w.n > 1 ? `×${w.n}` : ''}</span><button class="pill" data-find="${esc(w.word)}">Find</button><button class="pill" data-learn="${esc(w.word)}">It is a word</button></div>`).join('');
         $$('[data-find]', box).forEach(b => b.onclick = () => findWord(b.dataset.find));
-        $$('[data-learn]', box).forEach(b => b.onclick = async () => { try { await api(`/api/research/${enc}/spell/learn`, { method: 'POST', body: { word: b.dataset.learn } }); b.closest('.sp').remove(); } catch (e) { toast(e.message, true); } });
+        $$('[data-learn]', box).forEach(b => b.onclick = async () => { try { await api(`${BASE}/spell/learn`, { method: 'POST', body: { word: b.dataset.learn } }); b.closest('.sp').remove(); } catch (e) { toast(e.message, true); } });
     }
     function findWord(w) {
         const re = new RegExp(`(?<![\\p{L}\\\\])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'gu'); re.lastIndex = code.selectionEnd;
@@ -319,7 +324,8 @@
     }
     addEventListener('visibilitychange', () => { if (!document.hidden) document.title = document.title.replace(/^● /, ''); });
     async function watch() {
-        clearTimeout(watchTimer); let qs; try { qs = (await api(`/api/research/${enc}/questions`)).questions; } catch { watchTimer = setTimeout(watch, 15000); return; }
+        if (WS) return;
+        clearTimeout(watchTimer); let qs; try { qs = (await api(`${BASE}/questions`)).questions; } catch { watchTimer = setTimeout(watch, 15000); return; }
         for (const q of qs) {
             const done = q.status !== 'waiting' && (q.toPaper !== 'requested');
             if (!watchPrimed) { if (done) seenDone.add(q.id + (q.toPaper || '')); continue; }
@@ -359,7 +365,7 @@
     }
     async function drawCiteCheck() {
         const box = $('#citecheck'); if (box.hidden) return;
-        let d; try { d = await api(`/api/research/${enc}/citecheck`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        let d; try { d = await api(`${BASE}/citecheck`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         const sc = d.scan, rp = d.report, busy = d.run && d.run.status === 'waiting' && !d.run.problem;
         S.cred = rp ? { items: rp.items, uncited: rp.uncited } : null; paint();
         const queues = new Map(); if (rp) for (const i of rp.items) { const k = `${i.file}|${i.key}`; if (!queues.has(k)) queues.set(k, []); queues.get(k).push(i); }
@@ -389,7 +395,7 @@
             ${rp?.summary ? `<details class="cc-fold"><summary>The agent's summary</summary><p class="cc-note">${esc(rp.summary)}</p></details>` : ''}
             ${fine.length ? `<details class="cc-fold" ${rp || attention.length ? '' : 'open'}><summary>${rp ? `Supported citations (${fine.length})` : `All citations (${fine.length})`}</summary>${fine.map(rowHtml).join('')}</details>` : ''}
             ${!sc.items.length ? '<div class="empty">No citations in the paper yet.</div>' : ''}`;
-        $('#cc-run').onclick = async () => { if (!(await save())) return; try { await api(`/api/research/${enc}/citecheck`, { method: 'POST', body: {} }); kick(); } catch (e) { toast(e.message, true); } drawCiteCheck(); };
+        $('#cc-run').onclick = async () => { if (!(await save())) return; try { await api(`${BASE}/citecheck`, { method: 'POST', body: {} }); kick(); } catch (e) { toast(e.message, true); } drawCiteCheck(); };
         $$('[data-jump]', box).forEach(b => b.onclick = () => { const [f, l] = b.dataset.jump.split('|'); jump(f, Number(l), { key: b.dataset.jkey, uncited: b.dataset.juncited !== undefined ? rp?.uncited[Number(b.dataset.juncited)] : null }); });
         $$('[data-src-key]', box).forEach(b => b.onclick = () => openSource(b.dataset.srcKey, b.dataset.srcWhere));
         clearTimeout(ccPoll); if (busy) ccPoll = setTimeout(drawCiteCheck, 6000);
@@ -423,7 +429,7 @@
     }
     async function drawChanges(version = '') {
         const box = $('#changes'); if (box.hidden) return; box.innerHTML = '<div class="empty">Comparing…</div>';
-        let d, h; try { [d, h] = await Promise.all([api(`/api/research/${enc}/diff${version ? `?version=${version}` : ''}`), api(`/api/research/${enc}/history`)]); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        let d, h; try { [d, h] = await Promise.all([api(`${BASE}/diff${version ? `?version=${version}` : ''}`), api(`${BASE}/history`)]); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         const vers = h.versions.filter(v => v.where === 'paper');
         const add = d.files.reduce((n, f) => n + f.added, 0), rem = d.files.reduce((n, f) => n + f.removed, 0);
         box.innerHTML = `<div class="d-top"><select id="d-ver" aria-label="What to compare"><option value="">Since the last version (not saved yet)</option>${vers.map(v => `<option value="${esc(v.id)}" ${v.id === version ? 'selected' : ''}>${esc(new Date(v.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${esc(v.message.slice(0, 60))}</option>`).join('')}</select><span class="d-stat">${d.files.length ? `<ins>+${add}</ins> <del>−${rem}</del> in ${d.files.length} file${d.files.length === 1 ? '' : 's'}` : ''}</span></div>`
@@ -436,7 +442,7 @@
     let agentPoll = null;
     async function drawAgent() {
         const box = $('#agent'); if (box.hidden) return;
-        let st, qs; try { [st, qs] = await Promise.all([api(`/api/research/${enc}/versions`), api(`/api/research/${enc}/questions`)]); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        let st, qs; try { [st, qs] = await Promise.all([api(`${BASE}/versions`), api(`${BASE}/questions`)]); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         const edits = qs.questions.filter(q => q.kind === 'edit').reverse(); const busy = edits.some(q => q.status === 'waiting' && !q.problem);
         const sel = code.value.slice(code.selectionStart, code.selectionEnd); const keep = $('#ag-text')?.value || '';
         const when = st.last ? new Date(st.last.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
@@ -448,17 +454,17 @@
             ${edits.map(q => `<div class="ag-item"><p class="q">${esc(q.text)}</p>${q.status === 'waiting' ? `<p class="muted">${q.problem ? esc(q.problem) : 'The agent is working on it…'}</p>` : `<p class="a">${esc(q.answer || '')}</p>`}</div>`).join('')}${edits.some(q => q.status !== 'waiting') ? '<div class="ag-row"><span class="muted">See exactly what is different.</span><button class="pill" id="ag-diff">Show changes</button></div>' : ''}`;
         const dbtn = $('#ag-diff'); if (dbtn) dbtn.onclick = () => pane('changes');
         $('#ag-text').value = keep;
-        const saveVersion = async msg => { if (!(await save())) return false; try { await api(`/api/research/${enc}/commit`, { method: 'POST', body: { message: msg } }); return true; } catch (e) { toast(e.message, true); return false; } };
+        const saveVersion = async msg => { if (!(await save())) return false; try { await api(`${BASE}/commit`, { method: 'POST', body: { message: msg } }); return true; } catch (e) { toast(e.message, true); return false; } };
         const sv = $('#ag-save'); if (sv) sv.onclick = async () => { if (await saveVersion('Saved from the editor')) { toast('Version saved'); drawAgent(); } };
         const run = async () => {
             const text = $('#ag-text').value.trim(); if (!text) return toast('Say what you want changed.', true);
-            try { await api(`/api/research/${enc}/edits`, { method: 'POST', body: { text, file: S.cur || '', selection: sel } }); $('#ag-text').value = ''; kick(); } catch (e) { toast(e.message, true); }
+            try { await api(`${BASE}/edits`, { method: 'POST', body: { text, file: S.cur || '', selection: sel } }); $('#ag-text').value = ''; kick(); } catch (e) { toast(e.message, true); }
             drawAgent();
         };
         $('#ag-run').onclick = async () => {
             if (!$('#ag-text').value.trim()) return toast('Say what you want changed.', true);
             if (!(await save())) return;
-            const now = await api(`/api/research/${enc}/versions`);
+            const now = await api(`${BASE}/versions`);
             if (!now.dirty && now.last) return run();
             // Recommended, not forced: a version first means one tap undoes whatever the agent does.
             $('#ag-choice').innerHTML = `<div class="ag-ask"><p>Save a version first? Then you can go back if you do not like what the agent does.</p><div><button class="btn pri" id="ag-yes">Save version, then ask</button><button class="btn" id="ag-no">Ask without saving</button></div></div>`;
@@ -467,7 +473,7 @@
         const rv = $('#ag-revert'); if (rv) rv.onclick = async () => {
             $('#ag-choice').innerHTML = `<div class="ag-ask"><p>Drop every change since the last version (${esc(when)})? This cannot be undone.</p><div><button class="btn" id="ag-rv-yes">Yes, go back</button><button class="btn" id="ag-rv-no">Keep my changes</button></div></div>`;
             $('#ag-rv-no').onclick = drawAgent;
-            $('#ag-rv-yes').onclick = async () => { try { await api(`/api/research/${enc}/revert`, { method: 'POST', body: {} }); S.dirty = false; S.conflict = false; await loadAll(); if (S.cur) await openFile(S.cur).catch(() => openFile('main.tex')); toast('Back to the last version'); } catch (e) { toast(e.message, true); } pane('agent'); };
+            $('#ag-rv-yes').onclick = async () => { try { await api(`${BASE}/revert`, { method: 'POST', body: {} }); S.dirty = false; S.conflict = false; await loadAll(); if (S.cur) await openFile(S.cur).catch(() => openFile('main.tex')); toast('Back to the last version'); } catch (e) { toast(e.message, true); } pane('agent'); };
         };
         clearTimeout(agentPoll);
         if (busy) agentPoll = setTimeout(async () => { await drawAgent(); }, 5000);
@@ -476,16 +482,16 @@
 
     // ----- the preview, with clickable citations -----
     async function refreshPreview() {
-        const box = $('#preview'); let d; try { d = await api(`/api/research/${enc}`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+        const box = $('#preview'); let d; try { d = await api(`${BASE}`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
         S.detail = d; const b = d.build; let html = '';
         if (b) html += `<div class="build ${b.ok ? '' : 'bad'}">${b.ok ? `Built · ${b.pages} page${b.pages === 1 ? '' : 's'} · ${b.warnings} warning${b.warnings === 1 ? '' : 's'}` : `Build failed: ${esc((b.errors || []).join(' · ') || 'see paper/build/main.log')}`}</div>`;
         const pr = $('#problems'); const msgs = [...(b && !b.ok ? b.errors || [] : []), ...(b?.undefinedCites?.length ? [`Undefined citations: ${b.undefinedCites.join(', ')}`] : [])];
         pr.textContent = msgs.join('\n'); S.build = b ? { ok: !!b.ok && !msgs.length, failed: !b.ok, n: msgs.length, pages: b.pages } : null; pr.classList.toggle('on', msgs.length > 0 && !!S.showProblems); cites();
         if (!d.pagesAvailable) { box.innerHTML = html + '<div class="empty">Nothing built yet. Press Build.</div>'; return; }
-        let links = { pages: [] }; try { links = await api(`/api/research/${enc}/links`); } catch { /* pages still show */ }
+        let links = { pages: [] }; try { links = await api(`${BASE}/links`); } catch { /* pages still show */ }
         html += Array.from({ length: d.pagesAvailable }, (_, i) => {
             const L = (links.pages[i]?.links || []).map(l => `<a class="l" href="#" data-key="${esc(l.key)}" title="${esc(l.key)}" style="left:${l.x * 100}%;top:${l.y * 100}%;width:${l.w * 100}%;height:${l.h * 100}%"></a>`).join('');
-            return `<div class="pg"><img alt="Page ${i + 1}" src="/api/research/${enc}/page/${i + 1}?v=${b?.at || 0}">${L}</div>`;
+            return `<div class="pg"><img alt="Page ${i + 1}" src="${BASE}/page/${i + 1}?v=${b?.at || 0}">${L}</div>`;
         }).join('');
         box.innerHTML = html;
         $$('#preview a.l').forEach(a => a.onclick = e => { e.preventDefault(); openSource(a.dataset.key, ''); });
@@ -504,14 +510,14 @@
     }
     function bindRecord(box, sid, key, where) {
         const rec = $('.rec', box); if (!rec) return;
-        const c = $('[data-rec-cite]', rec); if (c) c.onclick = async () => { try { const r = await api(`/api/research/${enc}/cite`, { method: 'POST', body: { id: sid } }); await reloadBib(); insert(r.latex); } catch (er) { toast(er.message, true); } };
+        const c = $('[data-rec-cite]', rec); if (c) c.onclick = async () => { try { const r = await api(`${BASE}/cite`, { method: 'POST', body: { id: sid } }); await reloadBib(); insert(r.latex); } catch (er) { toast(er.message, true); } };
         $('[data-rec-edit]', rec).onclick = async () => {
-            const v = await api(`/api/research/${enc}/source/${sid}`); const m = v.meta;
+            const v = await api(`${BASE}/source/${sid}`); const m = v.meta;
             const keys = ['title', 'author', 'year', 'journal', 'volume', 'pages', 'publisher', 'doi', 'url'];
             rec.querySelector('dl').outerHTML = `<form class="rec-form">${keys.map(k => `<label><span>${FIELD_LABEL[k]}</span><input name="${k}" value="${esc((k === 'pages' ? m.pageRange : m[k]) || '')}" ${k === 'year' ? 'inputmode="numeric" maxlength="4"' : ''}></label>`).join('')}<label><span>Entry type</span><select name="type">${['', 'article', 'inproceedings', 'book', 'incollection', 'techreport', 'phdthesis', 'misc', 'online'].map(t => `<option value="${t}" ${t === (m.bibType || '') ? 'selected' : ''}>${t || 'automatic'}</option>`).join('')}</select></label><div class="rec-acts"><button class="pill pri" type="submit">Save the record</button><button class="pill" type="button" data-rec-cancel>Cancel</button></div></form>`;
             $('[data-rec-edit]', rec).hidden = true;
             const form = $('.rec-form', rec); $('[data-rec-cancel]', form).onclick = () => openSource(key, where);
-            form.onsubmit = async ev => { ev.preventDefault(); const fields = Object.fromEntries(new FormData(form)); try { await api(`/api/research/${enc}/source/${sid}/record`, { method: 'POST', body: { fields } }); await reloadBib(); toast('Record saved: refs.bib is updated'); openSource(key, where); } catch (er) { toast(er.message, true); } };
+            form.onsubmit = async ev => { ev.preventDefault(); const fields = Object.fromEntries(new FormData(form)); try { await api(`${BASE}/source/${sid}/record`, { method: 'POST', body: { fields } }); await reloadBib(); toast('Record saved: refs.bib is updated'); openSource(key, where); } catch (er) { toast(er.message, true); } };
         };
     }
 
@@ -525,7 +531,7 @@
         if (!e) { box.innerHTML = `<div class="empty">${esc(key)} is not in refs.bib.</div>`; return; }
         if (!e.source) { box.innerHTML = `<div class="src"><h2>${esc(e.title)}</h2><div class="meta">${esc([e.author, e.year].filter(Boolean).join(', '))}</div><p class="muted">This reference has no source file in the topic.${e.url ? ` <a target="_blank" rel="noopener" href="${esc(e.url)}">Open the link</a>` : ''}</p><p class="muted">Add its file or page as a source and put <b>source = {sNN}</b> in its refs.bib entry to link it.</p></div>`; return; }
         box.innerHTML = '<div class="empty">Loading…</div>';
-        let v; try { v = await api(`/api/research/${enc}/source/${e.source.id}`); } catch (er) { box.innerHTML = `<div class="empty">${esc(er.message)}</div>`; return; }
+        let v; try { v = await api(`${BASE}/source/${e.source.id}`); } catch (er) { box.innerHTML = `<div class="empty">${esc(er.message)}</div>`; return; }
         const w = parseWhere(where); const m = v.meta; const sid = e.source.id; setTimeout(() => bindRecord(box, sid, key, where), 0);
         let head = `<div class="src"><h2>${esc(m.title || e.title)}</h2><div class="meta"><span>${esc([m.author, m.year].filter(Boolean).join(', '))}</span><span class="pill">${esc(m.kind)}</span>${where ? `<span class="pill">${esc(where)}</span>` : ''}${m.url ? `<a target="_blank" rel="noopener" href="${esc(m.url)}">Original</a>` : ''}</div>${recordHtml(v.record)}`;
         if (e.source.hasPdf) {
@@ -536,8 +542,8 @@
             const banner = w.page ? `<div class="s-note"><b>This citation points to page ${w.page}.</b>${w.page > pages ? ` The file only has ${pages} pages: the page number may be the journal's, not the file's.` : ''}</div>`
                 : claims.length ? `<div class="s-note"><b>${where ? esc(where) + ': ' : ''}No page in this citation.</b> It was cited for:<ul>${claims.map(c => `<li>${esc(c.claim)}${c.quote ? ` <q>${esc(c.quote)}</q>` : ''} ${c.page ? `<button class="pill" data-goto="${c.page}">page ${c.page}${c.found ? ' (found by its quote)' : ''}</button>` : '<span class="muted">(page not known: search the text for the quote)</span>'}</li>`).join('')}</ul></div>`
                 : `<div class="s-note"><b>No page in this citation,</b> and nothing was logged about why it was cited. Scroll the pages, or use Text to search.</div>`;
-            box.innerHTML = head + `<div class="nav sticky"><span id="pn"></span><button class="pill" id="pcite">Cite this page</button><a class="pill" href="/api/research/${enc}/source/${sid}/original" download>Download PDF</a><button class="pill" id="ptxt">Text</button></div>${banner}<pre id="ptext" hidden></pre>
-                <div id="ppages">${Array.from({ length: pages }, (_, i) => `<figure class="pg spg ${w.page === i + 1 ? 'cited' : ''}" data-p="${i + 1}"><img loading="lazy" alt="Page ${i + 1}" src="/api/research/${enc}/source/${sid}/page/${i + 1}"><figcaption>${i + 1}</figcaption></figure>`).join('')}</div></div>`;
+            box.innerHTML = head + `<div class="nav sticky"><span id="pn"></span><button class="pill" id="pcite">Cite this page</button><a class="pill" href="${BASE}/source/${sid}/original" download>Download PDF</a><button class="pill" id="ptxt">Text</button></div>${banner}<pre id="ptext" hidden></pre>
+                <div id="ppages">${Array.from({ length: pages }, (_, i) => `<figure class="pg spg ${w.page === i + 1 ? 'cited' : ''}" data-p="${i + 1}"><img loading="lazy" alt="Page ${i + 1}" src="${BASE}/source/${sid}/page/${i + 1}"><figcaption>${i + 1}</figcaption></figure>`).join('')}</div></div>`;
             let cur = target; const label = () => { $('#pn', box).textContent = `Page ${cur} of ${pages}`; };
             const go = n => { const f = $(`.spg[data-p="${n}"]`, box); if (f) { box.scrollTop = f.offsetTop - 56; cur = n; label(); } };
             // which page is in view decides what "Cite this page" cites
@@ -554,7 +560,7 @@
             const layer = async fig => {
                 if (fig.dataset.text) return; fig.dataset.text = '1';
                 const img = fig.querySelector('img'); if (img.naturalWidth) fig.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
-                let r; try { r = await api(`/api/research/${enc}/source/${sid}/lines/${fig.dataset.p}`); } catch { return; }
+                let r; try { r = await api(`${BASE}/source/${sid}/lines/${fig.dataset.p}`); } catch { return; }
                 const tl = document.createElement('div'); tl.className = 'tl';
                 tl.innerHTML = r.lines.map(l => l.words.map((wd, i) => { const next = l.words[i + 1]; const last = !next || next.x <= wd.x; const width = last ? wd.w : next.x - wd.x;
                     return `<span data-w="${width}" data-h="${l.h}" style="left:${wd.x * 100}%;top:${l.y * 100}%">${esc(wd.s)}${last ? '\n' : ' '}</span>`; }).join('')).join('');
@@ -578,7 +584,7 @@
 
     // ----- go -----
     (async () => {
-        if (!slug) { $('#title').textContent = 'No topic'; return; }
-        try { watch(); if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); loadCred(); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
+        if (!slug && !WS) { $('#title').textContent = 'No topic'; return; }
+        try { watch(); if (WS) pane('preview'); else if (localStorage.getItem('editor.pane') === 'both' && innerWidth > 900) pane('both'); await loadAll(); await openFile('main.tex').catch(() => {}); loadCred(); view(innerWidth > 900 ? 'edit' : 'edit'); await refreshPreview(); } catch (e) { toast(e.message, true); }
     })();
 })();

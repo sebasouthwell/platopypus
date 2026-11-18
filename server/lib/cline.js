@@ -95,7 +95,7 @@ export function isolate(home, dir, owner = null, { session = null } = {}) {
     fs.writeFileSync(path.join(dir, 'hub.port'), String(port));
     // A case or research shell: its tools as an MCP server, approved (PlatOpypus and the research command check every call).
     const m = agentsLib.MCP_FOR[session];
-    if (m) fs.writeFileSync(path.join(settings, 'cline_mcp_settings.json'), JSON.stringify({ mcpServers: { [m.name]: { command: m.command, args: [], disabled: false, timeout: 900, autoApprove: m.tools } } }, null, 2), { mode: 0o600 });
+    if (m) fs.writeFileSync(path.join(settings, 'cline_mcp_settings.json'), JSON.stringify({ mcpServers: { [m.name]: { command: m.command, args: m.args || [], disabled: false, timeout: 900, autoApprove: m.tools } } }, null, 2), { mode: 0o600 });
     if (owner) { for (const p of [data, settings, ...fs.readdirSync(settings).map(n => path.join(settings, n)), path.join(dir, 'hub.port')]) { try { fs.chownSync(p, owner.uid, owner.gid); } catch { /* best effort */ } } }
     return { CLINE_DATA_DIR: data, CLINE_HUB_PORT: String(port) };
 }

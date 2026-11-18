@@ -45,6 +45,9 @@ import * as clineLib from './lib/cline.js';
 import * as consult from './lib/consult.js';
 import * as schedules from './lib/schedules.js';
 import * as cases from './lib/cases.js';
+import * as jobs from './lib/jobs.js';
+import * as kitTools from './lib/kit/tools.js';
+import * as workspaces from './lib/kit/workspaces.js';
 import * as zipstream from './lib/zipstream.js';
 import * as prefs from './lib/prefs.js';
 import * as transfers from './lib/transfers.js';
@@ -92,6 +95,7 @@ elevate.setShellLookup(name => shells.shellMeta(name)?.cwd || null);
 
 // What a restricted (agent-user shell) session may call: the box CLIs and nothing else.
 const AGENT_ROUTES = [
+    ['GET', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}$/], ['POST', /^\/api\/agent\/tools\/[a-z][a-z0-9-]{1,30}\/[a-z_]{2,40}$/],   // app tools (kit/tools.js); each app checks the shell
     ['GET', /^\/api\/me$/], ['GET', /^\/api\/vault$/], ['POST', /^\/api\/agent\/vault$/],
     ['POST', /^\/api\/agent\/elevate$/], ['GET', /^\/api\/agent\/elevate\/[a-f0-9]{12}$/],
     ['POST', /^\/api\/agent\/research\/ask$/], ['GET', /^\/api\/agent\/research\/ask\/[a-f0-9]{12}$/],
@@ -396,6 +400,9 @@ const server = http.createServer(async (req, res) => {
             if (p === '/api/agent/schedules' && method === 'POST') { const b = await readJson(req, 96 * 1024); return send(res, 201, schedules.propose({ name: b.name, cron: b.cron, script: b.script, why: b.why, from: session.agent })); }
             if (p === '/api/agent/consult' && method === 'GET') return send(res, 200, await consult.available(sh.session || null));
             if (p === '/api/agent/consult' && method === 'POST') { const b = await readJson(req, 64 * 1024); const pr = await caller(b.pid); return send(res, 200, await consult.ask({ from: session.agent, fromAgent: sh.agent, session: sh.session || null, cwd: pr.cwd, to: b.to, question: b.question, web: !!b.web, model: b.model })); }
+            // App tools (kit/tools.js): one declared list per app, used by plato-tool and plato-mcp. The app decides what this shell may act on.
+            if ((am = p.match(/^\/api\/agent\/tools\/([a-z][a-z0-9-]{1,30})$/)) && method === 'GET') return send(res, 200, { tools: kitTools.list(am[1], sh) });
+            if ((am = p.match(/^\/api\/agent\/tools\/([a-z][a-z0-9-]{1,30})\/([a-z_]{2,40})$/)) && method === 'POST') { const b = await readJson(req, 512 * 1024); await caller(b.pid); return send(res, 200, await kitTools.call(am[1], am[2], sh, b.args || {}, `shell "${session.agent}"`)); }
             // Security Lab: the engagement is the one this shell works in; every run is checked against its scope.
             if (p.startsWith('/api/agent/lab/')) {
                 const slug = lab.engagementOf(sh.cwd); if (!slug) return send(res, 403, { error: 'This shell is not in a Security Lab engagement.' });
@@ -796,6 +803,106 @@ const server = http.createServer(async (req, res) => {
             }
         }
         // Conspiracy: cases, the pinboard, theories, probes. Needs the app.
+        // Job Hunt (lib/jobs.js). Files go up as base64 in JSON (CVs, application documents).
+        if (p === '/api/jobs' || p.startsWith('/api/jobs/')) {
+            if (!(await addons.isAdded('jobs'))) return send(res, 409, { error: 'Add Job Hunt first (Apps tab).', needApp: 'jobs' });
+            if (!jobs.ready()) jobs.setup();
+            const fileOut = (file, type, name, inline = true) => { const st = fs.statSync(file); res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`, 'Cache-Control': 'no-store', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'" }); fs.createReadStream(file).pipe(res); };
+            const typeOf = f => ({ '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.doc': 'application/msword', '.tex': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8' }[path.extname(f).toLowerCase()] || 'application/octet-stream');
+            const rest = p.slice('/api/jobs'.length).replace(/^\//, ''); let jm;
+            const body = async (n = 64 * 1024) => (method === 'POST' ? await readJson(req, n) : {});
+            if (rest === '' && method === 'GET') return send(res, 200, { ...jobs.overview(), stages: jobs.STAGES, statuses: jobs.STATUSES, kinds: jobs.ME_KINDS, advice: jobs.ADVICE.map(a => ({ tag: a.tag, title: a.title })), folder: path.relative(config.root, jobs.ROOT) });
+            if (rest === 'settings' && method === 'POST') return send(res, 200, jobs.setSettings(await body()));
+            if (rest === 'key' && method === 'POST') { const b = await body(); return send(res, 200, jobs.setKey(String(b.source || ''), b.values || {})); }
+            if (rest === 'hunt' && method === 'POST') return send(res, 200, await jobs.hunt('phone'));
+            if (rest === 'log' && method === 'GET') return send(res, 200, { log: jobs.readLog(300) });
+            if (rest === 'wishes' && method === 'GET') return send(res, 200, { wishes: jobs.wishes() });
+            // A wish: kept, then worked by a one-shot agent in the Job Hunt folder (agent user, jobs tools).
+            if (rest === 'wish' && method === 'POST') {
+                jobs.writeBrief(); const b = await body(); const s = jobs.settings(); const w = jobs.addWish(b.text, 'phone');
+                const agent = b.agent || s.agent || 'claude'; const model = b.model ?? s.model ?? '';
+                const name = `wish-${w.id.slice(1)}`;
+                try { await shells.create({ name, kind: 'agent', agent, model, runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.wishPrompt(w), oneshot: true }); }
+                catch (e) { jobs.finishWish(w.id, { status: 'failed', summary: e.message }); throw e; }
+                return send(res, 201, { wish: w, shell: name });
+            }
+            // Talk to an agent about yourself: an interactive shell that interviews you and fills in Me.
+            if (rest === 'me/interview' && method === 'POST') {
+                jobs.writeBrief(); const b = await body(); const s = jobs.settings(); const name = `me-${Math.random().toString(36).slice(2, 6)}`;
+                const prompt = `Interview me to build my "Me" map for job hunting. Start with me_summary to see what is there. Then ask me about ${b.topic ? `this first: ${String(b.topic).slice(0, 300)}. Then ` : ''}my projects, jobs, education, skills and achievements, one or two questions at a time. For each thing I tell you, save it with add_me (kind, title, summary, level, dates, tags, concrete evidence, links to related items). Push for specifics: what I did myself, results, numbers, tools. Never add anything I did not say. Also answer the open gaps (ask me about them).`;
+                await shells.create({ name, kind: 'agent', agent: b.agent || s.agent || 'claude', model: b.model ?? s.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt });
+                return send(res, 201, { shell: name });
+            }
+            if (rest === 'me' && method === 'GET') return send(res, 200, jobs.me());
+            if (rest === 'me' && method === 'POST') return send(res, 201, jobs.addMe(await body(), 'phone'));
+            if ((jm = rest.match(/^me\/(m[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeMe(jm[1]));
+            if ((jm = rest.match(/^gap\/(g[0-9a-f]{6})$/)) && method === 'POST') { const b = await body(); return send(res, 200, jobs.closeGap(jm[1], b)); }
+            if (rest === 'board' && method === 'GET') return send(res, 200, jobs.board());
+            if (rest === 'board' && method === 'POST') return send(res, 201, jobs.addJob(await body(256 * 1024), 'phone'));
+            if ((jm = rest.match(/^job\/(j[0-9a-f]{6})(?:\/(\w+))?$/))) {
+                const [id, op = ''] = [jm[1], jm[2] || ''];
+                if (op === '' && method === 'GET') return send(res, 200, { job: jobs.getJob(id), advice: jobs.adviceFor(id), drafts: jobs.drafts(id), plan: jobs.PLAN, candidates: jobs.getJob(id).requirements?.length ? jobs.candidates(jobs.getJob(id).requirements) : [], estimate: jobs.getJob(id).salaryMin ? jobs.ukEstimate(jobs.getJob(id).salaryMin, jobs.settings().money) : null });
+                if (op === '' && method === 'POST') return send(res, 200, jobs.updateJob(id, await body(), 'phone'));
+                if (op === 'advice' && method === 'POST') { const b = await body(); return send(res, 201, { probes: await jobs.askAdvice(id, b, 'phone') }); }
+                if (op === 'money' && method === 'POST') return send(res, 200, jobs.setMoney(id, await body(), 'phone'));
+                if (op === 'plan' && method === 'POST') return send(res, 200, jobs.setPlan(id, await body(), 'phone'));
+                if (op === 'draft' && method === 'GET') return send(res, 200, { name: url.searchParams.get('name'), text: jobs.readDraft(id, String(url.searchParams.get('name') || '')) });
+                // The AI work for a stage: research fans out probes; the others run a one-shot agent that writes drafts.
+                if (op === 'work' && method === 'POST') {
+                    const b = await body(); const j = jobs.getJob(id); const s = jobs.settings();
+                    if (b.stage === 'research') return send(res, 201, { probes: await jobs.askAdvice(id, { topics: ['company', 'role', ...(b.visa ? ['visa'] : []), ...(b.pay ? ['pay'] : [])], extra: b.extra || '' }, 'phone') });
+                    const prompt = jobs.stagePrompt(j, String(b.stage || ''), b.extra || ''); jobs.writeBrief();
+                    const name = `${String(b.stage).slice(0, 6)}-${id.slice(1)}-${Math.random().toString(36).slice(2, 5)}`;
+                    await shells.create({ name, kind: 'agent', agent: b.agent || s.agent || 'claude', model: b.model ?? s.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true });
+                    jobs.log({ kind: 'plan', by: 'phone', what: `${j.title}: agent started for ${b.stage}` });
+                    return send(res, 201, { shell: name });
+                }
+                if (op === 'estimate' && method === 'POST') { const b = await body(); return send(res, 200, jobs.ukEstimate(b.gross, jobs.settings().money)); }
+            }
+            if (rest === 'cvs' && method === 'GET') return send(res, 200, { cvs: jobs.cvs() });
+            if (rest === 'cvs' && method === 'POST') return send(res, 201, jobs.addCv(await body(22 * 1024 * 1024), 'phone'));
+            if ((jm = rest.match(/^cvs\/(c[0-9a-f]{6})(?:\/(delete|file))?$/))) {
+                if (!jm[2] && method === 'POST') return send(res, 200, jobs.updateCv(jm[1], await body()));
+                if (jm[2] === 'delete' && method === 'POST') return send(res, 200, jobs.removeCv(jm[1]));
+                if (jm[2] === 'file' && method === 'GET') { const f = jobs.cvPath(jm[1]); return fileOut(f.file, typeOf(f.file), f.name, url.searchParams.get('download') !== '1'); }
+            }
+            if (rest === 'cv' && method === 'GET') return send(res, 200, jobs.cvTemplate());
+            if (rest === 'cv/template' && method === 'POST') { const b = await body(400 * 1024); return send(res, 200, jobs.setTemplate({ tex: b.tex || undefined, name: b.name }, 'phone')); }
+            if (rest === 'cv/variant' && method === 'POST') { const b = await body(96 * 1024); return send(res, 201, jobs.addVariant(b.section, b, 'phone')); }
+            if (rest === 'cv/variant/delete' && method === 'POST') { const b = await body(); return send(res, 200, jobs.removeVariant(b.section, b.id)); }
+            if (rest === 'cv/render' && method === 'POST') { const b = await body(); return send(res, 200, { tex: jobs.renderCv(b.choice || {}) }); }
+            if (rest === 'cv/preview' && method === 'POST') { const b = await body(); return send(res, 200, await jobs.previewCv(b.choice || {})); }
+            if (rest === 'cv/preview.pdf' && method === 'GET') return fileOut(jobs.previewFile(), 'application/pdf', 'CV preview.pdf');
+            if (rest === 'cv/version' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.saveVersion(b, 'phone')); }
+            if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\.(pdf|tex)$/)) && method === 'GET') return fileOut(jobs.versionFile(jm[1], jm[2]), typeOf(`x.${jm[2]}`), `CV.${jm[2]}`, url.searchParams.get('download') !== '1');
+            if (rest === 'apps' && method === 'GET') return send(res, 200, { apps: jobs.applications().map(a => ({ ...a, folder: path.relative(config.root, a.folder) })) });
+            if (rest === 'apps' && method === 'POST') { const a = jobs.createApplication(await body(), 'phone'); return send(res, 201, { ...a, folder: path.relative(config.root, a.folder) }); }
+            if ((jm = rest.match(/^apps\/(a[0-9a-f]{6})(?:\/(files|file|cv))?$/))) {
+                const [id, op = ''] = [jm[1], jm[2] || ''];
+                if (op === '' && method === 'POST') return send(res, 200, jobs.updateApplication(id, await body(), 'phone'));
+                if (op === 'files' && method === 'GET') { const f = jobs.appFiles(id); return send(res, 200, { ...f, folder: path.relative(config.root, f.folder) }); }
+                if (op === 'file' && method === 'POST') return send(res, 201, jobs.saveAppFile(id, await body(30 * 1024 * 1024)));
+                if (op === 'cv' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.cvForApplication(id, b.choice || {}, 'phone')); }
+            }
+            return send(res, 404, { error: 'Not found.' });
+        }
+
+        // Editor workspaces (lib/kit/workspaces.js): the LaTeX editor on any registered folder (web/editor.html?ws=<id>).
+        if ((m = p.match(/^\/api\/ws\/([a-z][a-z0-9-]{1,40})(?:\/(.*))?$/)) && (method === 'GET' || method === 'POST')) {
+            const [id, rest = ''] = [m[1], m[2] || '']; let w2;
+            if (rest === '' && method === 'GET') return send(res, 200, workspaces.info(id));
+            if (rest === 'files' && method === 'GET') return send(res, 200, workspaces.files(id));
+            if (rest === 'file' && method === 'GET') return send(res, 200, workspaces.readFile(id, url.searchParams.get('path')));
+            if (rest === 'file' && method === 'POST') { const b = await readJson(req, 3 * 1024 * 1024); return send(res, 200, workspaces.writeFile(id, b.path, b.text, { baseMtime: b.baseMtime })); }
+            if (rest === 'build' && method === 'POST') return send(res, 200, await workspaces.build(id));
+            if (rest === 'spell' && method === 'POST') { const b = await readJson(req, 3 * 1024 * 1024); return send(res, 200, await workspaces.spell(id, b.text || '', b.lang)); }
+            if (((w2 = rest.match(/^page\/(\d{1,4})$/)) || rest === 'pdf') && method === 'GET') {
+                const file = w2 ? workspaces.pageFile(id, w2[1]) : workspaces.pdfFile(id); const st = fs.statSync(file);
+                res.writeHead(200, { 'Content-Type': w2 ? 'image/png' : 'application/pdf', 'Content-Length': st.size, 'Content-Disposition': `inline; filename="${w2 ? `page-${w2[1]}.png` : 'main.pdf'}"`, 'Cache-Control': 'no-store', ...securityHeaders(), 'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'" });
+                return fs.createReadStream(file).pipe(res);
+            }
+            return send(res, 404, { error: 'Not found.' });
+        }
         if (p === '/api/cases' || p.startsWith('/api/cases/')) {
             if (!(await addons.isAdded('cases'))) return send(res, 409, { error: 'Add Conspiracy first (Apps tab).', needApp: 'cases' });
             if (p === '/api/cases' && method === 'GET') return send(res, 200, { cases: cases.list(), kinds: cases.KINDS });
