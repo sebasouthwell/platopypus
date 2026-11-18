@@ -1541,3 +1541,6 @@ input[type=month] { color-scheme: dark; }
 .jh-tpl b { font-size: 14.5px; } .jh-tpl span { font-size: 12.5px; color: var(--mist); line-height: 1.35; } .jh-tpl em { font-style: normal; font-size: 11.5px; color: var(--dock); } .jh-tpl i { font-style: normal; font-size: 11.5px; color: var(--dim); margin-top: auto; }
 .jh-tpl.on { border-color: var(--brass); background: rgba(240,184,64,.07); box-shadow: inset 0 0 0 1px var(--brass); }
 .jh-tpl.add { border-style: dashed; align-items: flex-start; } .jh-tpl.add svg.i { color: var(--brass); }
+
+.jh-tplbar { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 6px; } .jh-tplbar .muted { font-size: 12.5px !important; margin: 0 !important; }
+.jh-tpl.sel { border-color: var(--brass); background: rgba(240,184,64,.08); } .jh-tpl .jh-tick { margin-bottom: 4px; }

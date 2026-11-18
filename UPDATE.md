@@ -997,6 +997,14 @@ phone's Update button. Mechanism:
   - Section suggestions, previews, versions and application CVs take a template (`?t=<id>` or `template` in the body);
     agents use the default unless told otherwise.
 
+- **2.22.1**: Templates fill themselves from Me. Adding a starter ("Fill starters with my real content", on by default) or
+  pressing "Fill from my Me" on any template queues an agent that rewrites it with confirmed Me content in the
+  template's own style, builds it and fixes errors (`fillPrompt`, one fill at a time; the card shows "filling from
+  Me…"). Box requests: `cvstarters` (add starters, filled) and `cvfill`.
+  Templates can be deleted one at a time (Details) or many at once (Manage on the template row, with "Select unused").
+  Unused templates go at once; a template that is the default, has saved PDFs or made an application's CV needs a
+  confirmation that says so (`templateUse`). Applications record the template that made their CV (`cvTemplate`).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

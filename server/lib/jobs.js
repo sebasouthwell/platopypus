@@ -357,7 +357,7 @@ export function createApplication({ job, cv = null, notes = '' }, by = 'phone') 
 export function updateApplication(id, b, by = 'phone') {
     const apps = applications(); const a = apps.find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
     if (b.stage !== undefined && b.stage !== a.stage) { if (!STAGES.includes(b.stage)) throw httpError(400, `Stage: ${STAGES.join(', ')}.`); a.stage = b.stage; a.history.push({ stage: b.stage, at: Date.now(), by }); if (b.stage === 'applied') { try { updateJob(a.job, { status: 'applied' }, by); } catch { /* job gone */ } } log({ kind: 'stage', by, what: `${a.title}${a.company ? ` at ${a.company}` : ''}: ${b.stage}` }); }
-    for (const k of ['next', 'nextDate', 'notes', 'priority', 'cv']) if (b[k] !== undefined) a[k] = clip(b[k], k === 'notes' ? 4000 : 200);
+    for (const k of ['next', 'nextDate', 'notes', 'priority', 'cv', 'cvTemplate']) if (b[k] !== undefined) a[k] = clip(b[k], k === 'notes' ? 4000 : 200);
     saveApps(apps); return a;
 }
 export function appFiles(id) {
@@ -675,7 +675,7 @@ function migrateLegacy() {
 export function templates() {
     migrateLegacy(); let ids = []; try { ids = fs.readdirSync(TROOT()).filter(x => TPL_RE.test(x)); } catch { return []; }
     const def = settings().cvDefault;
-    return ids.map(tid => { const m = readJson(TD(tid, 'meta.json'), {}) || {}; const s = readJson(TD(tid, 'cv.json'), {}) || {}; registerWs(tid); return { id: tid, name: m.name || s.name || 'CV', style: m.style || '', contexts: m.contexts || [], starter: m.starter || null, by: m.by, created: m.created, sections: (s.sections || []).length, versions: (s.versions || []).length, default: tid === def }; }).sort((a, b) => (b.default - a.default) || a.created - b.created);
+    return ids.map(tid => { const m = readJson(TD(tid, 'meta.json'), {}) || {}; const s = readJson(TD(tid, 'cv.json'), {}) || {}; registerWs(tid); return { id: tid, name: m.name || s.name || 'CV', style: m.style || '', contexts: m.contexts || [], starter: m.starter || null, filling: !!m.filling && Date.now() - m.filling < 40 * 60_000, inUse: templateUse(tid).length > 0, filled: m.filled || null, by: m.by, created: m.created, sections: (s.sections || []).length, versions: (s.versions || []).length, default: tid === def }; }).sort((a, b) => (b.default - a.default) || a.created - b.created);
 }
 const tidOr = tid => { if (tid && TPL_RE.test(tid)) return tid; const t = templates(); if (!t.length) throw httpError(409, 'Add a CV template first.'); return t[0].id; };
 const cvState = tid => readJson(TD(tid, 'cv.json'), null);
@@ -697,7 +697,23 @@ export function duplicateTemplate(tid, by = 'phone') {
     const t = createTemplate({ name: `${m.name || 'CV'} (copy)`, style: m.style, contexts: m.contexts, tex }, by);
     const src = cvState(tid); const dst = cvState(t.id); dst.sections = src.sections; writeJson(TD(t.id, 'cv.json'), dst); return cvTemplate(t.id);
 }
-export function removeTemplate(tid) { fs.rmSync(TD(tid), { recursive: true, force: true }); if (settings().cvDefault === tid) setSettings({ cvDefault: '' }); return { removed: tid }; }
+// How a template is in use: the default, saved PDFs, applications whose CV it made. Unused ones delete without asking.
+export function templateUse(tid) {
+    const s = cvState(tid) || {}; const out = [];
+    if (settings().cvDefault === tid) out.push('your default template');
+    if ((s.versions || []).length) out.push(`${s.versions.length} saved PDF${s.versions.length === 1 ? '' : 's'}`);
+    const apps = applications().filter(a => a.cvTemplate === tid); if (apps.length) out.push(`the CV for ${apps.length === 1 ? `"${apps[0].title}"` : `${apps.length} applications`} (those files stay)`);
+    return out;
+}
+export function removeTemplates(ids, { confirm = false } = {}) {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(t => TPL_RE.test(String(t)) && fs.existsSync(TD(t)));
+    if (!list.length) throw httpError(404, 'No such templates.');
+    const used = list.map(t => ({ id: t, name: (readJson(TD(t, 'meta.json'), {}) || {}).name || t, use: templateUse(t) })).filter(x => x.use.length);
+    if (used.length && !confirm) { const e = httpError(409, list.length === 1 ? 'This template is in use.' : `${used.length} of these templates are in use.`); e.needConfirm = used; throw e; }
+    for (const t of list) { fs.rmSync(TD(t), { recursive: true, force: true }); if (settings().cvDefault === t) setSettings({ cvDefault: '' }); }
+    log({ kind: 'cv', by: 'phone', what: `Deleted ${list.length} CV template${list.length === 1 ? '' : 's'}` }); return { deleted: list.length };
+}
+export const removeTemplate = (tid, opt) => removeTemplates([tid], opt);
 export function cvTemplate(tid0) {
     let tid; try { tid = tidOr(tid0); } catch { return { template: null, templates: [], starters: starterList(), hasLatex: hasLatex() }; }
     const s = cvState(tid); const m = readJson(TD(tid, 'meta.json'), {}) || {};
@@ -776,7 +792,7 @@ export const previewFile = tid0 => { const f = TD(tidOr(tid0), 'preview', 'previ
 export async function cvForApplication(appId, choice, by = 'phone', tid0) {
     const a = applications().find(x => x.id === appId); if (!a) throw httpError(404, 'No such application.');
     const r = await buildCv(choice || {}, path.join(a.folder, 'CV & Cover Letter'), 'CV', tid0);
-    updateApplication(appId, { cv: 'tailored' }, by); log({ kind: 'cv', by, what: `Tailored CV made for ${a.title}${a.company ? ` at ${a.company}` : ''}` });
+    updateApplication(appId, { cv: 'tailored', cvTemplate: tidOr(tid0) }, by); log({ kind: 'cv', by, what: `Tailored CV made for ${a.title}${a.company ? ` at ${a.company}` : ''}` });
     return { tex: path.relative(a.folder, r.tex), pdf: r.pdf ? path.relative(a.folder, r.pdf) : null, note: r.note || null };
 }
 export function designPrompt({ style, context, fill = true }) {
@@ -1461,6 +1477,8 @@ export async function takeRequests(start) {
             else if (r.type === 'code') await addCodeGit(r, 'box');
             else if (r.type === 'codezip') await addCodeZipFile(r, 'box');
             else if (r.type === 'dates') await start(datingPrompt(), 'dates');
+            else if (r.type === 'cvstarters') { for (const st of (r.starters || Object.keys(STARTERS))) { const t = createTemplate({ starter: st }, 'box'); if (r.fill !== false) queueFill(t.template.id); } }
+            else if (r.type === 'cvfill') queueFill(r.template);
             else if (r.type === 'docnote') { const list = docs(); for (const [id, note] of Object.entries(r.notes || {})) { const d = list.find(x => x.id === id); if (d) d.notes = clip(note, 1000); } writeJson(docsFile(), { docs: list }); }
             else if (r.type === 'docs') queueDocReads();
         } catch (e) { log({ kind: 'job', by: 'box', what: `Request ${r.type} failed: ${e.message}` }); }
@@ -1476,4 +1494,34 @@ export function datingPrompt() {
 export function recency(i) {
     const to = String(i.to || '').toLowerCase(); if (!to && !i.from) return 0.75; if (to === 'now' || to === 'present' || to === 'current') return 1;
     const y = Number((to || String(i.from)).slice(0, 4)); if (!y) return 0.75; const age = new Date().getFullYear() - y; return Math.max(0.4, Math.min(1, 1 - age * 0.06));
+}
+
+// ---------- filling a template from Me ----------
+// A starter (or any template) is filled by an agent with the person's confirmed Me, in the template's own LaTeX style,
+// built and fixed, so each template shows a real example CV before any application. One fill at a time.
+export function fillPrompt(tid) {
+    const m = readJson(TD(tid, 'meta.json'), {}) || {};
+    return `Fill my CV template ${tid} ("${m.name || 'CV'}": ${m.style || ''}${(m.contexts || []).length ? `; for ${m.contexts.join(', ')}` : ''}) with my real content, so I can see an example CV in this style.\n` +
+        `1. cv_sections (template ${tid}) and cv_section_text for each section, to learn the template's commands and structure.\n` +
+        `2. me_summary (confirmed items only) and me_item for the strongest ones. Pick what suits this template's purpose: recent and strongest first, true facts only, with dates; one or two pages, as the template intends.\n` +
+        `3. Rewrite the whole document with every section filled in the template's own style (keep its preamble, commands and "% @section{Name}" … "% @end" markers; you may add or drop a section if the content calls for it). The header keeps placeholders for phone and email; use my name and public links that are in Me.\n` +
+        `4. update_cv_template (template ${tid}) with the whole .tex, then build_cv_template; fix and repeat until it builds. No \\\\input, \\\\include or shell escape.\n` +
+        `Finish with one line: what you put in and what I should check.`;
+}
+const fillQueue = []; let filling = false;
+export function queueFill(tid) {
+    if (!TPL_RE.test(String(tid || '')) || !fs.existsSync(TD(tid))) throw httpError(404, 'No such template.');
+    const m = readJson(TD(tid, 'meta.json'), {}) || {}; m.filling = Date.now(); writeJson(TD(tid, 'meta.json'), m);
+    if (!fillQueue.includes(tid)) fillQueue.push(tid); drainFill(); return { queued: tid, position: fillQueue.indexOf(tid) + 1 };
+}
+async function drainFill() {
+    if (filling || !runner || !fillQueue.length) return; filling = true;
+    try {
+        while (fillQueue.length) {
+            const tid = fillQueue.shift(); if (!fs.existsSync(TD(tid))) continue;
+            try { const n = await runner(fillPrompt(tid), `cvfill-${tid.slice(1)}`); log({ kind: 'cv', by: 'box', what: `Filling template ${(readJson(TD(tid, 'meta.json'), {}) || {}).name || tid} from Me` }); await waitShell(n); }
+            catch (e) { log({ kind: 'cv', by: 'box', what: `Template fill not started: ${e.message}` }); }
+            finally { const m = readJson(TD(tid, 'meta.json'), null); if (m) { delete m.filling; m.filled = Date.now(); writeJson(TD(tid, 'meta.json'), m); } }
+        }
+    } finally { filling = false; }
 }

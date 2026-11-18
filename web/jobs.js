@@ -5,7 +5,7 @@
 // Applications (a folder and tracker per application), Activity, Setup (what to search, keys, money assumptions).
 
 let C = null;
-const S = { tpl: null, meSub: 'map', pbOpt: { confirmedOnly: false, allSkills: false }, sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
+const S = { tplSel: null, tpl: null, meSub: 'map', pbOpt: { confirmedOnly: false, allSkills: false }, sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
 const ROUTE = { realistic: 'Apply now', stretch: 'Stretch', entry: 'Way in', goal: 'Goal' };
 const STANDING = { 'in-field': 'In your field', adjacent: 'A step across', 'career change': 'A career change' };
@@ -332,7 +332,7 @@ async function renderCv(box) {
     if (!t.template) {
         html += `<div class="card jh-cvstart"><h3>CV templates</h3><p class="note">Keep several LaTeX CVs for different contexts, for example a plain one-page CV for job sites and an academic one for research posts. Each section can hold several versions (yours, or AI suggestions for a job) that you swap in and build to a PDF.</p>${starterGallery(t.starters)}</div>`;
     } else {
-        html += `<div class="jh-tpls" role="list">${t.templates.map(x => `<button class="jh-tpl ${x.id === t.template.id ? 'on' : ''}" data-tpl="${x.id}" role="listitem"><b>${esc(x.name)}${x.default ? ' <span class="jh-def">default</span>' : ''}</b><span>${esc(x.style || '')}</span>${x.contexts.length ? `<em>${x.contexts.map(esc).join(' · ')}</em>` : ''}<i>${x.sections} sections · ${x.versions} saved</i></button>`).join('')}<button class="jh-tpl add" data-tpladd>${icon('plus')}<b>Add a template</b><span>Starters, your own .tex, or designed by AI</span></button></div>
+        html += `<div class="jh-tplbar"><span class="muted">${t.templates.length} template${t.templates.length === 1 ? '' : 's'}</span><button class="text-btn" data-tplman>${S.tplSel ? 'Done' : 'Manage'}</button></div>${S.tplSel ? `<div class="jh-selbar"><span>${S.tplSel.size} selected</span><button class="text-btn" data-tplunused>Select unused</button><button class="btn danger-btn" data-tpldel ${S.tplSel.size ? '' : 'disabled'}>${icon('trash')}Delete</button></div>` : ''}<div class="jh-tpls" role="list">${t.templates.map(x => `<button class="jh-tpl ${S.tplSel ? (S.tplSel.has(x.id) ? 'sel' : '') : x.id === t.template.id ? 'on' : ''}" data-tpl="${x.id}" role="listitem" ${S.tplSel ? `aria-pressed="${S.tplSel.has(x.id)}"` : ''}>${S.tplSel ? `<span class="jh-tick">${S.tplSel.has(x.id) ? icon('check') : ''}</span>` : ''}<b>${esc(x.name)}${x.default ? ' <span class="jh-def">default</span>' : ''}</b><span>${esc(x.style || '')}</span>${x.contexts.length ? `<em>${x.contexts.map(esc).join(' · ')}</em>` : ''}<i>${x.filling ? 'filling from Me…' : `${x.sections} sections · ${x.versions} saved${x.inUse ? ' · in use' : ''}`}</i></button>`).join('')}${S.tplSel ? '' : `<button class="jh-tpl add" data-tpladd>${icon('plus')}<b>Add a template</b><span>Starters, your own .tex, or designed by AI</span></button>`}</div>
         <div class="jh-cvbar"><div><b>${esc(t.template.name)}</b><span class="muted"> · ${t.sections.length} sections</span> <button class="text-btn" data-tplmeta>Details</button></div>
             <div class="r-actions"><a class="btn" href="/editor.html?ws=${t.template.ws}" target="_blank" rel="noopener">${icon('file-code')}Edit LaTeX</a><button class="btn" data-preview>${icon('eye')}Preview PDF</button><button class="btn pri" data-version>${icon('save')}Save as version</button></div></div>
             ${t.hasLatex ? '' : '<p class="jh-banner">LaTeX is not on this box yet, so PDFs cannot be built. Add the Research app (Apps tab) to get it.</p>'}
@@ -348,7 +348,10 @@ async function renderCv(box) {
         <div class="r-actions"><label class="btn">${icon('upload')}Add a CV file<input type="file" accept=".pdf,.doc,.docx,.odt,.md,.txt,.tex" data-cvfile hidden></label></div>`;
     box.innerHTML = html;
     wireGallery(box, () => renderCv(box));
-    $$('[data-tpl]', box).forEach(x => x.onclick = () => { if (S.tpl === x.dataset.tpl) return; S.tpl = x.dataset.tpl; S.choice = {}; renderCv(box); });
+    $$('[data-tpl]', box).forEach(x => x.onclick = () => { if (S.tplSel) { S.tplSel.has(x.dataset.tpl) ? S.tplSel.delete(x.dataset.tpl) : S.tplSel.add(x.dataset.tpl); return renderCv(box); } if (S.tpl === x.dataset.tpl) return; S.tpl = x.dataset.tpl; S.choice = {}; renderCv(box); });
+    const tman = $('[data-tplman]', box); if (tman) tman.onclick = () => { S.tplSel = S.tplSel ? null : new Set(); renderCv(box); };
+    const tun = $('[data-tplunused]', box); if (tun) tun.onclick = () => { for (const x of t.templates) if (!x.inUse) S.tplSel.add(x.id); renderCv(box); };
+    const tdel = $('[data-tpldel]', box); if (tdel) tdel.onclick = () => deleteTemplates([...S.tplSel], () => { if (S.tplSel.has(S.tpl)) { S.tpl = null; S.choice = {}; } S.tplSel = null; renderCv(box); });
     const ta = $('[data-tpladd]', box); if (ta) ta.onclick = () => addTemplateDialog(t.starters, () => renderCv(box));
     const tm = $('[data-tplmeta]', box); if (tm) tm.onclick = () => templateMetaDialog(t.template, t.templates.find(x => x.id === t.template.id), () => renderCv(box));
 
@@ -756,11 +759,12 @@ function wireBoard(root) {
 function starterGallery(starters) {
     const { esc, icon } = C;
     return `<div class="jh-starters">${starters.map(st => `<button class="jh-tpl" data-starter="${st.id}"><b>${esc(st.name)}</b><span>${esc(st.style)}</span><em>${st.contexts.map(esc).join(' · ')}</em></button>`).join('')}</div>
+        <label class="jh-check"><input type="checkbox" data-fill checked>Fill starters with my real content from Me (an agent does it; you see an example CV in that style)</label>
         <div class="r-actions"><label class="btn">${icon('upload')}Use my own .tex<input type="file" accept=".tex" data-texfile hidden></label><button class="btn pri" data-design>${icon('claude')}Design one with AI</button></div>`;
 }
 function wireGallery(root, done) {
     const { $, $$ } = C;
-    $$('[data-starter]', root).forEach(b => b.onclick = async () => { try { const t = await C.api('/api/jobs/cv/templates', { method: 'POST', body: { starter: b.dataset.starter } }); S.tpl = t.template.id; S.choice = {}; C.toast(`Added "${t.template.name}"`); done(); } catch (e) { C.toast(e.message, true); } });
+    $$('[data-starter]', root).forEach(b => b.onclick = async () => { try { const fill = !!$('[data-fill]', root)?.checked; const t = await C.api('/api/jobs/cv/templates', { method: 'POST', body: { starter: b.dataset.starter, fill } }); S.tpl = t.template.id; S.choice = {}; C.toast(fill ? `Added "${t.template.name}"; an agent is filling it from Me` : `Added "${t.template.name}"`); done(); } catch (e) { C.toast(e.message, true); } });
     const tf = $('[data-texfile]', root); if (tf) tf.onchange = async () => { const f = tf.files[0]; if (!f) return; try { const t = await C.api('/api/jobs/cv/templates', { method: 'POST', body: { tex: await f.text(), name: f.name.replace(/\.tex$/, '') } }); S.tpl = t.template.id; S.choice = {}; done(); } catch (e) { C.toast(e.message, true); } };
     const dz = $('[data-design]', root); if (dz) dz.onclick = () => designDialog();
 }
@@ -785,8 +789,22 @@ function templateMetaDialog(tpl, row, done) {
         <div class="field"><label for="tm-s">Style</label><input id="tm-s" maxlength="300" value="${esc(tpl.style || '')}"></div>
         <div class="field"><label for="tm-c">Good for (comma-separated)</label><input id="tm-c" value="${esc((tpl.contexts || []).join(', '))}" placeholder="job sites, academic, start-ups"></div>
         <label class="jh-check"><input type="checkbox" id="tm-d" ${row?.default ? 'checked' : ''}>Default template (agents use it unless told otherwise)</label>
-        <div class="buttons"><button class="danger" data-del>Delete</button><button data-dup>Duplicate</button><button class="primary" data-ok>Save</button></div>`);
+        <div class="buttons"><button class="danger" data-del>Delete</button><button data-dup>Duplicate</button><button data-fillme>Fill from my Me</button><button class="primary" data-ok>Save</button></div>`);
+    $('[data-fillme]', panel).onclick = async () => { try { await C.api(`/api/jobs/cv/templates/${tpl.id}/fill`, { method: 'POST' }); close(); C.toast('An agent is filling it from Me; the card says when it is done.'); done(); } catch (e) { C.toast(e.message, true); } };
     $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/cv/templates/${tpl.id}`, { method: 'POST', body: { name: $('#tm-n', panel).value, style: $('#tm-s', panel).value, contexts: $('#tm-c', panel).value, default: $('#tm-d', panel).checked } }); close(); done(); } catch (e) { C.toast(e.message, true); } };
     $('[data-dup]', panel).onclick = async () => { try { const t = await C.api(`/api/jobs/cv/templates/${tpl.id}/duplicate`, { method: 'POST' }); S.tpl = t.template.id; close(); done(); } catch (e) { C.toast(e.message, true); } };
-    $('[data-del]', panel).onclick = async () => { close(); if (await C.confirmDialog({ title: `Delete "${tpl.name}"?`, text: 'The template, its section versions and saved PDFs are deleted. CVs already put in application folders stay.', action: 'Delete' })) { await C.api(`/api/jobs/cv/templates/${tpl.id}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); S.tpl = null; S.choice = {}; done(); } };
+    $('[data-del]', panel).onclick = () => { close(); deleteTemplates([tpl.id], () => { S.tpl = null; S.choice = {}; done(); }); };
+}
+
+// Delete templates: at once when unused; otherwise say how each is used and ask.
+async function deleteTemplates(ids, done) {
+    const { esc, icon } = C;
+    const call = confirm => fetch('/api/jobs/cv/templates/delete', { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, confirm }) }).then(async r => ({ status: r.status, data: await r.json().catch(() => ({})) }));
+    const r = await call(false);
+    if (r.status === 200) { lastWrite = Date.now(); JC.invalidate(); C.toast(`Deleted ${r.data.deleted} template${r.data.deleted === 1 ? '' : 's'}`); return done(); }
+    if (r.status !== 409) return C.toast(r.data.error || 'Could not delete.', true);
+    const { panel, close } = C.openDialog(`<h2>${icon('trash')}Delete ${ids.length} template${ids.length === 1 ? '' : 's'}?</h2><p class="muted">${esc(r.data.error)} Their section versions and saved PDFs go with them; CVs already in application folders stay.</p>
+        <ul class="jh-dellist">${r.data.needConfirm.map(x => `<li><b>${esc(x.name)}</b><br><span class="muted">${esc(x.use.join(', '))}</span></li>`).join('')}</ul>
+        <div class="buttons"><button class="danger" data-ok>Delete</button><button data-close>Cancel</button></div>`, { size: 'small' });
+    C.$('[data-ok]', panel).onclick = async () => { const r2 = await call(true); close(); if (r2.status === 200) { lastWrite = Date.now(); JC.invalidate(); C.toast(`Deleted ${r2.data.deleted} template${r2.data.deleted === 1 ? '' : 's'}`); done(); } else C.toast(r2.data.error || 'Could not delete.', true); };
 }
