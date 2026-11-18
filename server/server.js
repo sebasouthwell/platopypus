@@ -949,15 +949,19 @@ const server = http.createServer(async (req, res) => {
                 if (jm[2] === 'delete' && method === 'POST') return send(res, 200, jobs.removeCv(jm[1]));
                 if (jm[2] === 'file' && method === 'GET') { const f = jobs.cvPath(jm[1]); return fileOut(f.file, typeOf(f.file), f.name, url.searchParams.get('download') !== '1'); }
             }
-            if (rest === 'cv' && method === 'GET') return send(res, 200, jobs.cvTemplate());
-            if (rest === 'cv/template' && method === 'POST') { const b = await body(400 * 1024); return send(res, 200, jobs.setTemplate({ tex: b.tex || undefined, name: b.name }, 'phone')); }
-            if (rest === 'cv/variant' && method === 'POST') { const b = await body(96 * 1024); return send(res, 201, jobs.addVariant(b.section, b, 'phone')); }
-            if (rest === 'cv/variant/delete' && method === 'POST') { const b = await body(); return send(res, 200, jobs.removeVariant(b.section, b.id)); }
-            if (rest === 'cv/render' && method === 'POST') { const b = await body(); return send(res, 200, { tex: jobs.renderCv(b.choice || {}) }); }
-            if (rest === 'cv/preview' && method === 'POST') { const b = await body(); return send(res, 200, await jobs.previewCv(b.choice || {})); }
-            if (rest === 'cv/preview.pdf' && method === 'GET') return fileOut(jobs.previewFile(), 'application/pdf', 'CV preview.pdf');
-            if (rest === 'cv/version' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.saveVersion(b, 'phone')); }
-            if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\.(pdf|tex)$/)) && method === 'GET') return fileOut(jobs.versionFile(jm[1], jm[2]), typeOf(`x.${jm[2]}`), `CV.${jm[2]}`, url.searchParams.get('download') !== '1');
+            const tq = url.searchParams.get('t') || undefined;
+            if (rest === 'cv' && method === 'GET') return send(res, 200, jobs.cvTemplate(tq));
+            if (rest === 'cv/templates' && method === 'POST') { const b = await body(400 * 1024); return send(res, 201, jobs.createTemplate(b, 'phone')); }
+            if ((jm = rest.match(/^cv\/templates\/(t[0-9a-f]{6})(?:\/(delete|duplicate))?$/)) && method === 'POST') { if (jm[2] === 'delete') return send(res, 200, jobs.removeTemplate(jm[1])); if (jm[2] === 'duplicate') return send(res, 201, jobs.duplicateTemplate(jm[1], 'phone')); return send(res, 200, jobs.updateTemplateMeta(jm[1], await body())); }
+            if (rest === 'cv/design' && method === 'POST') { jobs.writeBrief(); const b = await body(); const name = await jobsRunner(jobs.designPrompt(b), 'cvdesign'); jobs.log({ kind: 'cv', by: 'phone', what: 'Agent designing a CV template' }); return send(res, 201, { shell: name }); }
+            if (rest === 'cv/template' && method === 'POST') { const b = await body(400 * 1024); return send(res, 200, jobs.setTemplate({ tex: b.tex || undefined, name: b.name }, 'phone', tq)); }
+            if (rest === 'cv/variant' && method === 'POST') { const b = await body(96 * 1024); return send(res, 201, jobs.addVariant(b.section, { ...b, template: b.template || tq }, 'phone')); }
+            if (rest === 'cv/variant/delete' && method === 'POST') { const b = await body(); return send(res, 200, jobs.removeVariant(b.section, b.id, b.template || tq)); }
+            if (rest === 'cv/render' && method === 'POST') { const b = await body(); return send(res, 200, { tex: jobs.renderCv(b.choice || {}, b.template || tq) }); }
+            if (rest === 'cv/preview' && method === 'POST') { const b = await body(); return send(res, 200, await jobs.previewCv(b.choice || {}, b.template || tq)); }
+            if (rest === 'cv/preview.pdf' && method === 'GET') return fileOut(jobs.previewFile(tq), 'application/pdf', 'CV preview.pdf');
+            if (rest === 'cv/version' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.saveVersion({ ...b, template: b.template || tq }, 'phone')); }
+            if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\.(pdf|tex)$/)) && method === 'GET') return fileOut(jobs.versionFile(jm[1], jm[2], tq), typeOf(`x.${jm[2]}`), `CV.${jm[2]}`, url.searchParams.get('download') !== '1');
             if (rest === 'apps' && method === 'GET') return send(res, 200, { apps: jobs.applications().map(a => ({ ...a, folder: path.relative(config.root, a.folder) })) });
             if (rest === 'apps' && method === 'POST') { const a = jobs.createApplication(await body(), 'phone'); return send(res, 201, { ...a, folder: path.relative(config.root, a.folder) }); }
             if (rest === 'upcoming' && method === 'GET') return send(res, 200, { upcoming: jobs.upcoming(Number(url.searchParams.get('days')) || 90) });
@@ -968,7 +972,7 @@ const server = http.createServer(async (req, res) => {
                 if (op === 'files' && method === 'GET') { const f = jobs.appFiles(id); return send(res, 200, { ...f, folder: path.relative(config.root, f.folder) }); }
                 if (op === 'file' && method === 'POST') return send(res, 201, jobs.saveAppFile(id, await body(70 * 1024 * 1024)));
                 if (op === 'file' && method === 'GET') { const f = jobs.appFilePath(id, url.searchParams.get('path')); const ext = path.extname(f).toLowerCase(); const t = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }[ext] || typeOf(f); return fileOut(f, t, path.basename(f), url.searchParams.get('download') !== '1'); }
-                if (op === 'cv' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.cvForApplication(id, b.choice || {}, 'phone')); }
+                if (op === 'cv' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.cvForApplication(id, b.choice || {}, 'phone', b.template || tq)); }
             }
             return send(res, 404, { error: 'Not found.' });
         }

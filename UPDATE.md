@@ -983,6 +983,20 @@ phone's Update button. Mechanism:
   so they always reach the server. Writes to an app refresh its cache, and reads for 4 s after a write go to the server.
   The server sends ETags (304 when unchanged) on those apps' JSON reads.
 
+- **2.22.0**: A catalogue of CV templates.
+  - Each template lives in `/Jobs/cv/templates/<id>/` (`paper/main.tex`, `cv.json` with its sections, variants and
+    saved versions, `meta.json` with name, style and the contexts it suits) and opens in the LaTeX editor as workspace
+    `jobs-cv-<id>`. The single template of earlier versions moves into the catalogue on first use (variants and saved
+    PDFs kept).
+  - Built-in starters, plain article-class LaTeX with standard packages only: Classic, ATS plain, Two-column modern,
+    Academic and Project-led. Upload your own `.tex`, duplicate, rename, set the contexts, choose a default, delete.
+  - **Design one with AI**: an agent writes a new template for a style and context, fills it from confirmed Me items
+    (or placeholders), builds it to check it compiles, and fixes errors (`create_cv_template`, `update_cv_template`,
+    `build_cv_template`, `list_cv_templates`). Agent-written LaTeX may not use `\input`, `\include`, `\write18` or
+    file reads.
+  - Section suggestions, previews, versions and application CVs take a template (`?t=<id>` or `template` in the body);
+    agents use the default unless told otherwise.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

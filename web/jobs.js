@@ -5,7 +5,7 @@
 // Applications (a folder and tracker per application), Activity, Setup (what to search, keys, money assumptions).
 
 let C = null;
-const S = { meSub: 'map', pbOpt: { confirmedOnly: false, allSkills: false }, sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
+const S = { tpl: null, meSub: 'map', pbOpt: { confirmedOnly: false, allSkills: false }, sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
 const ROUTE = { realistic: 'Apply now', stretch: 'Stretch', entry: 'Way in', goal: 'Goal' };
 const STANDING = { 'in-field': 'In your field', adjacent: 'A step across', 'career change': 'A career change' };
@@ -326,40 +326,44 @@ function gapDialog(g, kinds) {
 
 // ---------- CV: template sections you swap, versions, and uploaded CVs ----------
 async function renderCv(box) {
-    const { esc, icon, $, $$ } = C; const [t, u] = await Promise.all([jget('/api/jobs/cv'), jget('/api/jobs/cvs')]);
+    const { esc, icon, $, $$ } = C; const [t, u] = await Promise.all([jget(`/api/jobs/cv${cvq()}`), jget('/api/jobs/cvs')]); if (t.template && S.tpl !== t.template.id) { S.tpl = t.template.id; }
     const cats = [...new Set(u.cvs.flatMap(c => c.categories))];
     let html = '';
     if (!t.template) {
-        html += `<div class="card jh-cvstart"><h3>Your CV as a LaTeX template</h3><p class="note">Mark each section with a line <code>% @section{Experience}</code> before it and <code>% @end</code> after it. Each section can then hold several versions (yours and AI suggestions for a job) that you swap in and build to a PDF.</p>
-            <div class="r-actions"><button class="btn pri" data-starter>${icon('file-plus')}Start from a simple template</button><label class="btn">${icon('upload')}Use my .tex file<input type="file" accept=".tex" data-texfile hidden></label></div></div>`;
+        html += `<div class="card jh-cvstart"><h3>CV templates</h3><p class="note">Keep several LaTeX CVs for different contexts, for example a plain one-page CV for job sites and an academic one for research posts. Each section can hold several versions (yours, or AI suggestions for a job) that you swap in and build to a PDF.</p>${starterGallery(t.starters)}</div>`;
     } else {
-        html += `<div class="jh-cvbar"><div><b>${esc(t.template.name)}</b><span class="muted"> · ${t.sections.length} sections</span></div>
-            <div class="r-actions"><a class="btn" href="/editor.html?ws=jobs-cv" target="_blank" rel="noopener">${icon('file-code')}Edit template</a><button class="btn" data-preview>${icon('eye')}Preview PDF</button><button class="btn pri" data-version>${icon('save')}Save as version</button></div></div>
+        html += `<div class="jh-tpls" role="list">${t.templates.map(x => `<button class="jh-tpl ${x.id === t.template.id ? 'on' : ''}" data-tpl="${x.id}" role="listitem"><b>${esc(x.name)}${x.default ? ' <span class="jh-def">default</span>' : ''}</b><span>${esc(x.style || '')}</span>${x.contexts.length ? `<em>${x.contexts.map(esc).join(' · ')}</em>` : ''}<i>${x.sections} sections · ${x.versions} saved</i></button>`).join('')}<button class="jh-tpl add" data-tpladd>${icon('plus')}<b>Add a template</b><span>Starters, your own .tex, or designed by AI</span></button></div>
+        <div class="jh-cvbar"><div><b>${esc(t.template.name)}</b><span class="muted"> · ${t.sections.length} sections</span> <button class="text-btn" data-tplmeta>Details</button></div>
+            <div class="r-actions"><a class="btn" href="/editor.html?ws=${t.template.ws}" target="_blank" rel="noopener">${icon('file-code')}Edit LaTeX</a><button class="btn" data-preview>${icon('eye')}Preview PDF</button><button class="btn pri" data-version>${icon('save')}Save as version</button></div></div>
             ${t.hasLatex ? '' : '<p class="jh-banner">LaTeX is not on this box yet, so PDFs cannot be built. Add the Research app (Apps tab) to get it.</p>'}
             <div class="jh-sections">${t.sections.map(s => { const cur = S.choice[s.name] ?? 'base'; const v = s.variants.find(x => x.id === cur); return `<div class="jh-sec ${cur === 'off' ? 'off' : ''}">
                 <div class="jh-sechead"><b>${esc(s.name)}</b><select data-sec="${esc(s.name)}" aria-label="${esc(s.name)} version">${s.variants.map(x => `<option value="${x.id}" ${cur === x.id ? 'selected' : ''}>${esc(x.label)}${x.job ? ' · for a job' : ''}${x.by && x.by !== 'phone' && x.id !== 'base' ? ' · AI' : ''}</option>`).join('')}<option value="off" ${cur === 'off' ? 'selected' : ''}>Leave out</option></select></div>
                 ${v ? `<pre class="jh-tex">${esc(v.text.length > 600 ? `${v.text.slice(0, 600)}…` : v.text)}</pre>` : ''}
                 <div class="jh-secact"><button class="text-btn" data-mine="${esc(s.name)}">Write my own version</button>${v && v.id !== 'base' ? `<button class="text-btn dim" data-delvar="${esc(s.name)}|${v.id}">Delete this version</button>` : ''}</div></div>`; }).join('')}</div>
-            ${t.versions.length ? `<h3 class="jh-h">Saved versions</h3>${t.versions.slice().reverse().map(v => `<div class="row"><div class="main"><div class="title">${esc(v.name)}</div><div class="sub muted">${esc(v.categories.join(', ') || 'no category')} · ${ago(v.at)}</div></div>${v.pdf ? `<a class="text-btn" href="/api/jobs/cv/version/${v.id}.pdf" target="_blank" rel="noopener">PDF</a>` : ''}<a class="text-btn" href="/api/jobs/cv/version/${v.id}.tex?download=1">.tex</a><button class="text-btn" data-use="${v.id}">Load</button></div>`).join('')}` : ''}`;
+            ${t.versions.length ? `<h3 class="jh-h">Saved versions</h3>${t.versions.slice().reverse().map(v => `<div class="row"><div class="main"><div class="title">${esc(v.name)}</div><div class="sub muted">${esc(v.categories.join(', ') || 'no category')} · ${ago(v.at)}</div></div>${v.pdf ? `<a class="text-btn" href="/api/jobs/cv/version/${v.id}.pdf${cvq()}" target="_blank" rel="noopener">PDF</a>` : ''}<a class="text-btn" href="/api/jobs/cv/version/${v.id}.tex${cvq() ? `${cvq()}&` : '?'}download=1">.tex</a><button class="text-btn" data-use="${v.id}">Load</button></div>`).join('')}` : ''}`;
     }
     html += `<h3 class="jh-h">CV files</h3><p class="note">Other CVs you keep (PDF or Word), sorted by the kind of job they are for.</p>
         ${cats.map(c => `<h4 class="jh-cat">${esc(c)}</h4>${u.cvs.filter(x => x.categories.includes(c)).map(cvRow).join('')}`).join('')}
         ${u.cvs.filter(x => !x.categories.length).map(cvRow).join('')}
         <div class="r-actions"><label class="btn">${icon('upload')}Add a CV file<input type="file" accept=".pdf,.doc,.docx,.odt,.md,.txt,.tex" data-cvfile hidden></label></div>`;
     box.innerHTML = html;
-    const st = $('[data-starter]', box); if (st) st.onclick = async () => { try { await C.api('/api/jobs/cv/template', { method: 'POST', body: {} }); reload(); } catch (e) { C.toast(e.message, true); } };
-    const tf = $('[data-texfile]', box); if (tf) tf.onchange = async () => { const f = tf.files[0]; if (!f) return; try { await C.api('/api/jobs/cv/template', { method: 'POST', body: { tex: await f.text(), name: f.name.replace(/\.tex$/, '') } }); reload(); } catch (e) { C.toast(e.message, true); } };
+    wireGallery(box, () => renderCv(box));
+    $$('[data-tpl]', box).forEach(x => x.onclick = () => { if (S.tpl === x.dataset.tpl) return; S.tpl = x.dataset.tpl; S.choice = {}; renderCv(box); });
+    const ta = $('[data-tpladd]', box); if (ta) ta.onclick = () => addTemplateDialog(t.starters, () => renderCv(box));
+    const tm = $('[data-tplmeta]', box); if (tm) tm.onclick = () => templateMetaDialog(t.template, t.templates.find(x => x.id === t.template.id), () => renderCv(box));
+
     $$('[data-sec]', box).forEach(x => x.onchange = () => { S.choice[x.dataset.sec] = x.value; renderCv(box); });
     $$('[data-mine]', box).forEach(x => x.onclick = () => variantDialog(t.sections.find(s => s.name === x.dataset.mine)));
-    $$('[data-delvar]', box).forEach(x => x.onclick = async () => { const [s, id] = x.dataset.delvar.split('|'); await C.api('/api/jobs/cv/variant/delete', { method: 'POST', body: { section: s, id } }).catch(e => C.toast(e.message, true)); S.choice[s] = 'base'; renderCv(box); });
+    $$('[data-delvar]', box).forEach(x => x.onclick = async () => { const [s, id] = x.dataset.delvar.split('|'); await C.api('/api/jobs/cv/variant/delete', { method: 'POST', body: { section: s, id, template: S.tpl } }).catch(e => C.toast(e.message, true)); S.choice[s] = 'base'; renderCv(box); });
     $$('[data-use]', box).forEach(x => x.onclick = () => { const v = t.versions.find(y => y.id === x.dataset.use); S.choice = { ...Object.fromEntries(Object.entries(v.choice).map(([k, val]) => [k, val === null ? 'off' : val])) }; renderCv(box); C.toast(`Loaded "${v.name}"`); });
-    const pv = $('[data-preview]', box); if (pv) pv.onclick = async () => { const w = window.open('', '_blank'); pv.disabled = true; try { const r = await C.api('/api/jobs/cv/preview', { method: 'POST', body: { choice: choice() } }); if (r.pdf) { if (w) w.location = `/api/jobs/cv/preview.pdf?t=${Date.now()}`; } else { w?.close(); C.toast(r.note || 'No PDF.', true); } } catch (e) { w?.close(); C.toast(e.message, true); } pv.disabled = false; };
+    const pv = $('[data-preview]', box); if (pv) pv.onclick = async () => { const w = window.open('', '_blank'); pv.disabled = true; try { const r = await C.api('/api/jobs/cv/preview', { method: 'POST', body: { choice: choice(), template: S.tpl } }); if (r.pdf) { if (w) w.location = `/api/jobs/cv/preview.pdf?t=${S.tpl}&r=${Date.now()}`; } else { w?.close(); C.toast(r.note || 'No PDF.', true); } } catch (e) { w?.close(); C.toast(e.message, true); } pv.disabled = false; };
     const sv = $('[data-version]', box); if (sv) sv.onclick = () => saveVersionDialog(cats);
     $$('[data-cvdef]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/cvs/${x.dataset.cvdef}`, { method: 'POST', body: { defaultFor: x.dataset.cat } }).catch(e => C.toast(e.message, true)); renderCv(box); });
     $$('[data-cvedit]', box).forEach(x => x.onclick = () => cvFileDialog(u.cvs.find(c => c.id === x.dataset.cvedit)));
     $$('[data-cvimport]', box).forEach(x => x.onclick = () => runAgent('/api/jobs/me/import', { cv: x.dataset.cvimport, template: !t.template }, `An agent is reading this CV${t.template ? '' : ' (and making your LaTeX template from it)'}. Its proposals appear under "To confirm" on the Me tab.`));
     $('[data-cvfile]', box).onchange = async e => { const f = e.target.files[0]; if (!f) return; cvFileDialog(null, f); };
 }
+const cvq = () => (S.tpl ? `?t=${S.tpl}` : '');
 const choice = () => Object.fromEntries(Object.entries(S.choice).map(([k, v]) => [k, v === 'off' ? null : v]));
 function cvRow(c) { const { esc } = C; return `<div class="row"><div class="main"><div class="title">${esc(c.name)}${(c.defaultFor || []).length ? ' <span class="jh-def">default</span>' : ''}</div><div class="sub muted">${esc(c.original)}${c.notes ? ` · ${esc(c.notes)}` : ''}</div></div><a class="text-btn" href="/api/jobs/cvs/${c.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-cvedit="${c.id}">Edit</button><button class="text-btn" data-cvimport="${c.id}">Read into Me</button></div>`; }
 function cvFileDialog(cv, file) {
@@ -380,7 +384,7 @@ function variantDialog(sec) {
         <div class="field"><label for="vr-l">Label</label><input id="vr-l" maxlength="60" placeholder="Security-focused"></div>
         <div class="field"><label for="vr-t">LaTeX</label><textarea id="vr-t" rows="14" class="mono" spellcheck="false">${esc(base.text)}</textarea></div>
         <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save version</button></div>`);
-    $('[data-ok]', panel).onclick = async () => { try { const v = await C.api('/api/jobs/cv/variant', { method: 'POST', body: { section: sec.name, label: $('#vr-l', panel).value || 'Mine', text: $('#vr-t', panel).value } }); S.choice[sec.name] = v.id; close(); reload(); } catch (e) { C.toast(e.message, true); } };
+    $('[data-ok]', panel).onclick = async () => { try { const v = await C.api('/api/jobs/cv/variant', { method: 'POST', body: { template: S.tpl, section: sec.name, label: $('#vr-l', panel).value || 'Mine', text: $('#vr-t', panel).value } }); S.choice[sec.name] = v.id; close(); reload(); } catch (e) { C.toast(e.message, true); } };
 }
 function saveVersionDialog(cats) {
     const { esc, icon, $ } = C;
@@ -388,7 +392,7 @@ function saveVersionDialog(cats) {
         <div class="field"><label for="sv-n">Name</label><input id="sv-n" maxlength="80" placeholder="Security analyst, one page"></div>
         <div class="field"><label for="sv-c">Categories</label><input id="sv-c" placeholder="${esc(cats.join(', ') || 'Security, Software')}"></div>
         <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save and build</button></div>`);
-    $('[data-ok]', panel).onclick = async e => { e.currentTarget.disabled = true; try { const v = await C.api('/api/jobs/cv/version', { method: 'POST', body: { name: $('#sv-n', panel).value, categories: $('#sv-c', panel).value, choice: choice() } }); close(); C.toast(v.note || 'Saved and built'); reload(); } catch (x) { C.toast(x.message, true); e.currentTarget.disabled = false; } };
+    $('[data-ok]', panel).onclick = async e => { e.currentTarget.disabled = true; try { const v = await C.api('/api/jobs/cv/version', { method: 'POST', body: { template: S.tpl, name: $('#sv-n', panel).value, categories: $('#sv-c', panel).value, choice: choice() } }); close(); C.toast(v.note || 'Saved and built'); reload(); } catch (x) { C.toast(x.message, true); e.currentTarget.disabled = false; } };
 }
 
 // ---------- Applications ----------
@@ -419,7 +423,7 @@ const IMG = /\.(png|jpe?g|gif|webp)$/i;
 const dkey = i => { const v = String(i.to || i.from || '').toLowerCase(); if (v === 'now' || v === 'present') return 99999; const m = v.match(/(\d{4})(?:-(\d{2}))?/); return m ? Number(m[1]) * 12 + Number(m[2] || 6) : 0; };
 async function appDialog(a0) {
     const { esc, icon, $, $$ } = C;
-    const [{ apps }, f, t] = await Promise.all([jget('/api/jobs/apps'), C.api(`/api/jobs/apps/${a0.id}/files`), jget('/api/jobs/cv')]);
+    const [{ apps }, f, t] = await Promise.all([jget('/api/jobs/apps'), C.api(`/api/jobs/apps/${a0.id}/files`), jget(`/api/jobs/cv${cvq()}`)]);
     const a = apps.find(x => x.id === a0.id) || a0; const types = S.ov.eventTypes; const today = new Date().toISOString().slice(0, 10);
     const fileUrl = rel => `/api/jobs/apps/${a.id}/file?path=${encodeURIComponent(rel)}`;
     const fileChip = rel => IMG.test(rel) ? `<a class="jh-thumb" href="${fileUrl(rel)}" target="_blank" rel="noopener"><img src="${fileUrl(rel)}" alt="${esc(rel)}" loading="lazy"></a>` : `<a class="chip" href="${fileUrl(rel)}" target="_blank" rel="noopener">${icon('file')}${esc(rel.split('/').pop())}</a>`;
@@ -468,7 +472,7 @@ async function appDialog(a0) {
     $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/apps/${a.id}`, { method: 'POST', body: { stage: $('#ap-st', panel).value, priority: $('#ap-pr', panel).value, next: $('#ap-nx', panel).value, nextDate: $('#ap-nd', panel).value, notes: $('#ap-no', panel).value } }); C.toast('Saved'); } catch (e) { C.toast(e.message, true); } };
     $('[data-files]', panel).onclick = () => { close(); C.state.filesPath = f.folder; C.go('files'); };
     $('[data-up]', panel).onchange = async e => { try { for (const fl of e.target.files) await upload(fl, /cover|cv|resume/i.test(fl.name) ? 'CV & Cover Letter' : 'Application'); reopen(); } catch (x) { C.toast(x.message, true); } };
-    const tl = $('[data-tailor]', panel); if (tl) tl.onclick = async () => { tl.disabled = true; try { const r = await C.api(`/api/jobs/apps/${a.id}/cv`, { method: 'POST', body: { choice: choice() } }); C.toast(r.note || `Saved ${r.pdf || r.tex}`); reopen(); } catch (x) { C.toast(x.message, true); tl.disabled = false; } };
+    const tl = $('[data-tailor]', panel); if (tl) tl.onclick = async () => { tl.disabled = true; try { const r = await C.api(`/api/jobs/apps/${a.id}/cv`, { method: 'POST', body: { choice: choice(), template: S.tpl } }); C.toast(r.note || `Saved ${r.pdf || r.tex}`); reopen(); } catch (x) { C.toast(x.message, true); tl.disabled = false; } };
 }
 
 // ---------- Activity ----------
@@ -510,7 +514,7 @@ async function renderSetup(box) {
 
 // Read a CV file into Me (as proposals), optionally making the LaTeX template from it.
 async function importDialog() {
-    const { esc, icon, $ } = C; const [u, t] = await Promise.all([jget('/api/jobs/cvs'), jget('/api/jobs/cv')]);
+    const { esc, icon, $ } = C; const [u, t] = await Promise.all([jget('/api/jobs/cvs'), jget(`/api/jobs/cv${cvq()}`)]);
     if (!u.cvs.length) { C.toast('Add your CV file on the CV tab first.', true); return loadJobs('cv'); }
     const { panel, close } = C.openDialog(`<h2>${icon('file-text')}Build Me from my CV</h2><p class="muted">An agent reads the CV and proposes each project, job, qualification and skill in it. You confirm them here.</p>
         <div class="field"><label for="im-cv">CV file</label><select id="im-cv">${u.cvs.map(c => `<option value="${c.id}">${esc(c.name)} · ${esc(c.original)}</option>`).join('')}</select></div>
@@ -746,4 +750,43 @@ function wireBoard(root) {
     const lit = id => { inner.classList.toggle('focus', !!id); inner.querySelectorAll('.str path').forEach(p => p.classList.toggle('on', !!id && (p.dataset.a === id || p.dataset.b === id))); inner.querySelectorAll('[data-me]').forEach(b => b.classList.toggle('on', !!id && (b.dataset.me === id || [...inner.querySelectorAll(`.str path[data-a="${id}"],.str path[data-b="${id}"]`)].some(p => p.dataset.a === b.dataset.me || p.dataset.b === b.dataset.me)))); };
     inner.querySelectorAll('[data-me]').forEach(b => { b.addEventListener('mouseenter', () => lit(b.dataset.me)); b.addEventListener('focus', () => lit(b.dataset.me)); b.addEventListener('mouseleave', () => lit(null)); b.addEventListener('blur', () => lit(null)); });
     root.querySelectorAll('[data-pbz]').forEach(b => b.onclick = () => { const f = b.dataset.pbz; if (f === 'fit') { st.z = Math.max(0.3, Math.min(1, w.clientWidth / (inner.offsetWidth + 40))); st.x = 10; st.y = 10; } else st.z = Math.max(0.25, Math.min(2.2, st.z * (f === 'in' ? 1.2 : 0.83))); apply(); });
+}
+
+// ---------- the template catalogue ----------
+function starterGallery(starters) {
+    const { esc, icon } = C;
+    return `<div class="jh-starters">${starters.map(st => `<button class="jh-tpl" data-starter="${st.id}"><b>${esc(st.name)}</b><span>${esc(st.style)}</span><em>${st.contexts.map(esc).join(' · ')}</em></button>`).join('')}</div>
+        <div class="r-actions"><label class="btn">${icon('upload')}Use my own .tex<input type="file" accept=".tex" data-texfile hidden></label><button class="btn pri" data-design>${icon('claude')}Design one with AI</button></div>`;
+}
+function wireGallery(root, done) {
+    const { $, $$ } = C;
+    $$('[data-starter]', root).forEach(b => b.onclick = async () => { try { const t = await C.api('/api/jobs/cv/templates', { method: 'POST', body: { starter: b.dataset.starter } }); S.tpl = t.template.id; S.choice = {}; C.toast(`Added "${t.template.name}"`); done(); } catch (e) { C.toast(e.message, true); } });
+    const tf = $('[data-texfile]', root); if (tf) tf.onchange = async () => { const f = tf.files[0]; if (!f) return; try { const t = await C.api('/api/jobs/cv/templates', { method: 'POST', body: { tex: await f.text(), name: f.name.replace(/\.tex$/, '') } }); S.tpl = t.template.id; S.choice = {}; done(); } catch (e) { C.toast(e.message, true); } };
+    const dz = $('[data-design]', root); if (dz) dz.onclick = () => designDialog();
+}
+function addTemplateDialog(starters, done) {
+    const { panel, close } = C.openDialog(`<h2>${C.icon('plus')}Add a CV template</h2><p class="muted">Pick a starter (placeholder content you then fill, or let an agent fill from Me), upload your own LaTeX, or have an agent design one for a context.</p>${starterGallery(starters)}<div class="buttons"><button data-close>Close</button></div>`);
+    wireGallery(panel, () => { close(); done(); });
+    const dz = panel.querySelector('[data-design]'); if (dz) dz.onclick = () => { close(); designDialog(); };
+}
+function designDialog() {
+    const { $, icon } = C;
+    const { panel, close } = C.openDialog(`<h2>${icon('claude')}Design a CV template</h2><p class="muted">An agent writes a new LaTeX template in your style, fills it from your confirmed Me (true facts only), checks it builds, and adds it to your catalogue.</p>
+        <div class="field"><label for="dz-s">Style</label><textarea id="dz-s" rows="2" placeholder="e.g. minimal, lots of white space, navy accent, skills as a compact grid"></textarea></div>
+        <div class="field"><label for="dz-c">What it is for</label><input id="dz-c" placeholder="e.g. Civil Service digital roles, or start-ups, or online applications (ATS)"></div>
+        <label class="jh-check"><input type="checkbox" id="dz-f" checked>Fill it with my real content from Me</label>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Design it</button></div>`);
+    $('[data-ok]', panel).onclick = () => { close(); runAgent('/api/jobs/cv/design', { style: $('#dz-s', panel).value, context: $('#dz-c', panel).value, fill: $('#dz-f', panel).checked }, 'An agent is designing your template. It appears in the CV tab when it has built cleanly.'); };
+}
+function templateMetaDialog(tpl, row, done) {
+    const { $, esc, icon } = C;
+    const { panel, close } = C.openDialog(`<h2>${icon('pencil')}${esc(tpl.name)}</h2>
+        <div class="field"><label for="tm-n">Name</label><input id="tm-n" maxlength="80" value="${esc(tpl.name)}"></div>
+        <div class="field"><label for="tm-s">Style</label><input id="tm-s" maxlength="300" value="${esc(tpl.style || '')}"></div>
+        <div class="field"><label for="tm-c">Good for (comma-separated)</label><input id="tm-c" value="${esc((tpl.contexts || []).join(', '))}" placeholder="job sites, academic, start-ups"></div>
+        <label class="jh-check"><input type="checkbox" id="tm-d" ${row?.default ? 'checked' : ''}>Default template (agents use it unless told otherwise)</label>
+        <div class="buttons"><button class="danger" data-del>Delete</button><button data-dup>Duplicate</button><button class="primary" data-ok>Save</button></div>`);
+    $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/cv/templates/${tpl.id}`, { method: 'POST', body: { name: $('#tm-n', panel).value, style: $('#tm-s', panel).value, contexts: $('#tm-c', panel).value, default: $('#tm-d', panel).checked } }); close(); done(); } catch (e) { C.toast(e.message, true); } };
+    $('[data-dup]', panel).onclick = async () => { try { const t = await C.api(`/api/jobs/cv/templates/${tpl.id}/duplicate`, { method: 'POST' }); S.tpl = t.template.id; close(); done(); } catch (e) { C.toast(e.message, true); } };
+    $('[data-del]', panel).onclick = async () => { close(); if (await C.confirmDialog({ title: `Delete "${tpl.name}"?`, text: 'The template, its section versions and saved PDFs are deleted. CVs already put in application folders stay.', action: 'Delete' })) { await C.api(`/api/jobs/cv/templates/${tpl.id}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); S.tpl = null; S.choice = {}; done(); } };
 }

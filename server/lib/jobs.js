@@ -54,7 +54,7 @@ export function settings() {
 export function setSettings(b = {}) {
     if (!ready()) setup();
     const s = readJson(P('.platopypus', 'jobs.json'), {}) || {};
-    for (const k of ['keywords', 'locations', 'countries', 'nationality', 'exclude', 'home', 'currency', 'agent', 'model', 'gitIdentities']) if (b[k] !== undefined) s[k] = clip(b[k], 400);
+    for (const k of ['keywords', 'locations', 'countries', 'nationality', 'exclude', 'home', 'currency', 'agent', 'model', 'gitIdentities', 'cvDefault']) if (b[k] !== undefined) s[k] = clip(b[k], 400);
     if (b.remote !== undefined) s.remote = !!b.remote; if (b.autoCpd !== undefined) s.autoCpd = !!b.autoCpd; if (b.autoRead !== undefined) s.autoRead = !!b.autoRead; if (b.autoAssess !== undefined) s.autoAssess = !!b.autoAssess; if (b.autoAssessPerDay !== undefined) s.autoAssessPerDay = Math.max(0, Math.min(50, Math.round(Number(b.autoAssessPerDay) || 0)));
     if (b.salaryMin !== undefined) { const n = Number(b.salaryMin); s.salaryMin = Number.isFinite(n) && n > 0 ? Math.round(n) : null; }
     if (Array.isArray(b.sources)) s.sources = b.sources.filter(x => SOURCES[x]);
@@ -420,23 +420,31 @@ export function overview() {
         me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, proposed: me().items.filter(i => i.status === 'proposed').length, cvs: cvs().length }, upcoming: upcoming(30).slice(0, 8), eventTypes: EVENT_TYPES };
 }
 
-// ---------- My CV: a LaTeX template with swappable sections ----------
-// The template is a .tex file whose sections are marked with comment lines:
+// ---------- CV templates: a catalogue of LaTeX CVs, each with swappable sections ----------
+// Each template is its own LaTeX CV in /Jobs/cv/templates/<id>/ (paper/main.tex, cv.json with its sections, variants and
+// saved versions, meta.json with its name, style and the contexts it suits). Sections are marked with comment lines:
 //     % @section{Experience}
 //     ...LaTeX...
 //     % @end
 // Each section keeps variants: "base" (what the template had), your own, and AI suggestions (tagged with the job they
 // were written for). A version picks one variant per section (or leaves a section out) and builds to PDF with latexmk.
-const CVD = (...x) => P('cv', ...x);
+// Starters below are plain article-class LaTeX using only standard packages, so they build on any TeX Live install.
 const SECTION_RE = /^%\s*@section\{([^}]+)\}\s*\n([\s\S]*?)^%\s*@end\s*$/gm;
-export const DEFAULT_TEX = String.raw`\documentclass[10.5pt,a4paper]{article}
-\usepackage[margin=1.6cm]{geometry}
+const TPL_RE = /^t[0-9a-f]{6}$/;
+const TROOT = (...x) => P('cv', 'templates', ...x);
+const TD = (tid, ...x) => { if (!TPL_RE.test(String(tid || ''))) throw httpError(400, 'Bad template id.'); return TROOT(tid, ...x); };
+const PRE = String.raw`\usepackage[T1]{fontenc}
 \usepackage[hidelinks]{hyperref}
-\usepackage{enumitem,titlesec}
+\usepackage{enumitem}
+\pagestyle{empty}`;
+export const STARTERS = {
+    classic: { name: 'Classic', style: 'Serif, ruled section headings, one page', contexts: ['general', 'graduate schemes'], tex: String.raw`\documentclass[10.5pt,a4paper]{article}
+\usepackage[margin=1.6cm]{geometry}
+${PRE}
+\usepackage{titlesec}
 \setlist{nosep,leftmargin=1.2em}
 \titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
 \titlespacing{\section}{0pt}{10pt}{5pt}
-\pagestyle{empty}
 \begin{document}
 % @section{Header}
 {\LARGE\bfseries Your Name}\\[2pt]
@@ -469,8 +477,186 @@ Languages: \dots \\ Tools: \dots
 \textbf{Degree} \hfill University \textbullet{} 2021--2025
 % @end
 \end{document}
-`;
-const cvState = () => readJson(CVD('cv.json'), null);
+` },
+    ats: { name: 'ATS plain', style: 'Single column, plain text headings, no tables, columns, icons or colour: reads cleanly in applicant tracking systems', contexts: ['job sites', 'large employers', 'online applications'], tex: String.raw`\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}
+${PRE}
+\setlist{nosep,leftmargin=1.4em}
+\setlength{\parindent}{0pt}
+\newcommand{\head}[1]{\par\medskip{\large\bfseries #1}\par\smallskip}
+\begin{document}
+% @section{Header}
+{\Large\bfseries Your Name}\par
+City, Country \textbar{} email@example.com \textbar{} 07000 000000 \textbar{} linkedin.com/in/you \textbar{} github.com/you
+% @end
+% @section{Summary}
+\head{Summary}
+Two or three lines with the job title you want and your strongest relevant evidence, using the words of the advert.
+% @end
+% @section{Skills}
+\head{Skills}
+Cloud: AWS, Terraform \textbar{} Languages: Python, Bash \textbar{} Tools: Git, Splunk
+% @end
+% @section{Experience}
+\head{Experience}
+\textbf{Job title}, Company, City \hfill Month Year -- Present
+\begin{itemize}
+  \item Action, scope and result with a number where you have one.
+\end{itemize}
+% @end
+% @section{Projects}
+\head{Projects}
+\textbf{Project name} \hfill Year
+\begin{itemize}
+  \item What it does, what you did, the technologies.
+\end{itemize}
+% @end
+% @section{Education}
+\head{Education}
+\textbf{Degree, grade}, University \hfill Year -- Year
+% @end
+% @section{Certifications}
+\head{Certifications}
+Certification name, issuer, year
+% @end
+\end{document}
+` },
+    twocol: { name: 'Two-column modern', style: 'Sans serif with a shaded side column for contact, skills and education', contexts: ['networking', 'tech start-ups', 'printing'], tex: String.raw`\documentclass[10pt,a4paper]{article}
+\usepackage[margin=1.2cm]{geometry}
+${PRE}
+\usepackage{xcolor}
+\definecolor{side}{HTML}{EEF1F5}\definecolor{accent}{HTML}{1F4E79}
+\renewcommand{\familydefault}{\sfdefault}
+\setlist{nosep,leftmargin=1.1em}
+\setlength{\parindent}{0pt}
+\newcommand{\head}[1]{\par\medskip{\color{accent}\large\bfseries #1}\par\vspace{2pt}{\color{accent}\hrule height 0.6pt}\vspace{4pt}}
+\begin{document}
+% @section{Header}
+{\Huge\bfseries\color{accent} Your Name}\par\vspace{2pt}
+{\large Job title you want}
+% @end
+\par\vspace{8pt}
+\noindent\colorbox{side}{\begin{minipage}[t][0.86\textheight][t]{0.30\textwidth}\vspace{4pt}
+% @section{Contact}
+\head{Contact}
+email@example.com\\ 07000 000000\\ City\\ github.com/you
+% @end
+% @section{Skills}
+\head{Skills}
+\textbf{Cloud} AWS, Terraform\\ \textbf{Code} Python, Bash\\ \textbf{Tools} Git, Splunk
+% @end
+% @section{Education}
+\head{Education}
+\textbf{Degree}\\ University\\ 2020--2025, grade
+% @end
+\end{minipage}}\hfill
+\begin{minipage}[t]{0.66\textwidth}
+% @section{Summary}
+\head{Profile}
+Two or three lines on what you do best and what you want next.
+% @end
+% @section{Experience}
+\head{Experience}
+\textbf{Role}, Company \hfill 2024--now
+\begin{itemize}
+  \item What you did, and what changed because of it.
+\end{itemize}
+% @end
+% @section{Projects}
+\head{Projects}
+\textbf{Project} \hfill Year
+\begin{itemize}
+  \item What it does, what you built, what it uses.
+\end{itemize}
+% @end
+\end{minipage}
+\end{document}
+` },
+    academic: { name: 'Academic', style: 'Education and research first: dissertation, projects, talks, teaching and service', contexts: ['PhD and research posts', 'universities', 'R&D roles'], tex: String.raw`\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}
+${PRE}
+\usepackage{titlesec}
+\setlist{nosep,leftmargin=1.3em}
+\titleformat{\section}{\large\scshape}{}{0em}{}[\vspace{-4pt}\rule{\textwidth}{0.4pt}]
+\titlespacing{\section}{0pt}{12pt}{6pt}
+\begin{document}
+% @section{Header}
+\begin{center}{\LARGE Your Name}\\[3pt] email@example.com \quad github.com/you \quad City\end{center}
+% @end
+% @section{Education}
+\section*{Education}
+\textbf{Degree}, University \hfill 2020--2025\\ Grade; notable modules.
+% @end
+% @section{Research}
+\section*{Research}
+\textbf{Dissertation title} \hfill Year\\ Question, method, findings, grade.
+% @end
+% @section{Projects}
+\section*{Selected projects}
+\textbf{Project} \hfill Year\\ Contribution and outcome.
+% @end
+% @section{Talks}
+\section*{Talks, posters and publications}
+Title, venue, year.
+% @end
+% @section{Teaching}
+\section*{Teaching and service}
+Workshops run, societies, mentoring.
+% @end
+% @section{Experience}
+\section*{Employment}
+\textbf{Role}, Organisation \hfill Years
+% @end
+% @section{Skills}
+\section*{Skills}
+Methods, languages, tools.
+% @end
+\end{document}
+` },
+    project: { name: 'Project-led', style: 'Projects first, each with its stack and result, then experience: suits portfolios and tech roles', contexts: ['software and DevOps roles', 'hackathon-heavy profiles'], tex: String.raw`\documentclass[10.5pt,a4paper]{article}
+\usepackage[margin=1.5cm]{geometry}
+${PRE}
+\usepackage{titlesec,xcolor}
+\definecolor{ink}{HTML}{2B2B2B}\definecolor{dim}{HTML}{666666}
+\renewcommand{\familydefault}{\sfdefault}
+\setlist{nosep,leftmargin=1.1em}
+\titleformat{\section}{\large\bfseries\color{ink}}{}{0em}{}
+\titlespacing{\section}{0pt}{10pt}{4pt}
+\newcommand{\stack}[1]{{\color{dim}\small #1}}
+\begin{document}
+% @section{Header}
+{\LARGE\bfseries Your Name} \hfill github.com/you \textbullet{} email@example.com
+% @end
+% @section{Summary}
+\section*{What I build}
+One line on the kind of systems you build and the impact.
+% @end
+% @section{Projects}
+\section*{Projects}
+\textbf{Project} \hfill Year\\ \stack{Python, AWS, Terraform}
+\begin{itemize}
+  \item The problem, what you built, the result (users, speed, prize).
+\end{itemize}
+% @end
+% @section{Experience}
+\section*{Experience}
+\textbf{Role}, Company \hfill 2024--now
+\begin{itemize}
+  \item Action and result.
+\end{itemize}
+% @end
+% @section{Skills}
+\section*{Skills}
+Languages \textbar{} Cloud \textbar{} Tools
+% @end
+% @section{Education}
+\section*{Education}
+\textbf{Degree}, University \hfill 2020--2025
+% @end
+\end{document}
+` },
+};
+export const DEFAULT_TEX = STARTERS.classic.tex;
 function parseTemplate(tex) {
     const sections = []; let m; SECTION_RE.lastIndex = 0;
     while ((m = SECTION_RE.exec(tex))) sections.push({ name: clip(m[1], 60), text: m[2].replace(/\s+$/, '') });
@@ -478,35 +664,70 @@ function parseTemplate(tex) {
     if (new Set(sections.map(s => s.name.toLowerCase())).size !== sections.length) throw httpError(400, 'Two sections have the same name.');
     return sections;
 }
-export function cvTemplate() {
-    const s = cvState(); if (!s) return { template: null };
-    return { template: { name: s.name, updated: s.updated }, sections: s.sections.map(x => ({ name: x.name, variants: x.variants.map(v => ({ id: v.id, label: v.label, by: v.by, job: v.job || null, at: v.at, text: v.text })) })), versions: s.versions || [], hasLatex: hasLatex() };
+// The single template of earlier versions (cv/paper, cv/cv.json, cv/versions) becomes the first catalogue entry.
+function migrateLegacy() {
+    const old = P('cv', 'paper', 'main.tex'); if (!fs.existsSync(old) || fs.existsSync(TROOT())) return;
+    const tid = id6('t'); fs.mkdirSync(TD(tid), { recursive: true });
+    for (const n of ['paper', 'cv.json', 'versions', 'preview']) { const f = P('cv', n); if (fs.existsSync(f)) fs.renameSync(f, TD(tid, n)); }
+    const s = readJson(TD(tid, 'cv.json'), {}) || {}; writeJson(TD(tid, 'meta.json'), { name: s.name || 'My CV', style: 'Your original template', contexts: [], created: Date.now(), by: 'phone' });
+    for (const d of [TROOT(), TD(tid)]) share(d); registerWs(tid);
 }
-export function setTemplate({ tex, name = 'My CV' }, by = 'phone') {
-    const t = String(tex ?? DEFAULT_TEX); if (t.length > 300_000) throw httpError(400, 'That template is too large.');
-    const parsed = parseTemplate(t); const old = cvState();
+export function templates() {
+    migrateLegacy(); let ids = []; try { ids = fs.readdirSync(TROOT()).filter(x => TPL_RE.test(x)); } catch { return []; }
+    const def = settings().cvDefault;
+    return ids.map(tid => { const m = readJson(TD(tid, 'meta.json'), {}) || {}; const s = readJson(TD(tid, 'cv.json'), {}) || {}; registerWs(tid); return { id: tid, name: m.name || s.name || 'CV', style: m.style || '', contexts: m.contexts || [], starter: m.starter || null, by: m.by, created: m.created, sections: (s.sections || []).length, versions: (s.versions || []).length, default: tid === def }; }).sort((a, b) => (b.default - a.default) || a.created - b.created);
+}
+const tidOr = tid => { if (tid && TPL_RE.test(tid)) return tid; const t = templates(); if (!t.length) throw httpError(409, 'Add a CV template first.'); return t[0].id; };
+const cvState = tid => readJson(TD(tid, 'cv.json'), null);
+export function createTemplate({ name, style = '', contexts = [], tex, starter = null }, by = 'phone') {
+    migrateLegacy(); const st = starter ? STARTERS[starter] : null; if (starter && !st) throw httpError(400, 'No such starter.');
+    const t = String(tex ?? st?.tex ?? DEFAULT_TEX); if (t.length > 300_000) throw httpError(400, 'That template is too large.');
+    if (by !== 'phone' && /\\(input|include|write18|openout|immediate|openin|read)\b/.test(t)) throw httpError(400, 'A template cannot read or write files (\\input, \\include, \\write18…).');
+    const parsed = parseTemplate(t); const tid = id6('t');
+    for (const d of [TROOT(), TD(tid), TD(tid, 'paper'), TD(tid, 'versions')]) { fs.mkdirSync(d, { recursive: true }); share(d); }
+    fs.writeFileSync(TD(tid, 'paper', 'main.tex'), t); share(TD(tid, 'paper', 'main.tex'));
+    writeJson(TD(tid, 'cv.json'), { name: clip(name || st?.name || 'CV', 80), updated: Date.now(), sections: parsed.map(p => ({ name: p.name, variants: [{ id: 'base', label: 'Original', text: p.text, by, at: Date.now() }] })), versions: [] });
+    writeJson(TD(tid, 'meta.json'), { name: clip(name || st?.name || 'CV', 80), style: clip(style || st?.style || '', 300), contexts: (Array.isArray(contexts) ? contexts : String(contexts).split(',')).map(x => clip(x, 60).trim()).filter(Boolean).slice(0, 8), starter, created: Date.now(), by });
+    registerWs(tid); log({ kind: 'cv', by, what: `CV template added: ${name || st?.name || 'CV'} (${parsed.length} sections)` });
+    return cvTemplate(tid);
+}
+export function updateTemplateMeta(tid, b) { const m = readJson(TD(tid, 'meta.json'), null); if (!m) throw httpError(404, 'No such template.'); for (const k of ['name', 'style']) if (b[k] !== undefined) m[k] = clip(b[k], k === 'name' ? 80 : 300); if (b.contexts !== undefined) m.contexts = (Array.isArray(b.contexts) ? b.contexts : String(b.contexts).split(',')).map(x => clip(x, 60).trim()).filter(Boolean).slice(0, 8); writeJson(TD(tid, 'meta.json'), m); if (b.default) setSettings({ cvDefault: tid }); return m; }
+export function duplicateTemplate(tid, by = 'phone') {
+    const m = readJson(TD(tid, 'meta.json'), {}) || {}; const tex = fs.readFileSync(TD(tid, 'paper', 'main.tex'), 'utf8');
+    const t = createTemplate({ name: `${m.name || 'CV'} (copy)`, style: m.style, contexts: m.contexts, tex }, by);
+    const src = cvState(tid); const dst = cvState(t.id); dst.sections = src.sections; writeJson(TD(t.id, 'cv.json'), dst); return cvTemplate(t.id);
+}
+export function removeTemplate(tid) { fs.rmSync(TD(tid), { recursive: true, force: true }); if (settings().cvDefault === tid) setSettings({ cvDefault: '' }); return { removed: tid }; }
+export function cvTemplate(tid0) {
+    let tid; try { tid = tidOr(tid0); } catch { return { template: null, templates: [], starters: starterList(), hasLatex: hasLatex() }; }
+    const s = cvState(tid); const m = readJson(TD(tid, 'meta.json'), {}) || {};
+    return { template: { id: tid, name: m.name || s.name, style: m.style || '', contexts: m.contexts || [], updated: s.updated, ws: `jobs-cv-${tid}` }, templates: templates(), starters: starterList(), sections: s.sections.map(x => ({ name: x.name, variants: x.variants.map(v => ({ id: v.id, label: v.label, by: v.by, job: v.job || null, at: v.at, text: v.text })) })), versions: s.versions || [], hasLatex: hasLatex() };
+}
+const starterList = () => Object.entries(STARTERS).map(([k, v]) => ({ id: k, name: v.name, style: v.style, contexts: v.contexts }));
+// Replacing the LaTeX of a template (upload): its variants for sections that still exist are kept.
+export function setTemplate({ tex, name }, by = 'phone', tid0) {
+    if (!tid0 && !templates().length) return createTemplate({ name: name || 'My CV', tex }, by);
+    const tid = tidOr(tid0); const t = String(tex ?? DEFAULT_TEX); if (t.length > 300_000) throw httpError(400, 'That template is too large.');
+    const parsed = parseTemplate(t); const old = cvState(tid);
     const sections = parsed.map(p => { const prev = old?.sections.find(x => x.name.toLowerCase() === p.name.toLowerCase()); const base = { id: 'base', label: 'Original', text: p.text, by, at: Date.now() }; return { name: p.name, variants: prev ? [base, ...prev.variants.filter(v => v.id !== 'base')] : [base] }; });
-    fs.mkdirSync(CVD('versions'), { recursive: true }); share(CVD()); share(CVD('versions'));
-    fs.mkdirSync(CVD('paper'), { recursive: true }); share(CVD('paper')); fs.writeFileSync(CVD('paper', 'main.tex'), t); share(CVD('paper', 'main.tex'));
-    writeJson(CVD('cv.json'), { name: clip(name, 80), updated: Date.now(), sections, versions: old?.versions || [] });
-    log({ kind: 'cv', by, what: `CV template ${old ? 'replaced' : 'set'}: ${parsed.length} sections (${parsed.map(p => p.name).join(', ')})` });
-    return cvTemplate();
+    fs.writeFileSync(TD(tid, 'paper', 'main.tex'), t); share(TD(tid, 'paper', 'main.tex'));
+    writeJson(TD(tid, 'cv.json'), { ...old, name: clip(name || old?.name || 'CV', 80), updated: Date.now(), sections });
+    if (name) updateTemplateMeta(tid, { name });
+    log({ kind: 'cv', by, what: `CV template replaced: ${parsed.length} sections` }); return cvTemplate(tid);
 }
-export function addVariant(section, { label, text, job = null }, by = 'phone') {
-    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
+export function addVariant(section, { label, text, job = null, template } = {}, by = 'phone') {
+    const tid = tidOr(template); const s = cvState(tid);
     const sec = s.sections.find(x => x.name.toLowerCase() === String(section).toLowerCase()); if (!sec) throw httpError(404, `No section "${section}". Sections: ${s.sections.map(x => x.name).join(', ')}.`);
     const t = String(text || '').replace(/\s+$/, ''); if (t.length < 3) throw httpError(400, 'The variant needs some LaTeX.'); if (t.length > 40_000) throw httpError(400, 'Keep a section under 40 000 characters.');
-    if (/\\(input|include|write18|openout|immediate)\b/.test(t)) throw httpError(400, 'A section cannot read or write files (\\input, \\include, \\write18…).');
+    if (/\\(input|include|write18|openout|immediate|openin|read)\b/.test(t)) throw httpError(400, 'A section cannot read or write files (\\input, \\include, \\write18…).');
     const v = { id: id6('v'), label: clip(label || (job ? 'Suggested' : 'Mine'), 60), text: t, by, job: job || null, at: Date.now() };
-    sec.variants.push(v); s.updated = Date.now(); writeJson(CVD('cv.json'), s);
-    log({ kind: 'cv', by, what: `New ${sec.name} variant: ${v.label}${job ? ` (for a job)` : ''}` });
-    return v;
+    sec.variants.push(v); s.updated = Date.now(); writeJson(TD(tid, 'cv.json'), s);
+    log({ kind: 'cv', by, what: `New ${sec.name} variant: ${v.label}${job ? ' (for a job)' : ''}` }); return v;
 }
-export function removeVariant(section, id) { const s = cvState(); const sec = s?.sections.find(x => x.name.toLowerCase() === String(section).toLowerCase()); if (!sec) throw httpError(404, 'No such section.'); if (id === 'base') throw httpError(400, 'The original stays; replace the template to change it.'); sec.variants = sec.variants.filter(v => v.id !== id); writeJson(CVD('cv.json'), s); return { removed: id }; }
+export function removeVariant(section, id, tid0) { const tid = tidOr(tid0); const s = cvState(tid); const sec = s?.sections.find(x => x.name.toLowerCase() === String(section).toLowerCase()); if (!sec) throw httpError(404, 'No such section.'); if (id === 'base') throw httpError(400, 'The original stays; edit the template to change it.'); sec.variants = sec.variants.filter(v => v.id !== id); writeJson(TD(tid, 'cv.json'), s); return { removed: id }; }
 // Render a choice of variants ({section: variantId|null}) into a complete .tex document.
-export function renderCv(choice = {}) {
-    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
-    const tex = fs.readFileSync(CVD('paper', 'main.tex'), 'utf8');
+export function renderCv(choice = {}, tid0) {
+    const tid = tidOr(tid0); const s = cvState(tid); const tex = fs.readFileSync(TD(tid, 'paper', 'main.tex'), 'utf8');
     return tex.replace(SECTION_RE, (all, name) => {
         const sec = s.sections.find(x => x.name.toLowerCase() === name.trim().toLowerCase()); if (!sec) return all;
         const pick = Object.prototype.hasOwnProperty.call(choice, sec.name) ? choice[sec.name] : 'base';
@@ -516,21 +737,23 @@ export function renderCv(choice = {}) {
     });
 }
 function hasLatex() { return ['/usr/bin/latexmk', '/usr/local/bin/latexmk'].some(f => fs.existsSync(f)); }
-// The template is edited in the LaTeX editor (workspace "jobs-cv"). After a save, the "Original" variant of each section
-// follows the file, sections that disappeared are dropped, and new ones appear.
-export function syncTemplate() {
-    const s = cvState(); if (!s) return; const parsed = parseTemplate(fs.readFileSync(CVD('paper', 'main.tex'), 'utf8'));
+// Each template is edited in the LaTeX editor (workspace "jobs-cv-<id>"). After a save, the "Original" variant of each
+// section follows the file, sections that disappeared are dropped, and new ones appear.
+export function syncTemplate(tid) {
+    const s = cvState(tid); if (!s) return; const parsed = parseTemplate(fs.readFileSync(TD(tid, 'paper', 'main.tex'), 'utf8'));
     s.sections = parsed.map(p => { const prev = s.sections.find(x => x.name.toLowerCase() === p.name.toLowerCase()); const base = { id: 'base', label: 'Original', text: p.text, by: 'phone', at: Date.now() }; return { name: p.name, variants: prev ? [base, ...prev.variants.filter(v => v.id !== 'base')] : [base] }; });
-    s.updated = Date.now(); writeJson(CVD('cv.json'), s);
+    s.updated = Date.now(); writeJson(TD(tid, 'cv.json'), s);
 }
+const registered = new Set();
+function registerWs(tid) { if (registered.has(tid)) return; registered.add(tid); ws.register({ id: `jobs-cv-${tid}`, title: 'CV template', caps: ['build', 'spell'], dir: () => (fs.existsSync(TD(tid, 'paper', 'main.tex')) ? TD(tid) : null), afterWrite: rel => { if (rel === 'main.tex') syncTemplate(tid); } }); }
 // Build a choice into <outDir>/<base>.pdf: rendered into a scratch paper folder, built as the agent user (LaTeX is code).
-export async function buildCv(choice, outDir, base = 'CV') {
-    const tex = renderCv(choice); fs.mkdirSync(outDir, { recursive: true }); share(outDir);
+export async function buildCv(choice, outDir, base = 'CV', tid0) {
+    const tid = tidOr(tid0); const tex = renderCv(choice, tid); fs.mkdirSync(outDir, { recursive: true }); share(outDir);
     const tf = path.join(outDir, `${base}.tex`); fs.writeFileSync(tf, tex); share(tf);
     if (!hasLatex()) return { tex: tf, pdf: null, note: 'LaTeX is not installed: the .tex is saved. Add the Research app to build PDFs.' };
-    const scratch = CVD('.build', crypto.randomBytes(4).toString('hex'));
-    fs.mkdirSync(path.join(scratch, 'paper'), { recursive: true }); for (const d of [CVD('.build'), scratch, path.join(scratch, 'paper')]) share(d);
-    for (const f of fs.readdirSync(CVD('paper'))) if (/\.(cls|sty|png|jpg|jpeg|pdf|bib)$/i.test(f) && f !== 'main.pdf') { fs.copyFileSync(CVD('paper', f), path.join(scratch, 'paper', f)); share(path.join(scratch, 'paper', f)); }
+    const scratch = TD(tid, '.build', crypto.randomBytes(4).toString('hex'));
+    fs.mkdirSync(path.join(scratch, 'paper'), { recursive: true }); for (const d of [TD(tid, '.build'), scratch, path.join(scratch, 'paper')]) share(d);
+    for (const f of fs.readdirSync(TD(tid, 'paper'))) if (/\.(cls|sty|png|jpg|jpeg|pdf|bib)$/i.test(f) && f !== 'main.pdf') { fs.copyFileSync(TD(tid, 'paper', f), path.join(scratch, 'paper', f)); share(path.join(scratch, 'paper', f)); }
     fs.writeFileSync(path.join(scratch, 'paper', 'main.tex'), tex); share(path.join(scratch, 'paper', 'main.tex'));
     try {
         const r = await ws.buildPaper(scratch); const pdf = path.join(scratch, 'paper', 'build', 'main.pdf');
@@ -538,23 +761,29 @@ export async function buildCv(choice, outDir, base = 'CV') {
         const out = path.join(outDir, `${base}.pdf`); fs.copyFileSync(pdf, out); share(out); return { tex: tf, pdf: out, pages: r.pages };
     } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 }
-export async function saveVersion({ name, choice, categories = [] }, by = 'phone') {
-    const s = cvState(); if (!s) throw httpError(409, 'Set up your CV template first.');
+export async function saveVersion({ name, choice, categories = [], template }, by = 'phone') {
+    const tid = tidOr(template); const s = cvState(tid);
     const n = clip(name, 80); if (n.length < 2) throw httpError(400, 'Name the version.');
-    const id = id6('cv'); const r = await buildCv(choice || {}, CVD('versions', id), 'CV');
+    const id = id6('cv'); const r = await buildCv(choice || {}, TD(tid, 'versions', id), 'CV', tid);
     const v = { id, name: n, choice: choice || {}, categories: [...new Set((Array.isArray(categories) ? categories : String(categories).split(',')).map(x => clip(x, 40)).filter(Boolean))], pdf: !!r.pdf, at: Date.now(), by };
-    s.versions = [...(s.versions || []), v]; writeJson(CVD('cv.json'), s); log({ kind: 'cv', by, what: `CV version saved: ${n}` });
+    s.versions = [...(s.versions || []), v]; writeJson(TD(tid, 'cv.json'), s); log({ kind: 'cv', by, what: `CV version saved: ${n}` });
     return { ...v, note: r.note || null };
 }
-export function versionFile(id, ext = 'pdf') { const f = CVD('versions', id, `CV.${ext === 'tex' ? 'tex' : 'pdf'}`); if (!/^cv[0-9a-f]{6}$/.test(id) || !fs.existsSync(f)) throw httpError(404, 'No such file.'); return f; }
-export async function previewCv(choice) { const dir = CVD('preview'); const r = await buildCv(choice || {}, dir, 'preview'); return { pdf: !!r.pdf, note: r.note || null }; }
-export const previewFile = () => { const f = CVD('preview', 'preview.pdf'); if (!fs.existsSync(f)) throw httpError(404, 'No preview yet.'); return f; };
-// Put a tailored CV into an application's "CV & Cover Letter" folder.
-export async function cvForApplication(appId, choice, by = 'phone') {
+export function versionFile(id, ext = 'pdf', tid0) { const f = TD(tidOr(tid0), 'versions', id, `CV.${ext === 'tex' ? 'tex' : 'pdf'}`); if (!/^cv[0-9a-f]{6}$/.test(id) || !fs.existsSync(f)) throw httpError(404, 'No such file.'); return f; }
+export async function previewCv(choice, tid0) { const tid = tidOr(tid0); const r = await buildCv(choice || {}, TD(tid, 'preview'), 'preview', tid); return { pdf: !!r.pdf, note: r.note || null }; }
+export const previewFile = tid0 => { const f = TD(tidOr(tid0), 'preview', 'preview.pdf'); if (!fs.existsSync(f)) throw httpError(404, 'No preview yet.'); return f; };
+// Put a CV built from a template into an application's "CV & Cover Letter" folder.
+export async function cvForApplication(appId, choice, by = 'phone', tid0) {
     const a = applications().find(x => x.id === appId); if (!a) throw httpError(404, 'No such application.');
-    const r = await buildCv(choice || {}, path.join(a.folder, 'CV & Cover Letter'), 'CV');
+    const r = await buildCv(choice || {}, path.join(a.folder, 'CV & Cover Letter'), 'CV', tid0);
     updateApplication(appId, { cv: 'tailored' }, by); log({ kind: 'cv', by, what: `Tailored CV made for ${a.title}${a.company ? ` at ${a.company}` : ''}` });
     return { tex: path.relative(a.folder, r.tex), pdf: r.pdf ? path.relative(a.folder, r.pdf) : null, note: r.note || null };
+}
+export function designPrompt({ style, context, fill = true }) {
+    return `Design a new LaTeX CV template for me. Style: ${clip(style, 600) || 'clean and modern'}. For: ${clip(context, 300) || 'general applications'}.\n` +
+        `Rules: a complete article-class document that builds with pdflatex/latexmk using only standard TeX Live packages (geometry, hyperref, enumitem, titlesec, xcolor, tabularx, array, multicol, parskip, fontenc); no \\input, \\include, shell escape, external files, images or fonts that may be missing. Mark every replaceable block with a line "% @section{Name}" before it and "% @end" after it (Header, Summary, Experience, Projects, Skills, Education, plus any that suit the style). Keep it to one or two pages; if the context is online applications, keep it ATS-friendly (single column, real text, no tables for layout).\n` +
+        (fill ? `Fill it with my real content: read me_summary (confirmed items only; prefer recent, strongest evidence) and use true facts only, dated.\n` : `Use clear placeholder content.\n`) +
+        `Save it with create_cv_template (name, style, contexts, tex), then build_cv_template with the id it returns; if the build fails, fix the LaTeX and save again (update_cv_template). Finish with one line: the template's name and what it is for.`;
 }
 
 // ---------- keys: saved straight into the Vault (general scope) ----------
@@ -613,7 +842,7 @@ export function setWishPlan(id, b) {
 export function finishWish(id, { status = 'done', summary = '' } = {}) { const list = wishes(); const w = list.find(x => x.id === id); if (!w) throw httpError(404, 'No such wish.'); w.status = status; w.summary = clip(summary, 2000); w.finished = Date.now(); writeJson(P('wishes.json'), { wishes: list }); return w; }
 export function importPrompt(cv, { template = false } = {}) {
     return `Build my Me map from my CV "${cv.name}" (CV file id ${cv.id}).\n1. read_cv (id ${cv.id}) and me_summary.\n2. Always date items: from and to as YYYY-MM (or YYYY), "now" if ongoing, inferred from git history, document dates, the module or academic year, or file dates; say in why how you dated it. For every project, job or role, qualification, education, skill and achievement in it, call propose_me with what the CV says (title, org, dates, a summary in my words, tags, evidence such as numbers and results, level only if the CV makes it clear) and sources [{"title": "CV: ${cv.name}"}]. Then link related items with link_me (skills and achievements to the role or project they came from). Do not invent or embellish; things the CV implies but does not state go in "why" with confidence "low".\n` +
-        (template ? `3. If cv_sections says there is no template yet, write my CV as a clean one- or two-page LaTeX article (geometry, enumitem, titlesec, hyperref only; no other packages, no \\input) with each section marked by a line "% @section{Name}" before it and "% @end" after it, using exactly the CV's content, and save it with set_cv_template.\n` : '') +
+        (template ? `3. Write my CV as a clean one- or two-page LaTeX article (geometry, enumitem, titlesec, hyperref only; no other packages, no \\input) with each section marked by a line "% @section{Name}" before it and "% @end" after it, using exactly the CV's content, and save it with create_cv_template.\n` : '') +
         `Finish with a short summary: how many items you proposed, and anything you could not read. I will confirm each item on the Me tab.`;
 }
 export function findMePrompt({ name, links = '', hints = '' }) {
@@ -671,8 +900,12 @@ kit.registerApp('jobs', {
         { name: 'mark_code_read', description: 'Mark uploaded code as read into Me; this deletes the code copy (the summary stays).', inputSchema: kit.obj({ id: kit.str('Code id') }, ['id']), run: (c, a) => { markCodeRead(a.id); return 'ok'; } },
         { name: 'cv_files', description: 'The person\'s uploaded CV files (id, name, categories).', inputSchema: kit.obj({}), run: () => cvs().map(x => `${x.id} ${x.name} (${x.original})${x.categories.length ? ` [${x.categories.join(', ')}]` : ''}`).join('\n') || 'No CV files.' },
         { name: 'read_cv', description: 'The text of an uploaded CV file.', inputSchema: kit.obj({ id: kit.str('CV file id') }, ['id']), run: async (c, a) => cvText(a.id) },
-        { name: 'set_cv_template', description: 'Create the person\'s LaTeX CV template (only when there is none yet). Mark each section with a line "% @section{Name}" before it and "% @end" after it.', inputSchema: kit.obj({ tex: kit.str('The whole .tex document'), name: kit.str('Name for it') }, ['tex']),
-            run: (c, a, by) => { if (cvTemplate().template) throw httpError(409, 'There is already a template: suggest section variants instead.'); if (/\\(input|include|write18|openout|immediate)\b/.test(a.tex)) throw httpError(400, 'No \\input, \\include or \\write18.'); const t = setTemplate({ tex: a.tex, name: a.name || 'My CV' }, by); return `Template saved: ${t.sections.map(x => x.name).join(', ')}`; } },
+        { name: 'create_cv_template', description: 'Add a CV template to the person\'s catalogue: a complete LaTeX document with every replaceable block marked "% @section{Name}" … "% @end". Returns its id.', inputSchema: kit.obj({ name: kit.str('Name'), style: kit.str('The look, in a sentence'), contexts: kit.arr('What it suits, e.g. "job sites", "academic"'), tex: kit.str('The whole .tex document') }, ['name', 'tex']),
+            run: (c, a, by) => { const t = createTemplate(a, by); return `Template ${t.template.id} saved: ${t.sections.map(x => x.name).join(', ')}`; } },
+        { name: 'update_cv_template', description: 'Replace the LaTeX of a template (keeps section variants whose sections still exist).', inputSchema: kit.obj({ template: kit.str('Template id'), tex: kit.str('The whole .tex document') }, ['template', 'tex']),
+            run: (c, a, by) => { if (/\\(input|include|write18|openout|immediate|openin|read)\b/.test(a.tex)) throw httpError(400, 'No \\input, \\include or \\write18.'); const t = setTemplate({ tex: a.tex }, by, a.template); return `Updated: ${t.sections.map(x => x.name).join(', ')}`; } },
+        { name: 'build_cv_template', description: 'Build a template (its original sections) to check it compiles. Returns ok and pages, or the LaTeX errors.', inputSchema: kit.obj({ template: kit.str('Template id') }, ['template']),
+            run: async (c, a) => { try { const r = await previewCv({}, a.template); return r.pdf ? 'Built fine.' : r.note; } catch (e) { return `Build failed: ${e.message}`; } } },
         { name: 'set_search', description: 'Set what the hunt looks for.', inputSchema: kit.obj({ keywords: kit.str('Job-site search words'), locations: kit.str('Places, comma-separated'), remote: kit.bool('Include remote jobs'), salaryMin: kit.num('Lowest yearly salary'), exclude: kit.str('Words that rule a job out, comma-separated') }),
             run: (c, a) => { const s = setSettings(a); return `Search: "${s.keywords}" in ${s.locations || 'anywhere'}${s.remote ? ' (and remote)' : ''}${s.salaryMin ? `, from ${s.salaryMin}` : ''}`; } },
         { name: 'hunt', description: 'Run the job-site search now (Adzuna, Reed, Jooble when keys are set; Remotive, Arbeitnow always). New jobs land on the board.', inputSchema: kit.obj({}), run: async (c, a, by) => hunt(by) },
@@ -690,9 +923,10 @@ kit.registerApp('jobs', {
         { name: 'save_money', description: 'Save the money line for a job (yearly, in the job\'s local currency): gross, take-home, living costs where the job is, what is left, and your assumptions (tax rules and year, sources).', inputSchema: kit.obj({ id: kit.str('Job id'), currency: kit.str('ISO code: GBP, EUR, CHF…'), gross: kit.num('Gross'), takeHome: kit.num('After tax, NI, loan, pension'), living: kit.num('Rent, bills, council tax, food, travel'), left: kit.num('Left over'), assumptions: kit.str('How you worked it out and the sources') }, ['id']),
             run: (c, a, by) => { const j = setMoney(a.id, a, by); return `${jobLine(j)} · left ${j.money.left ?? '?'}`; } },
         { name: 'add_gap', description: 'Note something jobs ask for that Me has no evidence of, for the person to answer.', inputSchema: kit.obj({ text: kit.str('The gap, as a question to the person'), job: kit.str('Job id') }, ['text']), run: (c, a, by) => addGap(a, by) },
-        { name: 'cv_sections', description: 'The person\'s CV template sections and the variants of each (ids and labels).', inputSchema: kit.obj({}), run: () => { const t = cvTemplate(); if (!t.template) return 'No CV template yet.'; return t.sections.map(s => `${s.name}: ${s.variants.map(v => `${v.id} "${v.label}"${v.job ? ` (for ${v.job})` : ''}`).join(', ')}`).join('\n'); } },
-        { name: 'cv_section_text', description: 'The LaTeX of one CV section variant.', inputSchema: kit.obj({ section: kit.str('Section name'), variant: kit.str('Variant id (default: base)') }, ['section']), run: (c, a) => { const t = cvTemplate(); const s = t.sections?.find(x => x.name.toLowerCase() === a.section.toLowerCase()); if (!s) throw httpError(404, 'No such section.'); return (s.variants.find(v => v.id === (a.variant || 'base')) || s.variants[0]).text; } },
-        { name: 'suggest_cv_section', description: 'Suggest a rewrite of one CV section (LaTeX, same style as the template) for a job. Only true things from Me. The person picks it in the CV builder.', inputSchema: kit.obj({ section: kit.str('Section name'), label: kit.str('Short label'), text: kit.str('The LaTeX'), job: kit.str('Job id it is for') }, ['section', 'text']),
+        { name: 'list_cv_templates', description: 'The person\'s CV templates (id, name, style, the contexts each suits) and the starters available.', inputSchema: kit.obj({}), run: () => { const t = templates(); return `${t.map(x => `${x.id} ${x.name}${x.default ? ' [default]' : ''}: ${x.style}${x.contexts.length ? ` (for ${x.contexts.join(', ')})` : ''}`).join('\n') || 'No templates yet.'}\nStarters: ${Object.entries(STARTERS).map(([k, v]) => `${k} (${v.name})`).join(', ')}`; } },
+        { name: 'cv_sections', description: 'A CV template\'s sections and the variants of each (ids and labels). Default template unless one is given.', inputSchema: kit.obj({ template: kit.str('Template id (optional)') }), run: (c, a) => { const t = cvTemplate(a.template); if (!t.template) return 'No CV template yet.'; return `${t.template.id} ${t.template.name}\n` + t.sections.map(s => `${s.name}: ${s.variants.map(v => `${v.id} "${v.label}"${v.job ? ` (for ${v.job})` : ''}`).join(', ')}`).join('\n'); } },
+        { name: 'cv_section_text', description: 'The LaTeX of one CV section variant.', inputSchema: kit.obj({ section: kit.str('Section name'), variant: kit.str('Variant id (default: base)'), template: kit.str('Template id (optional)') }, ['section']), run: (c, a) => { const t = cvTemplate(a.template); const s = t.sections?.find(x => x.name.toLowerCase() === a.section.toLowerCase()); if (!s) throw httpError(404, 'No such section.'); return (s.variants.find(v => v.id === (a.variant || 'base')) || s.variants[0]).text; } },
+        { name: 'suggest_cv_section', description: 'Suggest a rewrite of one CV section (LaTeX, same style as the template) for a job. Only true things from Me. The person picks it in the CV builder.', inputSchema: kit.obj({ section: kit.str('Section name'), label: kit.str('Short label'), text: kit.str('The LaTeX'), job: kit.str('Job id it is for'), template: kit.str('Template id (optional; default template otherwise)') }, ['section', 'text']),
             run: (c, a, by) => addVariant(a.section, a, by) },
         { name: 'save_draft', description: 'Save a draft for a job as Markdown (cover-letter, application-answers, interview-prep, thank-you, offer-checklist, or another short name). Also copied into the job\'s application folder if there is one.', inputSchema: kit.obj({ job: kit.str('Job id'), name: kit.str('Short name, e.g. cover-letter'), text: kit.str('The draft, in Markdown') }, ['job', 'name', 'text']),
             run: (c, a, by) => saveDraft(a.job, a.name, a.text, by) },
@@ -710,7 +944,7 @@ kit.registerApp('jobs', {
 });
 
 // ---------- the CV template as an editor workspace ----------
-ws.register({ id: 'jobs-cv', title: 'CV template', caps: ['build', 'spell'], dir: () => (fs.existsSync(CVD('paper', 'main.tex')) ? CVD() : null), afterWrite: rel => { if (rel === 'main.tex') syncTemplate(); } });
+try { templates(); } catch { /* not set up yet */ }   // registers each template's editor workspace
 
 // ---------- each job as a project: stages, checklists, drafts ----------
 // The stages follow the playbook (deploy/jobs/playbook.md, editable under AI prompts). Each stage has a checklist the

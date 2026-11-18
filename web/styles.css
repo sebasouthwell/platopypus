@@ -1533,3 +1533,11 @@ input[type=month] { color-scheme: dark; }
 .jh-bulk .t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; } .jh-bulk .t .muted { font-size: 12.5px !important; margin: 0 !important; }
 .jh-bulk .b { display: flex; flex-wrap: wrap; gap: 6px; } .jh-bulk .b .btn { min-height: 42px; padding: 0 12px; font-size: 13.5px; } .jh-bulk .b em { font-style: normal; font-family: var(--mono); font-size: 12px; opacity: .75; }
 .jh-bulk .srcs { display: flex; gap: 6px; flex-wrap: wrap; } .jh-bulk .srcs select { flex: 1; min-width: 180px; min-height: 42px; } .jh-bulk .srcs .btn { min-height: 42px; }
+
+.jh-tpls, .jh-starters { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 12px; padding: 2px 16px 4px; }
+.jh-starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); overflow: visible; margin: 10px 0; padding: 0; }
+.jh-tpls::-webkit-scrollbar { display: none; }
+.jh-tpl { flex: 0 0 min(72%, 240px); display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 12px; background: var(--hull); border: 1px solid var(--rail); border-radius: 14px; min-height: 96px; }
+.jh-tpl b { font-size: 14.5px; } .jh-tpl span { font-size: 12.5px; color: var(--mist); line-height: 1.35; } .jh-tpl em { font-style: normal; font-size: 11.5px; color: var(--dock); } .jh-tpl i { font-style: normal; font-size: 11.5px; color: var(--dim); margin-top: auto; }
+.jh-tpl.on { border-color: var(--brass); background: rgba(240,184,64,.07); box-shadow: inset 0 0 0 1px var(--brass); }
+.jh-tpl.add { border-style: dashed; align-items: flex-start; } .jh-tpl.add svg.i { color: var(--brass); }
