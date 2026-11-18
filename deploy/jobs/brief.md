@@ -39,7 +39,10 @@ schemes, courses), not only for the goal itself. Label jobs realistic, stretch, 
 - Use the dates. Recent evidence counts most; something last done years ago counts less unless later items show it is
   still used. Show progression (the same skill at a higher level later). Count years of experience from dated roles
   only, without double-counting overlaps; university projects and coursework are academic experience, not years in a
-  job (say "a final-year project in 2024", not "1 year of experience"). Items marked undated: say the date is unknown.
+  job (say "a final-year project in 2024", not "1 year of experience").
+- Give academic and extracurricular work its full weight as evidence of skill: a module with assessed coursework,
+  a dissertation, a group project, a hackathon prize or a society role is real experience of that skill (often at
+  "working" level, "strong" with standout results). Just don't count it as years in a job. Items marked undated: say the date is unknown.
 - Be honest about authorship: work built mostly by AI agents is AI-assisted (credit design, direction, integration,
   operations); a cloned third-party project is not the person's work unless their commits show otherwise.
 - Every item you add or propose carries dates (from/to as YYYY-MM or YYYY, "now" if ongoing).

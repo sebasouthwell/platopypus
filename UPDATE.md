@@ -947,6 +947,19 @@ phone's Update button. Mechanism:
   (credited as design, direction, integration and operations rather than hand-written code), and third-party projects
   with none of the person's commits add nothing. The brief says the same.
 
+- **2.21.0**: Me, reorganised.
+  - Sub-tabs: **Board**, **Items**, **To confirm**, **Sources** (CV import, find me online, documents, code) and
+    **Notes** (notes and gaps), each with its own actions.
+  - **The Board** is a pinboard like Conspiracy's: paper cards on a dark board in timeline columns (only years with
+    something in them; long gaps collapse to "…"; busy years wrap into a grid; undated items at the end), with lanes for
+    education, roles, projects, achievements, qualifications and interests. Skills are pins below, strung in red to the
+    cards they are linked to (the most-linked 48, or all). Drag to pan, scroll or pinch to zoom, fit and zoom buttons;
+    hovering or focusing a card lights up its strings. Proposed items are dashed; "Confirmed only" hides them.
+  - **Find me online spirals**: from the links given, it follows what each confirmed page links to (GitHub and
+    repositories, portfolio pages, PDFs, hackathon and society pages), about 3 hops, and records the trail in `why`.
+  - The brief gives academic and extracurricular work (modules, coursework, dissertations, group projects,
+    hackathons, society roles) full weight as evidence of skill, while not counting it as years in a job.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

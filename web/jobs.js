@@ -5,7 +5,7 @@
 // Applications (a folder and tracker per application), Activity, Setup (what to search, keys, money assumptions).
 
 let C = null;
-const S = { sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
+const S = { meSub: 'map', pbOpt: { confirmedOnly: false, allSkills: false }, sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
 const ROUTE = { realistic: 'Apply now', stretch: 'Stretch', entry: 'Way in', goal: 'Goal' };
 const STANDING = { 'in-field': 'In your field', adjacent: 'A step across', 'career change': 'A career change' };
@@ -205,17 +205,20 @@ async function renderMe(box) {
     const { esc, icon, $, $$ } = C; const [me, dl, cd] = await Promise.all([C.api('/api/jobs/me'), C.api('/api/jobs/docs'), C.api('/api/jobs/code')]); const kinds = S.ov.kinds;
     const gaps = me.gaps.filter(g => g.status === 'open'); const props = me.items.filter(i => i.status === 'proposed');
     box.innerHTML = `
-        <p class="r-sub">Everything you have done, in one place: agents check every job against it, and ask you for examples when a job wants something it cannot find here.</p>
-        <div class="jh-meacts"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button><button class="btn" data-import>${icon('file-text')}Build from my CV</button><button class="btn" data-findme>${icon('globe')}Find me online</button>${me.items.some(i => !i.from && !i.to) ? `<button class="btn" data-dates>${icon('clock')}Date my items (${me.items.filter(i => !i.from && !i.to).length})</button>` : ''}
-          <div class="seg jh-meview">${[['map', 'Map'], ['list', 'List']].map(([k, l]) => `<button data-mv="${k}" class="${S.meView === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+        <div class="jh-mesub" role="tablist">${[['map', 'Board'], ['items', `Items <em>${me.items.filter(i => i.status !== 'proposed').length}</em>`], ['confirm', `To confirm${props.length ? ` <em class="hot">${props.length}</em>` : ''}`], ['sources', 'Sources'], ['notes', `Notes${gaps.length ? ` <em>${gaps.length}</em>` : ''}`]].map(([k, l]) => `<button data-ms="${k}" class="${S.meSub === k ? 'on' : ''}" role="tab" aria-selected="${S.meSub === k}">${l}</button>`).join('')}</div>
+        <div data-sub="items" ${S.meSub === 'items' ? '' : 'hidden'}><div class="jh-meacts"><button class="btn pri" data-talk>${icon('claude')}Talk to an agent about me</button><button class="btn" data-add>${icon('plus')}Add something</button>${me.items.some(i => !i.from && !i.to) ? `<button class="btn" data-dates>${icon('clock')}Date my items (${me.items.filter(i => !i.from && !i.to).length})</button>` : ''}</div></div>
+        <div data-sub="confirm" ${S.meSub === 'confirm' ? '' : 'hidden'}>${props.length ? '' : '<p class="note">Nothing waiting. Agents put what they find here (from your documents, code, CV and the web) for you to confirm.</p>'}
         ${props.length ? `<div class="jh-props"><h3 class="jh-h">To confirm <span class="muted">Found by agents; not used for matching until you confirm.</span></h3>${props.map(i => `<div class="jh-prop ${esc(i.confidence || 'medium')}"><div class="main"><div class="t"><span class="kdot" style="--k:${KIND_COLOR[i.kind]}"></span>${esc(i.title)}<span class="conf">${esc(i.confidence || 'medium')}</span></div><div class="muted">${esc([kinds[i.kind], i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`].filter(Boolean).join(' · '))}</div>${i.summary ? `<div class="s">${esc(i.summary)}</div>` : ''}${i.why ? `<div class="why">${esc(i.why)}</div>` : ''}<div class="src">${(i.sources || []).map(x => x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : `<span>${esc(x.title)}</span>`).join('')}</div></div><div class="acts"><button class="btn pri" data-ok-me="${i.id}">${icon('check')}It's me</button><button class="btn" data-me="${i.id}">Edit</button><button class="btn" data-no-me="${i.id}">${icon('x')}No</button></div></div>`).join('')}${props.length > 1 ? '<div class="r-actions"><button class="text-btn" data-ok-high>Confirm all high-confidence</button></div>' : ''}</div>` : ''}
-        ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}
-        ${me.items.length ? (S.meView === 'map' ? `<div class="jh-map">${meMap(me.items, kinds)}</div>` : '') : '<p class="note">Nothing here yet. The quickest start: talk to an agent about your projects and jobs, or add your CV on the CV tab and ask the agent to read it.</p>'}
-        ${S.meView === 'list' || !me.items.length ? '' : '<p class="muted jh-maphint">Tap a dot to open it. Lines join related things.</p>'}
+        ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}</div>
+        <div data-sub="map" ${S.meSub === 'map' ? '' : 'hidden'}>${me.items.length ? `<div class="jh-pbbar"><div class="jh-chips">${[['confirmedOnly', 'Confirmed only'], ['allSkills', 'All skills']].map(([k, l]) => `<button data-pbo="${k}" class="${S.pbOpt[k] ? 'on' : ''}">${l}</button>`).join('')}</div><span class="z"><button class="jh-iconbtn" data-pbz="out" aria-label="Zoom out">−</button><button class="jh-iconbtn" data-pbz="fit" aria-label="Fit">⤢</button><button class="jh-iconbtn" data-pbz="in" aria-label="Zoom in">+</button></span></div>${mePinboard(me.items, kinds, S.pbOpt)}<p class="muted jh-maphint">Drag to move, pinch or scroll to zoom. Strings join skills to where you used them; dashed cards are waiting for you to confirm.</p>` : '<p class="note">Nothing here yet. Add documents or code under Sources, or talk to an agent about your projects and jobs.</p>'}</div>
+        <div data-sub="notes" ${S.meSub === 'notes' ? '' : 'hidden'}>
         <h3 class="jh-h">Notes</h3>
         <p class="note">Context that helps assessors: which example best shows a behaviour, what was yours in a group project, anything a CV line can't say. Levels are judged per job, so they aren't stored here.</p>
         ${(me.notes || []).map(n => `<div class="jh-note"><div class="main">${n.topic ? `<b>${esc(n.topic)}</b> ` : ''}${esc(n.text)}<div class="muted">${esc(n.by)} · ${ago(n.at)}</div></div><button class="text-btn dim" data-ndel="${n.id}" aria-label="Delete note">${icon('x')}</button></div>`).join('')}
         <div class="jh-noteadd"><input data-ntopic maxlength="80" placeholder="Topic (optional), e.g. Delivering at Pace"><textarea data-ntext rows="2" maxlength="4000" placeholder="e.g. For pace under pressure, use the CTF: I organised the team's split of 30 challenges in 48 hours"></textarea><button class="btn" data-nadd>${icon('plus')}Add note</button></div>
+        </div>
+        <div data-sub="sources" ${S.meSub === 'sources' ? '' : 'hidden'}>
+        <div class="jh-meacts"><button class="btn" data-import>${icon('file-text')}Build from my CV</button><button class="btn" data-findme>${icon('globe')}Find me online</button></div>
         <h3 class="jh-h">My documents</h3>
         <p class="note">Reports, papers, a dissertation, slides: anything that shows what you did. An agent breaks each one into the project, the skills it shows and the results, citing the page.</p>
         ${dl.docs.map(d => `<div class="row"><span class="ico">${icon('file-text')}</span><div class="main"><div class="title">${esc(d.name)}</div><div class="sub muted">${esc([d.kind, d.original, d.read ? 'read into Me' : 'not read yet'].filter(Boolean).join(' · '))}</div></div><a class="text-btn" href="/api/jobs/docs/${d.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-docread="${d.id}">${d.read ? 'Read again' : 'Read into Me'}</button><button class="text-btn dim" data-docdel="${d.id}">Remove</button></div>`).join('')}
@@ -224,7 +227,8 @@ async function renderMe(box) {
         <p class="note">A zip of a project (with its .git folder if you have it) or a Git link. An agent reads the code to see what it is and what it uses, and in group work checks which commits were yours. The code copy is deleted once read.</p>
         ${cd.code.map(k => `<div class="row"><span class="ico">${icon('file-code')}</span><div class="main"><div class="title">${esc(k.name)}</div><div class="sub muted">${esc([k.source === 'git' ? 'Git link' : 'zip', (k.languages || []).slice(0, 3).join(', '), k.commits ? `${k.mine ?? 0} of ${k.commits} commits yours${k.group ? ' (group)' : ''}` : 'no git history', k.read ? 'read into Me' : k.queued ? 'reading…' : 'waiting'].filter(Boolean).join(' · '))}</div></div>${k.read ? '' : `<button class="text-btn" data-coderead="${k.id}">Read now</button>`}<button class="text-btn dim" data-codedel="${k.id}">Remove</button></div>`).join('')}
         <div class="r-actions"><button class="btn" data-codeadd>${icon('file-code')}Add code</button></div>
-        <div class="jh-melist" ${S.meView === 'map' ? 'hidden' : ''}>${Object.entries(kinds).map(([k, l]) => { const its = me.items.filter(i => i.kind === k).sort((a, b) => dkey(b) - dkey(a)); return its.length ? `<h3 class="jh-h" style="--k:${KIND_COLOR[k]}"><span class="kdot"></span>${esc(l)}</h3>${its.map(i => `<button class="row" data-me="${i.id}"><div class="main"><div class="title">${esc(i.title)}${i.status === 'proposed' ? ' <span class="jh-def" style="color:var(--brass);border-color:rgba(240,184,64,.4)">to confirm</span>' : ''}</div><div class="sub muted">${esc([i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`, i.from || i.to ? '' : 'undated', i.level, (i.sources || []).length ? `${i.sources.length} source${i.sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '))}</div></div></button>`).join('')}` : ''; }).join('')}</div>`;
+        </div>
+        <div class="jh-melist" data-sub="items2" ${S.meSub === 'items' ? '' : 'hidden'}>${Object.entries(kinds).map(([k, l]) => { const its = me.items.filter(i => i.kind === k).sort((a, b) => dkey(b) - dkey(a)); return its.length ? `<h3 class="jh-h" style="--k:${KIND_COLOR[k]}"><span class="kdot"></span>${esc(l)}</h3>${its.map(i => `<button class="row" data-me="${i.id}"><div class="main"><div class="title">${esc(i.title)}${i.status === 'proposed' ? ' <span class="jh-def" style="color:var(--brass);border-color:rgba(240,184,64,.4)">to confirm</span>' : ''}</div><div class="sub muted">${esc([i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`, i.from || i.to ? '' : 'undated', i.level, (i.sources || []).length ? `${i.sources.length} source${i.sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '))}</div></div></button>`).join('')}` : ''; }).join('')}</div>`;
     $('[data-talk]', box).onclick = async () => { try { const r = await C.api('/api/jobs/me/interview', { method: 'POST', body: {} }); C.openTerminal(r.shell, 'Job Hunt'); } catch (e) { C.toast(e.message, true); } };
     $('[data-add]', box).onclick = () => meDialog(null, kinds);
     $('[data-import]', box).onclick = importDialog;
@@ -249,7 +253,9 @@ async function renderMe(box) {
     $$('[data-ok-me]', box).forEach(x => x.onclick = async () => { await verify(x.dataset.okMe, 'confirm'); renderMe(box); });
     $$('[data-no-me]', box).forEach(x => x.onclick = async () => { await verify(x.dataset.noMe, 'reject'); renderMe(box); });
     const hi = $('[data-ok-high]', box); if (hi) hi.onclick = async () => { for (const i of props.filter(p => p.confidence === 'high')) await verify(i.id, 'confirm'); renderMe(box); };
-    $$('[data-mv]', box).forEach(x => x.onclick = () => { S.meView = x.dataset.mv; renderMe(box); });
+    $$('[data-ms]', box).forEach(x => x.onclick = () => { S.meSub = x.dataset.ms; renderMe(box); });
+    $$('[data-pbo]', box).forEach(x => x.onclick = () => { S.pbOpt[x.dataset.pbo] = !S.pbOpt[x.dataset.pbo]; renderMe(box); });
+    if (S.meSub === 'map') wireBoard(box);
     $$('[data-me]', box).forEach(x => x.onclick = () => meDialog(me.items.find(i => i.id === x.dataset.me), kinds, me.items));
     $$('[data-gap]', box).forEach(x => x.onclick = () => gapDialog(me.gaps.find(g => g.id === x.dataset.gap), kinds));
     $$('[data-dismiss]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/gap/${x.dataset.dismiss}`, { method: 'POST', body: { status: 'dismissed' } }).catch(e => C.toast(e.message, true)); reload(); });
@@ -661,4 +667,68 @@ function codeDialog(ids, done) {
             close(); C.toast('Added. An agent reads it next; proposals appear under "To confirm".'); done();
         } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.textContent = 'Add'; }
     };
+}
+
+// ---------- Me as a pinboard: paper cards on a timeline, skills pinned below and strung to where they were used ----------
+const LANES = [['education', 'Education'], ['role', 'Jobs and roles'], ['project', 'Projects'], ['achievement', 'Achievements'], ['cert', 'Qualifications'], ['interest', 'Interests']];
+const yearOf = v => { const m = String(v || '').match(/(\d{4})(?:-(\d{2}))?/); return m ? Number(m[1]) + (Number(m[2] || 6) - 1) / 12 : null; };
+const nowY = () => new Date().getFullYear() + new Date().getMonth() / 12;
+function boardLayout(items, opt) {
+    const CARD_W = 190, CARD_H = 78, GAP = 12, LANE_PAD = 34, ROWS = 4, X0 = 40, BREAK = 46;
+    const show = items.filter(i => (opt.confirmedOnly ? i.status !== 'proposed' : true));
+    const cards = show.filter(i => i.kind !== 'skill'); const skills = show.filter(i => i.kind === 'skill');
+    const bucket = i => { const t = yearOf(i.from) ?? yearOf(i.to); return t === null ? 'undated' : Math.floor(t); };
+    const tOf = i => yearOf(i.from) ?? yearOf(i.to) ?? 9999;
+    // Only years with cards get a column; a busy year wraps into a grid of up to ROWS rows; gaps collapse to "…".
+    const years = [...new Set(cards.map(bucket))].sort((a, b) => (a === 'undated') - (b === 'undated') || a - b);
+    const laneKinds = LANES.filter(([k]) => cards.some(i => i.kind === k));
+    const colsFor = y => Math.max(1, ...laneKinds.map(([k]) => Math.ceil(cards.filter(i => i.kind === k && bucket(i) === y).length / ROWS)));
+    const ycol = new Map(); let x = X0; const marks = [];
+    years.forEach((y, n) => { const prev = years[n - 1]; if (n && y !== 'undated' && prev !== 'undated' && y - prev > 1) { marks.push({ x, label: '…', brk: true }); x += BREAK; } ycol.set(y, x); marks.push({ x, label: y === 'undated' ? 'Undated' : String(y) }); x += colsFor(y) * (CARD_W + GAP) + 26; });
+    const pos = new Map(); let top = 56; const lanes = [];
+    for (const [k, label] of laneKinds) {
+        let rowsUsed = 1;
+        for (const y of years) { const its = cards.filter(i => i.kind === k && bucket(i) === y).sort((a, b) => tOf(a) - tOf(b)); its.forEach((it, n) => { const col = Math.floor(n / ROWS), row = n % ROWS; rowsUsed = Math.max(rowsUsed, row + 1); pos.set(it.id, { x: ycol.get(y) + col * (CARD_W + GAP), y: top + LANE_PAD + row * (CARD_H + GAP), w: CARD_W, h: CARD_H, i: it }); }); }
+        const h = LANE_PAD + rowsUsed * (CARD_H + GAP) + 14; lanes.push({ k, label, y: top, h }); top += h;
+    }
+    const linkMap = new Map(); const addL = (a, b) => { if (!linkMap.has(a)) linkMap.set(a, new Set()); linkMap.get(a).add(b); };
+    for (const i of show) for (const l of i.links || []) { addL(i.id, l); addL(l, i.id); }
+    const ranked = skills.map(s2 => ({ s: s2, links: [...(linkMap.get(s2.id) || [])].filter(id => pos.has(id)) })).sort((a, b) => b.links.length - a.links.length);
+    const limit = opt.allSkills ? ranked.length : Math.min(ranked.length, 48);
+    const sx = s2 => { const b = bucket(s2); return (ycol.get(b) ?? ycol.get('undated') ?? x) + 60; };
+    const pins = []; const PIN_ROW = 40; const skillTop = top + 40; const rowsEnd = [];
+    const placed = ranked.slice(0, limit).map(({ s: s2, links }) => ({ s: s2, links, x: links.length ? links.reduce((n, id) => n + pos.get(id).x + CARD_W / 2, 0) / links.length : sx(s2) })).sort((a, b) => a.x - b.x);
+    for (const pl of placed) { const w = Math.min(200, 26 + pl.s.title.length * 7.2); let r = rowsEnd.findIndex(end => end + 10 <= pl.x - w / 2); if (r < 0) { rowsEnd.push(-1e9); r = rowsEnd.length - 1; } rowsEnd[r] = pl.x + w / 2; pins.push({ ...pl, w, y: skillTop + r * PIN_ROW }); }
+    const height = (pins.length ? skillTop + rowsEnd.length * PIN_ROW : top) + 60; const width = Math.max(x, ...pins.map(pn => pn.x + pn.w)) + 60;
+    return { pos, lanes, pins, marks, width, height, skillTop, hidden: ranked.length - limit };
+}
+function mePinboard(items, kinds, opt) {
+    const { esc } = C; const L = boardLayout(items, opt); const strings = [];
+    for (const p of L.pins) for (const id of p.links) { const c = L.pos.get(id); const x1 = p.x, yA = p.y, x2 = c.x + c.w / 2, yB = c.y + c.h; const mid = (yA + yB) / 2 + 30; strings.push(`<path data-a="${p.s.id}" data-b="${id}" d="M${x1},${yA} Q${(x1 + x2) / 2},${mid} ${x2},${yB}"/>`); }
+    for (const [id, c] of L.pos) for (const l of c.i.links || []) { const d = L.pos.get(l); if (d && id < l) strings.push(`<path class="cc" data-a="${id}" data-b="${l}" d="M${c.x + c.w / 2},${c.y + 6} Q${(c.x + d.x + c.w) / 2},${Math.min(c.y, d.y) - 40} ${d.x + d.w / 2},${d.y + 6}"/>`); }
+    const years = L.marks.map(m => `<div class="yr ${m.brk ? 'brk' : ''}" style="left:${m.x}px;height:${L.height}px"><span>${m.label}</span></div>`);
+    const tilt = id => ((parseInt(id.slice(1, 4), 16) % 7) - 3) * 0.45;
+    return `<div class="jh-pbw" data-pb><div class="jh-pbin" style="width:${L.width}px;height:${L.height}px">
+        ${years.join('')}
+        ${L.lanes.map(l => `<div class="ln" style="top:${l.y}px;height:${l.h}px"><span>${esc(l.label)}</span></div>`).join('')}
+        ${L.pins.length ? `<div class="ln sk" style="top:${L.skillTop - 30}px"><span>Skills${L.hidden ? ` · top ${L.pins.length} of ${L.pins.length + L.hidden}` : ''}</span></div>` : ''}
+        <svg class="str" width="${L.width}" height="${L.height}">${strings.join('')}</svg>
+        ${[...L.pos.values()].map(c => `<button class="pc ${c.i.status === 'proposed' ? 'prop' : ''}" data-me="${c.i.id}" style="left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;--k:${KIND_COLOR[c.i.kind]};transform:rotate(${tilt(c.i.id)}deg)"><i class="tack"></i><b>${esc(c.i.title)}</b><span>${esc([c.i.org, [c.i.from, c.i.to].filter(Boolean).join('–')].filter(Boolean).join(' · ') || 'undated')}</span></button>`).join('')}
+        ${L.pins.map(p => `<button class="pn ${p.s.status === 'proposed' ? 'prop' : ''}" data-me="${p.s.id}" style="left:${p.x - p.w / 2}px;top:${p.y - 14}px;width:${p.w}px">${esc(p.s.title)}${p.links.length > 1 ? `<em>${p.links.length}</em>` : ''}</button>`).join('')}
+    </div></div>`;
+}
+// Pan with a finger or mouse, zoom with the wheel or a pinch; hovering or focusing a card lights up its strings.
+function wireBoard(root) {
+    const w = root.querySelector('[data-pb]'); if (!w) return; const inner = w.firstElementChild;
+    const st = S.pb || (S.pb = { x: 0, y: 0, z: 0.8 }); const apply = () => { inner.style.transform = `translate(${st.x}px,${st.y}px) scale(${st.z})`; };
+    if (!S.pbFitted) { S.pbFitted = true; st.z = 0.8; st.y = 6; st.x = Math.min(10, w.clientWidth - inner.offsetWidth * st.z - 20); }
+    apply(); const pts = new Map(); let start = null; let moved = false;
+    w.addEventListener('pointerdown', e => { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 1) { start = { x: e.clientX - st.x, y: e.clientY - st.y }; moved = false; } else if (pts.size === 2) { const [a, b] = [...pts.values()]; start = { d: Math.hypot(a.x - b.x, a.y - b.y), z: st.z }; } });
+    w.addEventListener('pointermove', e => { if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 1 && start && start.x !== undefined) { const nx = e.clientX - start.x, ny = e.clientY - start.y; if (Math.abs(nx - st.x) + Math.abs(ny - st.y) > 3) { moved = true; w.setPointerCapture(e.pointerId); } st.x = nx; st.y = ny; apply(); } else if (pts.size === 2 && start?.d) { const [a, b] = [...pts.values()]; st.z = Math.max(0.25, Math.min(2.2, start.z * Math.hypot(a.x - b.x, a.y - b.y) / start.d)); moved = true; apply(); } });
+    const up = e => { pts.delete(e.pointerId); if (!pts.size) start = null; }; w.addEventListener('pointerup', up); w.addEventListener('pointercancel', up);
+    w.addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+    w.addEventListener('wheel', e => { e.preventDefault(); const r = w.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; const z2 = Math.max(0.25, Math.min(2.2, st.z * (e.deltaY < 0 ? 1.12 : 0.89))); st.x = mx - (mx - st.x) * z2 / st.z; st.y = my - (my - st.y) * z2 / st.z; st.z = z2; apply(); }, { passive: false });
+    const lit = id => { inner.classList.toggle('focus', !!id); inner.querySelectorAll('.str path').forEach(p => p.classList.toggle('on', !!id && (p.dataset.a === id || p.dataset.b === id))); inner.querySelectorAll('[data-me]').forEach(b => b.classList.toggle('on', !!id && (b.dataset.me === id || [...inner.querySelectorAll(`.str path[data-a="${id}"],.str path[data-b="${id}"]`)].some(p => p.dataset.a === b.dataset.me || p.dataset.b === b.dataset.me)))); };
+    inner.querySelectorAll('[data-me]').forEach(b => { b.addEventListener('mouseenter', () => lit(b.dataset.me)); b.addEventListener('focus', () => lit(b.dataset.me)); b.addEventListener('mouseleave', () => lit(null)); b.addEventListener('blur', () => lit(null)); });
+    root.querySelectorAll('[data-pbz]').forEach(b => b.onclick = () => { const f = b.dataset.pbz; if (f === 'fit') { st.z = Math.max(0.3, Math.min(1, w.clientWidth / (inner.offsetWidth + 40))); st.x = 10; st.y = 10; } else st.z = Math.max(0.25, Math.min(2.2, st.z * (f === 'in' ? 1.2 : 0.83))); apply(); });
 }
