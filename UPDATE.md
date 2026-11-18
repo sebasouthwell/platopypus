@@ -943,6 +943,10 @@ phone's Update button. Mechanism:
   - Requests from the box gain `codezip` (a zip already on the box, deleted after unpacking; optional `period`),
     `dates`, and `docnote` (set document notes).
 
+- **2.20.2**: The code reader checks authorship: AI co-author trailers and agent files mark work as AI-assisted
+  (credited as design, direction, integration and operations rather than hand-written code), and third-party projects
+  with none of the person's commits add nothing. The brief says the same.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
