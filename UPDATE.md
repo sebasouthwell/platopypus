@@ -964,6 +964,19 @@ phone's Update button. Mechanism:
   Confirm all (asks first), and confirm or reject everything from one source. One call (`POST /api/jobs/me/verify` with
   `ids`, `confidence` or `source`, and `action`).
 
+- **2.21.2**: Job Hunt switches panels instantly.
+  - `web/appcache.js`: a per-app response cache (in memory and IndexedDB). Answers show at once and are refreshed in
+    the background (re-rendering only when something changed, never while you type or have a dialog open). Identical
+    requests in flight share one fetch; writes in the app mark its entries stale, and reads right after a write go to the
+    server. IndexedDB entries are AES-GCM encrypted under a non-extractable browser key, expire after 12 hours, and the
+    whole store is deleted on sign-out, on the login screen and on any 401. Apps opt in per route; the Vault and
+    credentials are never cached.
+  - The server sends an ETag on Job Hunt GETs and answers 304 when unchanged (`private, no-cache`); other routes keep
+    `no-store`.
+  - The board list no longer carries advert text, fingerprints or source lists (239 KB to 41 KB in testing); the job
+    sheet still loads them.
+  - The Me tab builds only the open sub-tab's board and item list.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

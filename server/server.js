@@ -4,6 +4,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -147,6 +148,12 @@ const RUNNING_VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL
 function send(res, status, body, headers = {}) {
     if (res.auditHook && status < 300) { try { res.auditHook(body); } catch { /* never block the reply */ } }
     const data = typeof body === 'string' ? body : JSON.stringify(body);
+    // Apps whose web views keep a cache (web/appcache.js) get an ETag: an unchanged answer comes back as 304, no body.
+    const rq = res.req; if (status === 200 && rq && rq.method === 'GET' && typeof body !== 'string' && /^\/api\/jobs(\/|$|\?)/.test(rq.url || '')) {
+        const tag = `W/"${crypto.createHash('sha1').update(data).digest('base64url').slice(0, 22)}"`;
+        if (rq.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'private, no-cache', ...securityHeaders() }); return res.end(); }
+        headers = { ...headers, ETag: tag, 'Cache-Control': 'private, no-cache' };
+    }
     res.writeHead(status, {
         'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
@@ -890,7 +897,8 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'me' && method === 'POST') return send(res, 201, jobs.addMe(await body(), 'phone'));
             if ((jm = rest.match(/^me\/(m[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeMe(jm[1]));
             if ((jm = rest.match(/^gap\/(g[0-9a-f]{6})$/)) && method === 'POST') { const b = await body(); return send(res, 200, jobs.closeGap(jm[1], b)); }
-            if (rest === 'board' && method === 'GET') { const { dismissed, ...bd } = jobs.board(); void dismissed; return send(res, 200, bd); }
+            // The board list: cards only (the advert text, fingerprints and source list come with the job itself).
+            if (rest === 'board' && method === 'GET') { const bd = jobs.board(); return send(res, 200, { jobs: bd.jobs.map(({ description, keys, sources, requirements, ...j }) => ({ ...j, nsources: (sources || []).length, nreq: (requirements || []).length })) }); }
             if (rest === 'board/delete' && method === 'POST') { const b = await body(); try { return send(res, 200, jobs.deleteJobs(b.ids || [], { confirm: !!b.confirm }, 'phone')); } catch (e) { if (e.needConfirm) return send(res, 409, { error: e.message, needConfirm: e.needConfirm }); throw e; } }
             if (rest === 'board' && method === 'POST') return send(res, 201, jobs.addJob(await body(256 * 1024), 'phone'));
             if ((jm = rest.match(/^job\/(j[0-9a-f]{6})(?:\/(\w+))?$/))) {

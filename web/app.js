@@ -132,6 +132,7 @@ const WA = window.SimpleWebAuthnBrowser;
 let loginInfo = null;
 
 async function showLogin() {
+    import('/appcache.js').then(m => m.wipe()).catch(() => {});   // signed out: no cached app data stays in this browser
     $('#app').hidden = true; $('#term-sheet').hidden = true; $('#editor-sheet').hidden = true; $('#login').hidden = false;
     try { loginInfo = await (await fetch('/api/login', { credentials: 'same-origin' })).json(); } catch { loginInfo = { setup: false, passkeys: [], passwordSet: false }; }
     const setup = !!loginInfo.setup;
@@ -214,7 +215,7 @@ $('#totp-form').addEventListener('submit', async e => {
     try { await postAuth('/api/login/totp', { ticket: pendingTicket, code: $('#login-code').value.trim() }); pendingTicket = null; await showApp(); }
     catch (ex) { err.textContent = ex.message; if (ex.status === 400 || ex.status === 401 && /expired|again/i.test(ex.message)) showLogin(); }
 });
-$('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }).catch(() => {}); showLogin(); });
+$('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }).catch(() => {}); import('/appcache.js').then(m => m.wipe()).catch(() => {}); showLogin(); });
 
 // ---------- navigation ----------
 
