@@ -25,6 +25,18 @@ person in the app) and work an agent can do. Use what you learn in one stage in 
   the register was last updated and that a listing is a point-in-time check.
 - Keep every source with its link, and end with questions the person could ask the interviewer, based on what you found.
 
+## Frameworks
+
+Many employers score candidates against a published framework: the UK Civil Service uses Success Profiles
+(behaviours scored 1–7 against the grade's level indicators, plus experience, technical, strengths and ability tests),
+government digital roles add the DDaT capability framework, many IT employers use SFIA levels 1–7, EU employers e-CF or
+ECSF, US cyber roles NICE, the NHS its KSF and Agenda for Change bands. Find out which one applies (the advert's grade,
+band or wording, the careers site) and assess the person the way the employer will: element by element, on the real
+scale, from evidence of what they personally did. Then write the application in that framework's terms. A blind second
+assessor checks each assessment; big disagreements mean the evidence is ambiguous and needs a clearer example.
+Levels belong to the job, not the person: the same evidence may be a 3 for one employer's grade and a 4 for another's.
+Never record a level as a fact about the person; record useful context as a Me note (`add_me_note`) instead.
+
 ## 2. Tailor
 
 - Pull the requirements out of the advert, essential and desirable ones apart. Map each to evidence in Me.

@@ -26,10 +26,10 @@ export async function loadJobs(tab) {
     const { $, $$ } = C;
     S.ov = await C.api('/api/jobs');
     const c = S.ov.counts;
-    const tabs = [['board', `Board${c.new ? `<em>${c.new}</em>` : ''}`], ['me', `Me${c.gaps ? `<em>${c.gaps}</em>` : ''}`], ['cv', 'CV'], ['apps', 'Applications'], ['log', 'Activity'], ['setup', 'Setup']];
+    const tabs = [['board', `Board${c.new ? `<em>${c.new}</em>` : ''}`], ['me', `Me${c.gaps ? `<em>${c.gaps}</em>` : ''}`], ['cpd', 'CPD'], ['cv', 'CV'], ['apps', 'Applications'], ['log', 'Activity'], ['setup', 'Setup']];
     $('#jobs-seg').innerHTML = tabs.map(([k, l]) => `<button data-jt="${k}" class="${S.tab === k ? 'on' : ''}" role="tab" aria-selected="${S.tab === k}">${l}</button>`).join('');
     $$('#jobs-seg [data-jt]').forEach(b => b.onclick = () => loadJobs(b.dataset.jt).catch(e => C.toast(e.message, true)));
-    const fn = { board: renderBoard, me: renderMe, cv: renderCv, apps: renderApps, log: renderLog, setup: renderSetup }[S.tab];
+    const fn = { board: renderBoard, me: renderMe, cpd: renderCpd, cv: renderCv, apps: renderApps, log: renderLog, setup: renderSetup }[S.tab];
     await fn($('#jobs-body'));
 }
 const reload = () => loadJobs().catch(e => C.toast(e.message, true));
@@ -52,6 +52,7 @@ async function renderBoard(box) {
         <div class="jh-stats">
           ${[['Jobs', c.jobs], ['Shortlisted', c.shortlisted], ['To apply', c.toApply], ['Applied', c.applied], ['In progress', c.inProgress]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}
         </div>
+        ${upcomingList(ov.upcoming || [])}
         <div class="jh-tools">
           <div class="seg jh-filter">${[['active', 'Active'], ['new', 'New'], ['shortlisted', 'Shortlisted'], ['applying', 'Applying'], ['applied', 'Applied'], ['hidden', 'Hidden']].map(([k, l]) => `<button data-f="${k}" class="${S.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
           <div class="jh-toolrow">
@@ -72,6 +73,8 @@ async function renderBoard(box) {
     $('[data-add]', box).onclick = addJobDialog;
     $('[data-web]', box).onclick = () => runAgent('/api/jobs/websearch', {}, 'An agent is searching career pages and job boards. New jobs appear here.');
     $$('[data-job]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.job));
+    $$('[data-upjob]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.upjob));
+    $$('[data-upapp]', box).forEach(x => x.onclick = async () => { const { apps } = await C.api('/api/jobs/apps'); appDialog(apps.find(a => a.id === x.dataset.upapp)); });
     if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden) renderBoard(box).catch(() => {}); }, 20_000);
 }
 function jobCards(jobs) {
@@ -126,12 +129,15 @@ async function jobDialog(id) {
           ${cur.ai ? `<div class="jh-work"><textarea data-workx rows="2" maxlength="1500" placeholder="${cur.id === 'research' ? 'Anything to look into? e.g. I need a Skilled Worker visa' : cur.id === 'interview' ? 'What you know about the interview, e.g. 45 min video call with the team lead' : 'Anything the agent should know'}"></textarea>
             ${cur.id === 'research' ? '<div class="jh-topics"><label><input type="checkbox" data-wv>Visa and sponsorship too</label><label><input type="checkbox" data-wp>Pay and cost of living too</label></div>' : ''}
             <button class="btn pri" data-work="${cur.id}">${icon('claude')}${esc(cur.ai)}</button></div>` : '<p class="muted">Nothing for an agent here: tick things off as you do them.</p>'}
+          ${['tailor', 'apply'].includes(cur.id) ? `<a class="btn" href="/letter.html?job=${esc(id)}" target="_blank" rel="noopener">${icon('pencil')}Cover letter editor</a>` : ''}
           ${d.drafts.length ? `<div class="jh-drafts">${d.drafts.map(x => `<button class="chip" data-draft="${esc(x.name)}">${icon('file-text')}${esc(x.name)}</button>`).join('')}</div>` : ''}
         </div>
         <h3 class="jh-h">Fit</h3>
         ${j.match ? `<div class="jh-matchhead"><span class="jh-fit big ${j.match.score >= 70 ? 'hi' : j.match.score >= 45 ? 'mid' : 'lo'}" style="--v:${j.match.score}"><b>${j.match.score}</b></span><div>${j.match.level ? `<b>Comes in at: ${esc(j.match.level)}</b><br>` : ''}${esc(j.match.summary || '')}<div class="muted">by ${esc(j.match.by)} · ${ago(j.match.at)}</div></div></div>
             <div class="jh-lines">${j.match.lines.map(l => `<div class="jh-line ${l.verdict}"><span class="v">${VERDICT[l.verdict]}</span><div><div>${esc(l.requirement)}</div>${l.note ? `<div class="muted">${esc(l.note)}</div>` : ''}${l.evidence.length ? `<div class="jh-ev">${l.evidence.map(e => byId.get(e)).filter(Boolean).map(i => `<span style="--k:${KIND_COLOR[i.kind]}">${esc(i.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>`
             : `<p class="note">Not scored yet. ${d.candidates.length ? 'Likely evidence from Me is listed below; ' : ''}an agent scores it when it works a wish, or ask for it now.</p>${d.candidates.length ? `<div class="jh-lines">${d.candidates.map(r => `<div class="jh-line ${r.candidates.length ? 'partly' : 'gap'}"><span class="v">${r.candidates.length ? 'Maybe' : 'Nothing'}</span><div>${esc(r.requirement)}${r.candidates.length ? `<div class="jh-ev">${r.candidates.map(x => `<span style="--k:${KIND_COLOR[x.kind]}">${esc(x.title)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</div>` : ''}<div class="r-actions"><button class="btn" data-score>${icon('claude')}Score it against Me</button></div>`}
+        <h3 class="jh-h">How they will assess you</h3>
+        ${frameworkSection(j, d)}
         <h3 class="jh-h">Money, per year</h3>
         <div class="jh-money">
           ${[['Gross', m?.gross ?? est?.gross], ['Take-home', m?.takeHome ?? est?.takeHome], ['Living costs', m?.living], ['Left over', m?.left]].map(([l, v], i) => `<div class="${i === 3 ? 'left' : ''}"><span>${l}</span><b>${money(v, m?.currency || 'GBP')}</b></div>`).join('')}
@@ -156,7 +162,8 @@ async function jobDialog(id) {
             if (r.shell) { C.toast('An agent is working on it; drafts appear here when it finishes.'); close(); C.openTerminal(r.shell, 'Job Hunt'); } else { close(); jobDialog(id); } }
         catch (e) { C.toast(e.message, true); wk.disabled = false; }
     };
-    $$('[data-draft]', panel).forEach(x => x.onclick = async () => { try { const r = await C.api(`/api/jobs/job/${id}/draft?name=${encodeURIComponent(x.dataset.draft)}`); const dd = C.openDialog(`<h2>${icon('file-text')}${esc(r.name)}</h2><div class="jh-answer jh-draft">${md(r.text)}</div><div class="buttons"><button data-copy>Copy</button><button data-close>Close</button></div>`); $('[data-copy]', dd.panel).onclick = () => navigator.clipboard.writeText(r.text).then(() => C.toast('Copied')); } catch (e) { C.toast(e.message, true); } });
+    $$('[data-draft]', panel).forEach(x => { if (/letter/.test(x.dataset.draft)) x.onclick = () => window.open(`/letter.html?job=${id}&name=${encodeURIComponent(x.dataset.draft)}`, '_blank', 'noopener'); });
+    $$('[data-draft]', panel).filter(x => !/letter/.test(x.dataset.draft)).forEach(x => x.onclick = async () => { try { const r = await C.api(`/api/jobs/job/${id}/draft?name=${encodeURIComponent(x.dataset.draft)}`); const dd = C.openDialog(`<h2>${icon('file-text')}${esc(r.name)}</h2><div class="jh-answer jh-draft">${md(r.text)}</div><div class="buttons"><button data-copy>Copy</button><button data-close>Close</button></div>`); $('[data-copy]', dd.panel).onclick = () => navigator.clipboard.writeText(r.text).then(() => C.toast('Copied')); } catch (e) { C.toast(e.message, true); } });
     $$('[data-st]', panel).forEach(x => x.onclick = async () => { try { await C.api(`/api/jobs/job/${id}`, { method: 'POST', body: { status: x.dataset.st } }); close(); reload(); } catch (e) { C.toast(e.message, true); } });
     const ap = $('[data-apply]', panel); if (ap) ap.onclick = () => { close(); startApplication(j); };
     $('[data-save]', panel).onclick = async () => { try { await C.api(`/api/jobs/job/${id}`, { method: 'POST', body: { notes: $('#jd-notes', panel).value } }); C.toast('Saved'); } catch (e) { C.toast(e.message, true); } };
@@ -165,6 +172,8 @@ async function jobDialog(id) {
         if (!topics.length && !extra) return C.toast('Pick a topic or ask a question.', true);
         try { await C.api(`/api/jobs/job/${id}/advice`, { method: 'POST', body: { topics, extra } }); close(); jobDialog(id); } catch (e) { C.toast(e.message, true); }
     };
+    const fa = $('[data-fassess]', panel); if (fa) fa.onclick = async () => { try { const r = await C.api(`/api/jobs/job/${id}/assess`, { method: 'POST', body: { framework: $('[data-fpick]', panel).value } }); close(); runAgentShown(r.shell, 'An agent is assessing you against the framework. A blind second assessor then rates the same elements.'); } catch (e) { C.toast(e.message, true); } };
+    $$('[data-fblind]', panel).forEach(x => x.onclick = async () => { try { await C.api(`/api/jobs/job/${id}/assess`, { method: 'POST', body: { framework: x.dataset.fblind, blindOnly: true } }); C.toast('Blind review started.'); } catch (e) { C.toast(e.message, true); } });
     const sc = $('[data-score]', panel); if (sc) sc.onclick = async () => { try { await C.api('/api/jobs/wish', { method: 'POST', body: { text: `Score this one job against Me (requirements, fit, money): ${j.id} "${j.title}"${j.company ? ` at ${j.company}` : ''}. Do not hunt for others.` } }); C.toast('An agent is scoring it.'); close(); } catch (e) { C.toast(e.message, true); } };
     if (running) { const t = setInterval(async () => { if ($('#dialog').hidden || !panel.isConnected) return clearInterval(t); const n = await C.api(`/api/jobs/job/${id}`).catch(() => null); if (n && !n.advice.some(p => p.status === 'running')) { clearInterval(t); if (!$('#dialog').hidden) { close(); jobDialog(id); } } }, 8000); }
 }
@@ -181,6 +190,10 @@ async function renderMe(box) {
         ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}
         ${me.items.length ? (S.meView === 'map' ? `<div class="jh-map">${meMap(me.items, kinds)}</div>` : '') : '<p class="note">Nothing here yet. The quickest start: talk to an agent about your projects and jobs, or add your CV on the CV tab and ask the agent to read it.</p>'}
         ${S.meView === 'list' || !me.items.length ? '' : '<p class="muted jh-maphint">Tap a dot to open it. Lines join related things.</p>'}
+        <h3 class="jh-h">Notes</h3>
+        <p class="note">Context that helps assessors: which example best shows a behaviour, what was yours in a group project, anything a CV line can't say. Levels are judged per job, so they aren't stored here.</p>
+        ${(me.notes || []).map(n => `<div class="jh-note"><div class="main">${n.topic ? `<b>${esc(n.topic)}</b> ` : ''}${esc(n.text)}<div class="muted">${esc(n.by)} · ${ago(n.at)}</div></div><button class="text-btn dim" data-ndel="${n.id}" aria-label="Delete note">${icon('x')}</button></div>`).join('')}
+        <div class="jh-noteadd"><input data-ntopic maxlength="80" placeholder="Topic (optional), e.g. Delivering at Pace"><textarea data-ntext rows="2" maxlength="4000" placeholder="e.g. For pace under pressure, use the CTF: I organised the team's split of 30 challenges in 48 hours"></textarea><button class="btn" data-nadd>${icon('plus')}Add note</button></div>
         <h3 class="jh-h">My documents</h3>
         <p class="note">Reports, papers, a dissertation, slides: anything that shows what you did. An agent breaks each one into the project, the skills it shows and the results, citing the page.</p>
         ${dl.docs.map(d => `<div class="row"><span class="ico">${icon('file-text')}</span><div class="main"><div class="title">${esc(d.name)}</div><div class="sub muted">${esc([d.kind, d.original, d.read ? 'read into Me' : 'not read yet'].filter(Boolean).join(' · '))}</div></div><a class="text-btn" href="/api/jobs/docs/${d.id}/file" target="_blank" rel="noopener">Open</a><button class="text-btn" data-docread="${d.id}">${d.read ? 'Read again' : 'Read into Me'}</button><button class="text-btn dim" data-docdel="${d.id}">Remove</button></div>`).join('')}
@@ -189,6 +202,8 @@ async function renderMe(box) {
     $('[data-talk]', box).onclick = async () => { try { const r = await C.api('/api/jobs/me/interview', { method: 'POST', body: {} }); C.openTerminal(r.shell, 'Job Hunt'); } catch (e) { C.toast(e.message, true); } };
     $('[data-add]', box).onclick = () => meDialog(null, kinds);
     $('[data-import]', box).onclick = importDialog;
+    $('[data-nadd]', box).onclick = async () => { const t = $('[data-ntext]', box).value.trim(); if (!t) return; try { await C.api('/api/jobs/notes', { method: 'POST', body: { text: t, topic: $('[data-ntopic]', box).value } }); renderMe(box); } catch (e) { C.toast(e.message, true); } };
+    $$('[data-ndel]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/notes/${x.dataset.ndel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderMe(box); });
     $('[data-docup]', box).onchange = async e => {
         const files = [...e.target.files]; if (!files.length) return; const added = [];
         for (const f of files) { try { added.push(await C.api('/api/jobs/docs', { method: 'POST', body: { name: f.name.replace(/\.[^.]+$/, ''), file: f.name, data: await b64(f) } })); } catch (x) { C.toast(`${f.name}: ${x.message}`, true); } }
@@ -334,28 +349,74 @@ async function startApplication(j) {
     $('[data-ok]', panel).onclick = async () => { try { await C.api('/api/jobs/apps', { method: 'POST', body: { job: j.id, cv: $('#sa-cv', panel).value || null } }); close(); loadJobs('apps'); } catch (e) { C.toast(e.message, true); } };
 }
 async function renderApps(box) {
-    const { esc, $$ } = C; const { apps } = await C.api('/api/jobs/apps'); const c = S.ov.counts; const today = new Date().toISOString().slice(0, 10);
+    const { esc, $$ } = C; const [{ apps }, { upcoming }] = await Promise.all([C.api('/api/jobs/apps'), C.api('/api/jobs/upcoming?days=90')]); const c = S.ov.counts; const today = new Date().toISOString().slice(0, 10);
     const order = a => (['rejected', 'withdrawn', 'accepted'].includes(a.stage) ? 2 : a.nextDate ? 0 : 1);
     apps.sort((a, b) => order(a) - order(b) || String(a.nextDate || '9').localeCompare(String(b.nextDate || '9')) || b.created - a.created);
     box.innerHTML = `<div class="jh-stats">${[['Applied', c.applied], ['In progress', c.inProgress], ['To apply', c.toApply]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}</div>
-        ${apps.length ? `<div class="jh-apps">${apps.map(a => `<button class="jh-app ${a.stage}" data-app="${a.id}"><span class="n">${String(a.n).padStart(3, '0')}</span><span class="main"><span class="t">${esc(a.title)}</span><span class="s">${esc(a.company)}</span>${a.next ? `<span class="nx ${a.nextDate && a.nextDate < today ? 'late' : ''}">Next: ${esc(a.next)}${a.nextDate ? ` · ${esc(a.nextDate)}` : ''}</span>` : ''}</span><span class="stg">${STAGE_TXT[a.stage]}</span></button>`).join('')}</div>` : '<p class="note">No applications yet. Open a job on the board and start one: it gets its own folder and a place in this list.</p>'}`;
+        ${upcomingList(upcoming)}
+        ${apps.length ? `<h3 class="jh-h">Applications</h3><div class="jh-apps">${apps.map(a => { const ev = (a.events || []).filter(e => e.date && !e.done && e.date >= today).sort((x, y) => x.date.localeCompare(y.date))[0]; const files = (a.events || []).reduce((n, e) => n + (e.files || []).length, 0); return `<button class="jh-app ${a.stage}" data-app="${a.id}"><span class="n">${String(a.n).padStart(3, '0')}</span><span class="main"><span class="t">${esc(a.title)}</span><span class="s">${esc(a.company)}</span>${ev ? `<span class="nx">${esc(S.ov.eventTypes[ev.type])}${ev.title ? `: ${esc(ev.title)}` : ''} · ${esc(ev.date)}</span>` : a.next ? `<span class="nx ${a.nextDate && a.nextDate < today ? 'late' : ''}">Next: ${esc(a.next)}${a.nextDate ? ` · ${esc(a.nextDate)}` : ''}</span>` : ''}</span><span class="stg">${STAGE_TXT[a.stage]}${(a.events || []).length ? `<br><span class="muted">${a.events.length} entr${a.events.length === 1 ? 'y' : 'ies'}${files ? ` · ${files} file${files === 1 ? '' : 's'}` : ''}</span>` : ''}</span></button>`; }).join('')}</div>` : '<p class="note">No applications yet. Open a job on the board and start one: it gets its own folder, a timeline for notes, tests, interviews and screenshots, and a place in this list.</p>'}`;
     $$('[data-app]', box).forEach(x => x.onclick = () => appDialog(apps.find(a => a.id === x.dataset.app)));
+    $$('[data-upapp]', box).forEach(x => x.onclick = () => appDialog(apps.find(a => a.id === x.dataset.upapp)));
+    $$('[data-upjob]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.upjob));
 }
-async function appDialog(a) {
-    const { esc, icon, $ } = C; const [f, t] = await Promise.all([C.api(`/api/jobs/apps/${a.id}/files`), C.api('/api/jobs/cv')]);
+function upcomingList(list) {
+    const { esc } = C; if (!list.length) return '';
+    const fmt = d => new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    return `<h3 class="jh-h">Coming up</h3><div class="jh-up">${list.map(u => `<button class="jh-upi ${u.late ? 'late' : ''}" ${u.app ? `data-upapp="${u.app}"` : `data-upjob="${u.job}"`}><span class="d">${fmt(u.date)}${u.time ? ` ${esc(u.time)}` : ''}</span><span class="w">${esc(u.what)}</span><span class="o">${esc(u.title)}${u.company ? ` · ${esc(u.company)}` : ''}</span></button>`).join('')}</div>`;
+}
+const IMG = /\.(png|jpe?g|gif|webp)$/i;
+async function appDialog(a0) {
+    const { esc, icon, $, $$ } = C;
+    const [{ apps }, f, t] = await Promise.all([C.api('/api/jobs/apps'), C.api(`/api/jobs/apps/${a0.id}/files`), C.api('/api/jobs/cv')]);
+    const a = apps.find(x => x.id === a0.id) || a0; const types = S.ov.eventTypes; const today = new Date().toISOString().slice(0, 10);
+    const fileUrl = rel => `/api/jobs/apps/${a.id}/file?path=${encodeURIComponent(rel)}`;
+    const fileChip = rel => IMG.test(rel) ? `<a class="jh-thumb" href="${fileUrl(rel)}" target="_blank" rel="noopener"><img src="${fileUrl(rel)}" alt="${esc(rel)}" loading="lazy"></a>` : `<a class="chip" href="${fileUrl(rel)}" target="_blank" rel="noopener">${icon('file')}${esc(rel.split('/').pop())}</a>`;
+    const events = (a.events || []).slice().sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')) || y.created - x.created);
+    const attached = new Set(events.flatMap(e => e.files || []));
+    const loose = f.files.filter(x => !attached.has(x.path));
     const { panel, close } = C.openDialog(`<h2>${icon('folder')}${esc(a.title)}</h2><p class="muted">${esc(a.company)} · ${esc(f.folder)}</p>
-        <div class="field"><label for="ap-st">Stage</label><select id="ap-st">${S.ov.stages.map(s => `<option value="${s}" ${a.stage === s ? 'selected' : ''}>${STAGE_TXT[s]}</option>`).join('')}</select></div>
+        <div class="jh-two"><div class="field"><label for="ap-st">Stage</label><select id="ap-st">${S.ov.stages.map(s => `<option value="${s}" ${a.stage === s ? 'selected' : ''}>${STAGE_TXT[s]}</option>`).join('')}</select></div><div class="field"><label for="ap-pr">Priority</label><select id="ap-pr">${['low', 'normal', 'high'].map(p => `<option ${a.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div></div>
         <div class="jh-two"><div class="field"><label for="ap-nx">Next step</label><input id="ap-nx" maxlength="200" value="${esc(a.next || '')}" placeholder="Online test"></div><div class="field"><label for="ap-nd">By</label><input id="ap-nd" type="date" value="${esc(a.nextDate || '')}"></div></div>
-        <div class="field"><label for="ap-no">Notes</label><textarea id="ap-no" rows="4">${esc(a.notes || '')}</textarea></div>
-        <h3 class="jh-h">Files</h3>
-        <div class="jh-files">${f.files.map(x => `<div>${esc(x.path)}<span class="muted"> · ${Math.max(1, Math.round(x.size / 1024))} KB</span></div>`).join('') || '<p class="muted">Empty.</p>'}</div>
-        <div class="r-actions"><button class="btn" data-files>${icon('folder-open')}Open in Files</button><label class="btn">${icon('upload')}Add a file<input type="file" data-up hidden></label>${t.template ? `<button class="btn" data-tailor>${icon('file-pdf')}Put my current CV in it</button>` : ''}</div>
-        <h3 class="jh-h">History</h3><div class="jh-hist">${a.history.map(h => `<div><b>${STAGE_TXT[h.stage]}</b><span class="muted"> · ${new Date(h.at).toLocaleDateString('en-GB')} · ${esc(h.by)}</span></div>`).join('')}</div>
-        <div class="buttons"><button data-close>Close</button><button class="primary" data-ok>Save</button></div>`);
-    $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/apps/${a.id}`, { method: 'POST', body: { stage: $('#ap-st', panel).value, next: $('#ap-nx', panel).value, nextDate: $('#ap-nd', panel).value, notes: $('#ap-no', panel).value } }); close(); reload(); } catch (e) { C.toast(e.message, true); } };
+        <div class="field"><label for="ap-no">Notes</label><textarea id="ap-no" rows="3">${esc(a.notes || '')}</textarea></div>
+        <div class="buttons"><button class="primary" data-ok>Save</button></div>
+        <h3 class="jh-h">Timeline</h3>
+        <div class="jh-addev">
+          <div class="jh-two"><select data-et aria-label="Type">${Object.entries(types).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><input data-ed type="date" aria-label="Date" value="${today}"></div>
+          <input data-ett maxlength="200" placeholder="Title, e.g. Numerical reasoning test, or First interview with the team lead">
+          <textarea data-etx rows="2" placeholder="Details, what happened, what to prepare"></textarea>
+          <div class="jh-evbar"><label class="btn">${icon('upload')}Attach<input type="file" multiple data-ef hidden></label><span class="muted" data-efn>You can also paste a screenshot here.</span><button class="btn pri" data-eadd>${icon('plus')}Add</button></div>
+        </div>
+        <div class="jh-tl">${events.map(e => `<div class="jh-ev ${e.type} ${e.done ? 'done' : ''} ${e.date && e.date < today && !e.done && ['test', 'interview', 'deadline'].includes(e.type) ? 'late' : ''}">
+            <div class="jh-evh"><span class="ty">${esc(types[e.type] || e.type)}</span><b>${esc(e.title || '')}</b><span class="dt">${esc(e.date || '')}${e.time ? ` ${esc(e.time)}` : ''}</span>
+              ${['test', 'interview', 'deadline', 'call'].includes(e.type) ? `<label class="jh-done"><input type="checkbox" data-edone="${e.id}" ${e.done ? 'checked' : ''}>done</label>` : ''}<button class="text-btn dim" data-edel="${e.id}" aria-label="Delete entry">${icon('x')}</button></div>
+            ${e.text ? `<div class="tx">${esc(e.text)}</div>` : ''}
+            ${(e.files || []).length ? `<div class="jh-files2">${e.files.map(fileChip).join('')}</div>` : ''}
+            <label class="text-btn jh-evattach">Attach<input type="file" multiple data-eatt="${e.id}" hidden></label>
+          </div>`).join('') || '<p class="muted">Nothing yet. Add notes, tests, interviews and deadlines as they happen, and paste screenshots of each stage.</p>'}</div>
+        <h3 class="jh-h">Folder</h3>
+        <div class="jh-files2">${loose.map(x => fileChip(x.path)).join('') || '<span class="muted">No other files.</span>'}</div>
+        <div class="r-actions"><button class="btn" data-files>${icon('folder-open')}Open in Files</button><label class="btn">${icon('upload')}Add files<input type="file" multiple data-up hidden></label>${t.template ? `<button class="btn" data-tailor>${icon('file-pdf')}Put my current CV in it</button>` : ''}</div>
+        <h3 class="jh-h">Stage history</h3><div class="jh-hist">${a.history.map(h => `<div><b>${STAGE_TXT[h.stage]}</b><span class="muted"> · ${new Date(h.at).toLocaleDateString('en-GB')} · ${esc(h.by)}</span></div>`).join('')}</div>
+        <div class="buttons"><button data-close>Close</button></div>`);
+    const reopen = () => { close(); appDialog(a); };
+    const stageFolder = () => `Stages/${STAGE_TXT[$('#ap-st', panel).value] || 'Other'}`;
+    const upload = async (file, sub, event = null) => C.api(`/api/jobs/apps/${a.id}/file`, { method: 'POST', body: { name: file.name || `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`, data: await b64(file), sub, event } });
+    let pending = [];
+    const showPending = () => { $('[data-efn]', panel).textContent = pending.length ? pending.map(x => x.name || 'screenshot.png').join(', ') : 'You can also paste a screenshot here.'; };
+    $('[data-ef]', panel).onchange = e => { pending = [...pending, ...e.target.files]; showPending(); };
+    panel.addEventListener('paste', e => { const imgs = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => { const fl = i.getAsFile(); return new File([fl], `screenshot-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`, { type: fl.type }); }); if (!imgs.length) return; e.preventDefault(); pending = [...pending, ...imgs]; showPending(); if (!$('[data-ett]', panel).value) $('[data-ett]', panel).value = 'Screenshot'; });
+    $('[data-eadd]', panel).onclick = async () => {
+        const b = $('[data-eadd]', panel); b.disabled = true;
+        try { const e = await C.api(`/api/jobs/apps/${a.id}/event`, { method: 'POST', body: { type: $('[data-et]', panel).value, date: $('[data-ed]', panel).value, title: $('[data-ett]', panel).value, text: $('[data-etx]', panel).value, stage: $('#ap-st', panel).value } }); for (const fl of pending) await upload(fl, stageFolder(), e.id); reopen(); }
+        catch (x) { C.toast(x.message, true); b.disabled = false; }
+    };
+    $$('[data-eatt]', panel).forEach(x => x.onchange = async ev => { try { for (const fl of ev.target.files) await upload(fl, stageFolder(), x.dataset.eatt); reopen(); } catch (e) { C.toast(e.message, true); } });
+    $$('[data-edone]', panel).forEach(x => x.onchange = () => C.api(`/api/jobs/apps/${a.id}/event`, { method: 'POST', body: { id: x.dataset.edone, done: x.checked } }).catch(e => C.toast(e.message, true)));
+    $$('[data-edel]', panel).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/apps/${a.id}/event/${x.dataset.edel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); reopen(); });
+    $('[data-ok]', panel).onclick = async () => { try { await C.api(`/api/jobs/apps/${a.id}`, { method: 'POST', body: { stage: $('#ap-st', panel).value, priority: $('#ap-pr', panel).value, next: $('#ap-nx', panel).value, nextDate: $('#ap-nd', panel).value, notes: $('#ap-no', panel).value } }); C.toast('Saved'); } catch (e) { C.toast(e.message, true); } };
     $('[data-files]', panel).onclick = () => { close(); C.state.filesPath = f.folder; C.go('files'); };
-    $('[data-up]', panel).onchange = async e => { const file = e.target.files[0]; if (!file) return; try { await C.api(`/api/jobs/apps/${a.id}/file`, { method: 'POST', body: { name: file.name, data: await b64(file), sub: /cover|cv|resume/i.test(file.name) ? 'CV & Cover Letter' : 'Application' } }); close(); appDialog(a); } catch (x) { C.toast(x.message, true); } };
-    const tl = $('[data-tailor]', panel); if (tl) tl.onclick = async () => { tl.disabled = true; try { const r = await C.api(`/api/jobs/apps/${a.id}/cv`, { method: 'POST', body: { choice: choice() } }); C.toast(r.note || `Saved ${r.pdf || r.tex}`); close(); appDialog(a); } catch (x) { C.toast(x.message, true); tl.disabled = false; } };
+    $('[data-up]', panel).onchange = async e => { try { for (const fl of e.target.files) await upload(fl, /cover|cv|resume/i.test(fl.name) ? 'CV & Cover Letter' : 'Application'); reopen(); } catch (x) { C.toast(x.message, true); } };
+    const tl = $('[data-tailor]', panel); if (tl) tl.onclick = async () => { tl.disabled = true; try { const r = await C.api(`/api/jobs/apps/${a.id}/cv`, { method: 'POST', body: { choice: choice() } }); C.toast(r.note || `Saved ${r.pdf || r.tex}`); reopen(); } catch (x) { C.toast(x.message, true); tl.disabled = false; } };
 }
 
 // ---------- Activity ----------
@@ -380,6 +441,7 @@ async function renderSetup(box) {
         <div class="card jh-form">
           <div class="jh-two"><div class="field"><label for="st-a">Agent for wishes and advice</label><select id="st-a">${['claude', 'codex', 'cline'].map(a => `<option value="${a}" ${(s.agent || 'claude') === a ? 'selected' : ''}>${esc(C.agentTitle ? C.agentTitle(a) : a)}</option>`).join('')}</select></div><div class="field"><label for="st-mo">Model</label><input id="st-mo" value="${esc(s.model || '')}" placeholder="default (or oss:<ollama model>)"></div></div>
         </div>
+        <div class="card jh-form" style="margin-top:8px"><label class="jh-check"><input type="checkbox" id="st-ac" ${s.autoCpd === false ? '' : 'checked'}>Update Me from my CPD log by itself (when 5+ entries are new, at most once a day)</label><label class="jh-check"><input type="checkbox" id="st-aa" ${s.autoAssess === false ? '' : 'checked'}>Assess new jobs that use a framework (Civil Service, SFIA…) automatically</label><div class="field"><label for="st-ad">At most this many agent assessments a day (reused ones are free)</label><input id="st-ad" type="number" min="0" max="50" value="${esc(s.autoAssessPerDay ?? 6)}"></div></div>
         <h3 class="jh-h">Money</h3>
         <div class="card jh-form">
           <div class="jh-two"><div class="field"><label for="st-sl">Student loan</label><select id="st-sl">${[['none', 'None'], ['plan1', 'Plan 1'], ['plan2', 'Plan 2'], ['plan4', 'Plan 4 (Scotland)'], ['plan5', 'Plan 5'], ['postgrad', 'Postgraduate']].map(([k, l]) => `<option value="${k}" ${mo.studentLoan === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="field"><label for="st-pe">Pension (% of pay)</label><input id="st-pe" type="number" min="0" max="40" value="${esc(mo.pension ?? 5)}"></div></div>
@@ -390,7 +452,7 @@ async function renderSetup(box) {
         <p class="note">Keys are kept in the Vault. Remotive and Arbeitnow need none.</p>
         ${Object.entries(s.keys).map(([k, v]) => `<div class="card jh-key"><div class="jh-keyhead"><b>${esc(v.title)}</b><span class="${v.ready ? 'live' : 'muted'}">${v.ready ? 'ready' : v.needs.length ? 'no key' : 'ready, no key needed'}</span><label class="jh-check"><input type="checkbox" data-src="${k}" ${s.sources.includes(k) ? 'checked' : ''}>Use</label></div>
             ${v.needs.length ? `<div class="jh-keyrow">${v.needs.map(n => `<input data-key="${k}" data-env="${n}" type="password" autocomplete="off" placeholder="${esc(n)}${v.ready ? ' (saved; paste to replace)' : ''}">`).join('')}<button class="btn" data-savekey="${k}">Save</button></div>${v.signup ? `<a class="text-btn" href="${esc(v.signup)}" target="_blank" rel="noopener">Get a key</a>` : ''}` : ''}</div>`).join('')}`;
-    $('[data-save]', box).onclick = async () => { try { await C.api('/api/jobs/settings', { method: 'POST', body: { keywords: $('#st-k', box).value, locations: $('#st-l', box).value, countries: $('#st-co', box).value, nationality: $('#st-na', box).value, remote: $('#st-r', box).checked, salaryMin: $('#st-m', box).value, exclude: $('#st-x', box).value, agent: $('#st-a', box).value, model: $('#st-mo', box).value, sources: $$('[data-src]', box).filter(x => x.checked).map(x => x.dataset.src), money: { studentLoan: $('#st-sl', box).value, pension: Number($('#st-pe', box).value) || 0, notes: $('#st-mn', box).value } } }); C.toast('Saved'); reload(); } catch (e) { C.toast(e.message, true); } };
+    $('[data-save]', box).onclick = async () => { try { await C.api('/api/jobs/settings', { method: 'POST', body: { keywords: $('#st-k', box).value, locations: $('#st-l', box).value, countries: $('#st-co', box).value, nationality: $('#st-na', box).value, remote: $('#st-r', box).checked, salaryMin: $('#st-m', box).value, exclude: $('#st-x', box).value, agent: $('#st-a', box).value, model: $('#st-mo', box).value, autoAssess: $('#st-aa', box).checked, autoCpd: $('#st-ac', box).checked, autoAssessPerDay: Number($('#st-ad', box).value), sources: $$('[data-src]', box).filter(x => x.checked).map(x => x.dataset.src), money: { studentLoan: $('#st-sl', box).value, pension: Number($('#st-pe', box).value) || 0, notes: $('#st-mn', box).value } } }); C.toast('Saved'); reload(); } catch (e) { C.toast(e.message, true); } };
     $$('[data-savekey]', box).forEach(b => b.onclick = async () => { const k = b.dataset.savekey; const values = Object.fromEntries($$(`[data-key="${k}"]`, box).map(i => [i.dataset.env, i.value.trim()]).filter(([, v]) => v)); if (!Object.keys(values).length) return C.toast('Paste the key first.', true); try { await C.api('/api/jobs/key', { method: 'POST', body: { source: k, values } }); C.toast('Saved in the Vault'); reload(); } catch (e) { C.toast(e.message, true); } });
 }
 
@@ -413,4 +475,53 @@ function findMeDialog() {
         <div class="field"><label for="fm-h">Hints: where you studied or worked, topics</label><textarea id="fm-h" rows="2" placeholder="Computer Science, 2021–2025; security; Splunk"></textarea></div>
         <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Search</button></div>`);
     $('[data-ok]', panel).onclick = () => { const name = $('#fm-n', panel).value.trim(); if (!name) return C.toast('Give your name.', true); close(); runAgent('/api/jobs/me/findme', { name, links: $('#fm-l', panel).value, hints: $('#fm-h', panel).value }, 'An agent is looking for your public work. Finds appear under "To confirm" on the Me tab, each with sources.'); };
+}
+
+function runAgentShown(shell, msg) { const { panel, close } = C.openDialog(`<h2>${C.icon('claude')}Started</h2><p class="muted">${C.esc(msg)}</p><div class="buttons"><button data-close>OK</button><button class="primary" data-watch>Watch it work</button></div>`, { size: 'small' }); C.$('[data-watch]', panel).onclick = () => { close(); C.openTerminal(shell, 'Job Hunt'); }; }
+// The framework the employer uses, the assessment element by element, and the blind second assessor's levels beside it.
+function frameworkSection(j, d) {
+    const { esc, icon } = C; const det = d.detected || []; const all = d.frameworks || [];
+    const pick = `<select data-fpick aria-label="Framework"><option value="">Detect it for me${det[0] ? ` (looks like ${esc(det[0].title)})` : ''}</option>${all.map(f => `<option value="${f.id}">${esc(f.title)}</option>`).join('')}</select>`;
+    const tables = (j.assess || []).map(a => {
+        const f = all.find(x => x.id === a.framework); const sc = f?.scale || {}; const name = v => (v === null || v === undefined ? '–' : `${v}${sc[v] && String(sc[v]) !== String(v) ? ` <span class="muted">${esc(String(sc[v]).replace(/^\d+\s*/, ''))}</span>` : ''}`);
+        const stale = d.meVersion && a.meVersion && a.meVersion !== d.meVersion; const blind = a.blind; const bstate = !blind ? (Date.now() - a.at > 15 * 60_000 ? `<span class="flagtxt">blind review did not finish</span> <button class="text-btn" data-fblind="${a.framework}">Retry</button>` : '<span class="muted">blind review running…</span>') : blind.status === 'done' ? `<span class="muted">blind: ${esc(blind.by)}</span>` : `<span class="flagtxt">blind review ${esc(blind.status)}</span> <button class="text-btn" data-fblind="${a.framework}">Retry</button>`;
+        return `<div class="jh-fw"><div class="jh-fwh"><b>${esc(a.title)}</b>${a.target ? `<span class="tg">${esc(a.target)}</span>` : ''}${stale ? '<span class="flagtxt">Me has changed since: assess again</span>' : ''}${a.reusedFrom ? '<span class="muted">reused</span>' : ''}${bstate}</div>
+          ${a.summary ? `<p class="jh-fws">${esc(a.summary)}</p>` : ''}
+          <table class="jh-fwt"><thead><tr><th>Element</th><th>Needs</th><th>Assessor</th><th>Blind</th></tr></thead><tbody>${a.elements.map(e => `<tr class="${e.flag ? 'flag' : ''}" title="${esc(e.rationale || '')}"><td>${esc(e.name)}${e.kind ? ` <span class="muted">${esc(e.kind)}</span>` : ''}${e.rationale ? `<div class="why">${esc(e.rationale)}</div>` : ''}</td><td>${esc(e.required ?? '–')}</td><td>${name(e.level)}</td><td>${name(e.blind)}${e.flag ? ' <span class="flagtxt">differs</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`;
+    }).join('');
+    return `${tables}<div class="jh-fwask">${pick}<button class="btn" data-fassess>${icon('shield')}${(j.assess || []).length ? 'Assess again' : 'Assess me like they will'}</button></div>
+        <p class="muted">Levels are judged for this job's framework, grade and advert only. Many employers score you against a published framework (Civil Service Success Profiles, SFIA, DDaT and others). An agent assesses you the same way from your confirmed evidence, then a blind assessor rates the same elements without seeing the job or the first scores. Elements where they differ by 2 or more need a clearer example.</p>`;
+}
+
+// ---------- CPD log ----------
+async function renderCpd(box) {
+    const { esc, icon, $, $$ } = C; const [{ entries, types }, me] = await Promise.all([C.api('/api/jobs/cpd'), C.api('/api/jobs/me')]);
+    const today = new Date().toISOString().slice(0, 10); const projects = me.items.filter(i => ['project', 'role', 'education'].includes(i.kind) && i.status !== 'proposed');
+    const fresh = entries.filter(e => !e.processed).length; const hours = entries.reduce((n, e) => n + (e.hours || 0), 0);
+    const days = new Set(entries.map(e => e.date)); let streak = 0; for (let d = new Date(); days.has(d.toISOString().slice(0, 10)); d.setDate(d.getDate() - 1)) streak++;
+    const yearAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10); const yearHours = entries.filter(e => e.date >= yearAgo).reduce((n, e) => n + (e.hours || 0), 0);
+    const byWeek = new Map(); for (const e of entries.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created)) { const d = new Date(`${e.date}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const k = d.toISOString().slice(0, 10); if (!byWeek.has(k)) byWeek.set(k, []); byWeek.get(k).push(e); }
+    box.innerHTML = `
+        <form class="jh-wish" data-cpd>
+          <label for="cp-t">What did you do or learn today?</label>
+          <textarea id="cp-t" rows="3" maxlength="6000" placeholder="e.g. Wrote a Sigma rule for suspicious PowerShell; learned how to test it against the Splunk lab; found that encoded commands evade my first version"></textarea>
+          <div class="jh-cprow">
+            <input id="cp-d" type="date" value="${today}" aria-label="Date">
+            <select id="cp-y" aria-label="Type">${Object.entries(types).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
+            <input id="cp-p" list="cp-pl" maxlength="160" placeholder="Project (optional)" aria-label="Project"><datalist id="cp-pl">${projects.map(p => `<option value="${esc(p.title)}">`).join('')}</datalist>
+            <input id="cp-h" type="number" min="0" step="0.25" placeholder="Hours" aria-label="Hours">
+            <input id="cp-g" maxlength="200" placeholder="Tags, comma-separated" aria-label="Tags">
+            <button class="btn pri" type="submit">${icon('plus')}Log it</button>
+          </div>
+        </form>
+        <div class="jh-stats">${[['Entries', entries.length], ['Day streak', streak], ['Hours, last 12 months', Math.round(yearHours * 10) / 10], ['Hours in total', Math.round(hours * 10) / 10], ['Not yet in Me', fresh]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}</div>
+        <div class="r-actions"><button class="btn" data-cpdup ${fresh ? '' : 'disabled'}>${icon('claude')}Update Me from my log${fresh ? ` (${fresh} new)` : ''}</button><a class="btn" href="/api/jobs/cpd.csv">${icon('download')}Export CSV</a></div>
+        <p class="note">New entries feed Me: an agent turns them into new skills, fresh evidence for your projects and notes, as proposals you confirm. Once 5 or more are new it does this by itself (at most once a day; the switch is in Setup). A changed Me marks job assessments for re-checking.</p>
+        ${[...byWeek].map(([wk, es]) => `<h3 class="jh-h">Week of ${new Date(`${wk}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<span class="muted"> · ${es.reduce((n, e) => n + (e.hours || 0), 0) || '–'} h</span></h3>${es.map(e => `<div class="jh-cpd ${e.processed ? '' : 'new'}"><div class="m"><div class="h"><span class="d">${new Date(`${e.date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}</span><span class="ty">${esc(types[e.type] || e.type)}</span>${e.project ? `<span class="pj">${esc(e.project)}</span>` : ''}${e.hours ? `<span class="hr">${e.hours} h</span>` : ''}${e.processed ? '' : '<span class="nw">new</span>'}</div><div class="tx">${esc(e.text)}</div>${(e.tags || []).length ? `<div class="tg">${e.tags.map(t => `#${esc(t)}`).join(' ')}</div>` : ''}</div><button class="text-btn dim" data-cpddel="${e.id}" aria-label="Delete entry">${icon('x')}</button></div>`).join('')}`).join('') || '<p class="note">Nothing logged yet. A line a day is enough: what you worked on, what you found out, what you got better at.</p>'}`;
+    $('[data-cpd]', box).onsubmit = async ev => {
+        ev.preventDefault(); const t = $('#cp-t', box).value.trim(); if (!t) return; const pj = $('#cp-p', box).value.trim();
+        try { await C.api('/api/jobs/cpd', { method: 'POST', body: { text: t, date: $('#cp-d', box).value, type: $('#cp-y', box).value, project: pj, meId: projects.find(p => p.title === pj)?.id, hours: $('#cp-h', box).value, tags: $('#cp-g', box).value } }); renderCpd(box); } catch (x) { C.toast(x.message, true); }
+    };
+    $('[data-cpdup]', box).onclick = () => runAgent('/api/jobs/cpd/update', {}, 'An agent is reading your new log entries into Me. Its proposals appear under "To confirm" on the Me tab.');
+    $$('[data-cpddel]', box).forEach(x => x.onclick = async () => { if (await C.confirmDialog({ title: 'Delete this entry?', text: 'It is removed from the log. Anything already added to Me stays.', action: 'Delete' })) { await C.api(`/api/jobs/cpd/${x.dataset.cpddel}/delete`, { method: 'POST' }).catch(e => C.toast(e.message, true)); renderCpd(box); } });
 }

@@ -826,6 +826,44 @@ phone's Update button. Mechanism:
     search settings, adds real open adverts and scores the best.
   - New jobs tools: propose_me, link_me, doc_files, read_doc, mark_doc_read, cv_files, read_cv, set_cv_template.
 
+- **2.18.0**: Job Hunt assesses you the way employers do, and keeps everything about each application.
+  - **Frameworks** (`server/lib/frameworks.js`): Civil Service Success Profiles, SFIA, DDaT, e-CF, ECSF, NICE, CIISec,
+    NHS KSF, and the advert's own competencies. Each has its scale, levels, elements (or how to find them), detection
+    patterns and assessor notes in our own words; official descriptions are read from the owner's site at assessment time
+    (SFIA's text is licensed and is not copied). A job's detected frameworks are shown on it.
+  - **Assess me like they will:** an agent assesses the job's elements (required level, the level the confirmed evidence
+    supports, Me ids, rationale) and saves it on the job (`assess`). A **blind second assessor** then rates the same
+    elements: a zero-trust probe that sees the rubric, the required levels and all confirmed evidence, but not the job,
+    the employer or the first levels; its levels sit beside the first and elements 2+ apart are flagged. Probes are kept
+    under `/Jobs/assess/<job>/probes/`. Tailoring writes to the framework (e.g. Success Profiles behaviour statements).
+  - **Levels are per job, never stored as facts about you:** each employer, grade and advert reads a framework its own
+    way. Me gets free **notes** instead (`me.json` `notes`; e.g. which example best shows a behaviour) that assessors read.
+    Each assessment records the `meVersion` (a hash of confirmed Me items and notes); when Me changes it is shown as
+    stale. **New jobs that use a named framework are assessed on arrival** (added by you, an agent or the hunt): copied
+    from another job when Me is unchanged, the framework and grade match and every element it names was covered
+    (marked "reused"); otherwise by a one-shot agent, one at a time, up to `autoAssessPerDay` (default 6; Setup has the
+    switch). Agents get add_me_note and previous_assessments (for consistency across jobs).
+  - **Application timeline:** dated entries (note, test, interview, deadline, email, call, offer) with text, a done tick
+    and attached files; screenshots can be pasted into the dialog and land in `Stages/<stage>/` in the application folder.
+    Any file type up to 50 MB, any safe sub-folder (up to 4 levels); images preview inline. **Coming up** (Board and
+    Applications) lists dated entries, next steps and closing dates of shortlisted jobs. Agents get list_applications
+    and add_event.
+  - **Cover-letter editor** (`web/letter.html?job=<id>`): Markdown with autosave, a check for changes made elsewhere,
+    preview, and versions (every save keeps the previous text in `/Jobs/drafts/<job>/.history/`; agents' drafts too).
+    **Generate** has an agent adapt your most similar past letters (other jobs' drafts and letter files in application
+    folders, ranked by how alike the jobs are, with letters from applications that reached interview ranked higher), or
+    write a new one. The side pane: **Fit review** (each requirement and assessed framework element, covered, partly or
+    missing by shared words, with the Me evidence for each and an insert button), **AI review** (a zero-trust agent
+    reads the requirements, advert and letter, not Me, and returns per requirement a verdict, the quote and a fix, plus
+    length, tone, specificity, clichés and top fixes; kept as `<name>.review.json`), and **Based on** (the past letters).
+  - **CPD log** (a CPD tab; `/Jobs/cpd.json`): dated entries with type, project (linked to a Me item when it matches),
+    hours and tags; streak and hours totals; CSV export for professional bodies. **Update Me from my log** has an agent
+    turn new entries into proposals (new skills, new evidence for ongoing projects, notes), and it runs by itself once
+    5 or more entries are new, at most once a day (`autoCpd`, in Setup). Agents get cpd_entries and mark_cpd_processed.
+  - Blind reviews that answer with a Markdown table instead of JSON are read from the table.
+  - New jobs tools: list_frameworks, framework_info, detect_framework, save_assessment, add_me_note,
+    previous_assessments, list_applications, add_event.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

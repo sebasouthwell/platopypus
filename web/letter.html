@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cover letter</title>
+<meta name="theme-color" content="#0A1120">
+<link rel="icon" type="image/svg+xml" href="/mascot.svg">
+<link rel="stylesheet" href="/letter.css">
+</head>
+<body>
+<header id="bar">
+  <a class="back" href="/" id="back"><img src="/mascot.svg" alt="" width="26" height="26">Job Hunt</a>
+  <div class="ttl"><h1 id="title">Cover letter</h1><div id="sub" class="muted"></div></div>
+  <span id="state" class="muted"></span>
+  <select id="hist" aria-label="Earlier versions"><option value="">Versions</option></select>
+  <button id="gen" class="btn">Generate</button>
+  <button id="save" class="btn pri" disabled>Save</button>
+</header>
+<main id="grid">
+  <section id="ed">
+    <div id="edtabs" role="tablist"><button data-v="write" class="on">Write</button><button data-v="preview">Preview</button><span id="count" class="muted"></span></div>
+    <textarea id="code" spellcheck="true" aria-label="Cover letter (Markdown)" placeholder="Press Generate to start from your most similar past letter, or write here."></textarea>
+    <article id="pv" hidden></article>
+  </section>
+  <aside id="side">
+    <div id="sidetabs" role="tablist"><button data-p="fit" class="on">Fit review</button><button data-p="ai">AI review</button><button data-p="based">Based on</button></div>
+    <div id="fit"></div>
+    <div id="ai" hidden></div>
+    <div id="based" hidden></div>
+  </aside>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/letter.js"></script>
+</body>
+</html>

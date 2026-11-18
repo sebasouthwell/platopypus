@@ -804,6 +804,7 @@ const server = http.createServer(async (req, res) => {
         }
         // Conspiracy: cases, the pinboard, theories, probes. Needs the app.
         // Job Hunt (lib/jobs.js). Files go up as base64 in JSON (CVs, application documents).
+        jobs.setAgentRunner(async (prompt, base) => { const st = jobs.settings(); const name = `${base}-${Math.random().toString(36).slice(2, 4)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: prompt, oneshot: true }); return name; });
         if (p === '/api/jobs' || p.startsWith('/api/jobs/')) {
             if (!(await addons.isAdded('jobs'))) return send(res, 409, { error: 'Add Job Hunt first (Apps tab).', needApp: 'jobs' });
             if (!jobs.ready()) jobs.setup();
@@ -845,6 +846,14 @@ const server = http.createServer(async (req, res) => {
                 jobs.log({ kind: label === 'web' ? 'hunt' : 'me', by: 'phone', what: label === 'import' ? 'Agent reading a CV into Me' : label === 'findme' ? 'Agent looking for your work online' : 'Agent searching the web for jobs' });
                 return send(res, 201, { shell: name });
             }
+            if (rest === 'frameworks' && method === 'GET') return send(res, 200, { frameworks: jobs.frameworks() });
+            if (rest === 'cpd' && method === 'GET') return send(res, 200, { entries: jobs.cpd(), types: jobs.CPD_TYPES });
+            if (rest === 'cpd' && method === 'POST') return send(res, 201, jobs.saveCpd(await body(), 'phone'));
+            if ((jm = rest.match(/^cpd\/(p[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeCpd(jm[1]));
+            if (rest === 'cpd.csv' && method === 'GET') { const csv = jobs.cpdCsv(); res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="cpd-log.csv"', 'Cache-Control': 'no-store', ...securityHeaders() }); return res.end(csv); }
+            if (rest === 'cpd/update' && method === 'POST') { jobs.writeBrief(); const st = jobs.settings(); const name = `cpd-${Math.random().toString(36).slice(2, 6)}`; await shells.create({ name, kind: 'agent', agent: st.agent || 'claude', model: st.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.cpdPrompt(), oneshot: true }); jobs.log({ kind: 'cpd', by: 'phone', what: 'Updating Me from the CPD log' }); return send(res, 201, { shell: name }); }
+            if (rest === 'notes' && method === 'POST') return send(res, 201, jobs.addNote(await body(), 'phone'));
+            if ((jm = rest.match(/^notes\/(n[0-9a-f]{6})\/delete$/)) && method === 'POST') return send(res, 200, jobs.removeNote(jm[1]));
             if (rest === 'docs' && method === 'GET') return send(res, 200, { docs: jobs.docs() });
             if (rest === 'docs' && method === 'POST') return send(res, 201, jobs.addDoc(await body(56 * 1024 * 1024), 'phone'));
             if ((jm = rest.match(/^docs\/(d[0-9a-f]{6})\/(delete|file|read)$/))) {
@@ -865,10 +874,31 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'board' && method === 'POST') return send(res, 201, jobs.addJob(await body(256 * 1024), 'phone'));
             if ((jm = rest.match(/^job\/(j[0-9a-f]{6})(?:\/(\w+))?$/))) {
                 const [id, op = ''] = [jm[1], jm[2] || ''];
-                if (op === '' && method === 'GET') return send(res, 200, { job: jobs.getJob(id), advice: jobs.adviceFor(id), drafts: jobs.drafts(id), plan: jobs.PLAN, candidates: jobs.getJob(id).requirements?.length ? jobs.candidates(jobs.getJob(id).requirements) : [], estimate: jobs.getJob(id).salaryMin ? jobs.ukEstimate(jobs.getJob(id).salaryMin, jobs.settings().money) : null });
+                if (op === '' && method === 'GET') return send(res, 200, { job: jobs.getJob(id), advice: jobs.adviceFor(id), drafts: jobs.drafts(id), plan: jobs.PLAN, detected: jobs.detectFrameworks(id), meVersion: jobs.meVersion(), frameworks: jobs.frameworks().map(f => ({ id: f.id, title: f.title, scale: f.scale })), candidates: jobs.getJob(id).requirements?.length ? jobs.candidates(jobs.getJob(id).requirements) : [], estimate: jobs.getJob(id).salaryMin ? jobs.ukEstimate(jobs.getJob(id).salaryMin, jobs.settings().money) : null });
                 if (op === '' && method === 'POST') return send(res, 200, jobs.updateJob(id, await body(), 'phone'));
                 if (op === 'advice' && method === 'POST') { const b = await body(); return send(res, 201, { probes: await jobs.askAdvice(id, b, 'phone') }); }
                 if (op === 'money' && method === 'POST') return send(res, 200, jobs.setMoney(id, await body(), 'phone'));
+                if (op === 'assess' && method === 'POST') {
+                    const b = await body(); const j = jobs.getJob(id); const st = jobs.settings(); jobs.writeBrief();
+                    if (b.blindOnly) return send(res, 201, await jobs.blindReview(id, String(b.framework || ''), 'phone'));
+                    const name = `assess-${id.slice(1)}-${Math.random().toString(36).slice(2, 4)}`;
+                    await shells.create({ name, kind: 'agent', agent: b.agent || st.agent || 'claude', model: b.model ?? st.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: jobs.assessPrompt(j, b.framework || ''), oneshot: true });
+                    jobs.log({ kind: 'assess', by: 'phone', what: `${j.title}: framework assessment started` }); return send(res, 201, { shell: name });
+                }
+                // Cover letters (web/letter.html): read with fit coverage, save, generate, review, restore a version.
+                if (op === 'letter' && method === 'GET') { const nm = String(url.searchParams.get('name') || 'cover-letter'); const j = jobs.getJob(id); const sim = await jobs.similarLetters(id); return send(res, 200, { job: { id: j.id, title: j.title, company: j.company || '', url: j.url || '', location: j.location || '', match: j.match || null }, ...jobs.letter(id, nm), coverage: jobs.coverage(id, nm), similar: sim.map(x => ({ title: x.title, company: x.company, label: x.label, score: Math.round(x.score * 100), stage: x.stage || null })) }); }
+                if (op === 'letter' && method === 'POST') {
+                    const b = await body(512 * 1024); const nm = String(b.name || 'cover-letter');
+                    if (!b.action || b.action === 'save') return send(res, 200, jobs.writeLetter(id, nm, b.text, { baseMtime: b.baseMtime }, 'phone'));
+                    if (b.action === 'restore') return send(res, 200, jobs.restoreLetter(id, nm, b.version));
+                    if (b.action === 'review') return send(res, 201, await jobs.reviewLetter(id, nm, 'phone'));
+                    if (b.action === 'generate') {
+                        jobs.writeBrief(); const st = jobs.settings(); const name = `letter-${id.slice(1)}-${Math.random().toString(36).slice(2, 4)}`;
+                        await shells.create({ name, kind: 'agent', agent: b.agent || st.agent || 'claude', model: b.model ?? st.model ?? '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: await jobs.letterPrompt(id, { name: nm, extra: b.extra || '', fresh: !!b.fresh }), oneshot: true });
+                        jobs.log({ kind: 'draft', by: 'phone', what: `${jobs.getJob(id).title}: letter generation started` }); return send(res, 201, { shell: name });
+                    }
+                    return send(res, 400, { error: 'action: save, generate, review or restore.' });
+                }
                 if (op === 'plan' && method === 'POST') return send(res, 200, jobs.setPlan(id, await body(), 'phone'));
                 if (op === 'draft' && method === 'GET') return send(res, 200, { name: url.searchParams.get('name'), text: jobs.readDraft(id, String(url.searchParams.get('name') || '')) });
                 // The AI work for a stage: research fans out probes; the others run a one-shot agent that writes drafts.
@@ -901,11 +931,14 @@ const server = http.createServer(async (req, res) => {
             if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\.(pdf|tex)$/)) && method === 'GET') return fileOut(jobs.versionFile(jm[1], jm[2]), typeOf(`x.${jm[2]}`), `CV.${jm[2]}`, url.searchParams.get('download') !== '1');
             if (rest === 'apps' && method === 'GET') return send(res, 200, { apps: jobs.applications().map(a => ({ ...a, folder: path.relative(config.root, a.folder) })) });
             if (rest === 'apps' && method === 'POST') { const a = jobs.createApplication(await body(), 'phone'); return send(res, 201, { ...a, folder: path.relative(config.root, a.folder) }); }
+            if (rest === 'upcoming' && method === 'GET') return send(res, 200, { upcoming: jobs.upcoming(Number(url.searchParams.get('days')) || 90) });
+            if ((jm = rest.match(/^apps\/(a[0-9a-f]{6})\/event(?:\/(e[0-9a-f]{6})\/delete)?$/)) && method === 'POST') return send(res, 200, jm[2] ? jobs.removeEvent(jm[1], jm[2]) : jobs.saveEvent(jm[1], await body(), 'phone'));
             if ((jm = rest.match(/^apps\/(a[0-9a-f]{6})(?:\/(files|file|cv))?$/))) {
                 const [id, op = ''] = [jm[1], jm[2] || ''];
                 if (op === '' && method === 'POST') return send(res, 200, jobs.updateApplication(id, await body(), 'phone'));
                 if (op === 'files' && method === 'GET') { const f = jobs.appFiles(id); return send(res, 200, { ...f, folder: path.relative(config.root, f.folder) }); }
-                if (op === 'file' && method === 'POST') return send(res, 201, jobs.saveAppFile(id, await body(30 * 1024 * 1024)));
+                if (op === 'file' && method === 'POST') return send(res, 201, jobs.saveAppFile(id, await body(70 * 1024 * 1024)));
+                if (op === 'file' && method === 'GET') { const f = jobs.appFilePath(id, url.searchParams.get('path')); const ext = path.extname(f).toLowerCase(); const t = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }[ext] || typeOf(f); return fileOut(f, t, path.basename(f), url.searchParams.get('download') !== '1'); }
                 if (op === 'cv' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.cvForApplication(id, b.choice || {}, 'phone')); }
             }
             return send(res, 404, { error: 'Not found.' });

@@ -52,7 +52,7 @@ export function setSettings(b = {}) {
     if (!ready()) setup();
     const s = readJson(P('.platopypus', 'jobs.json'), {}) || {};
     for (const k of ['keywords', 'locations', 'countries', 'nationality', 'exclude', 'home', 'currency', 'agent', 'model']) if (b[k] !== undefined) s[k] = clip(b[k], 400);
-    if (b.remote !== undefined) s.remote = !!b.remote;
+    if (b.remote !== undefined) s.remote = !!b.remote; if (b.autoCpd !== undefined) s.autoCpd = !!b.autoCpd; if (b.autoAssess !== undefined) s.autoAssess = !!b.autoAssess; if (b.autoAssessPerDay !== undefined) s.autoAssessPerDay = Math.max(0, Math.min(50, Math.round(Number(b.autoAssessPerDay) || 0)));
     if (b.salaryMin !== undefined) { const n = Number(b.salaryMin); s.salaryMin = Number.isFinite(n) && n > 0 ? Math.round(n) : null; }
     if (Array.isArray(b.sources)) s.sources = b.sources.filter(x => SOURCES[x]);
     if (b.money && typeof b.money === 'object') s.money = { ...DEFAULTS.money, ...(s.money || {}), ...Object.fromEntries(Object.entries(b.money).map(([k, v]) => [k, typeof v === 'number' ? v : clip(v, 200)])) };
@@ -148,7 +148,7 @@ function upsertJob(b, j, by) {
 }
 export function addJob(body, by = 'phone') {
     const b = board(); if (!clip(body.title, 10)) throw httpError(400, 'A job needs a title.');
-    const { it, fresh } = upsertJob(b, body, by); saveBoard(b);
+    const { it, fresh } = upsertJob(b, body, by); saveBoard(b); if (fresh) queueAssess(it.id);
     if (fresh) log({ kind: 'job', by, what: `Found: ${it.title}${it.company ? ` at ${it.company}` : ''}${it.source ? ` (${it.source})` : ''}` });
     return it;
 }
@@ -206,7 +206,7 @@ export async function hunt(by = 'phone') {
     const s = settings(); if (!s.keywords.trim()) throw httpError(400, 'Set what to look for first (Setup: keywords).');
     const kv = await keyValues(); const ks = keyStatus();
     const locs = (s.locations || '').split(/[;,]/).map(x => x.trim()).filter(Boolean); const exclude = words(s.exclude); const want = words(s.keywords);
-    hunting = { started: Date.now() }; const out = { found: 0, added: 0, bySource: {}, errors: {} };
+    hunting = { started: Date.now() }; const out = { found: 0, added: 0, bySource: {}, errors: {} }; const fresh_ids = [];
     try {
         const b = board();
         for (const src of s.sources) {
@@ -217,13 +217,13 @@ export async function hunt(by = 'phone') {
                     const list = await FETCH[src]({ keywords: s.keywords, location, salaryMin: s.salaryMin, country }, kv);
                     for (const j of list) {
                         if (!j.title) continue; if (want.length && !want.some(w => `${j.title} ${j.category || ''}`.toLowerCase().includes(w))) continue; if (exclude.some(w => `${j.title} ${j.company || ''}`.toLowerCase().includes(w))) continue;
-                        out.found++; const { fresh } = upsertJob(b, j, `hunt (${src})`); if (fresh) { out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
+                        out.found++; const { it: nj, fresh } = upsertJob(b, j, `hunt (${src})`); if (fresh) { fresh_ids.push(nj.id); out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
                     }
                 } catch (e) { out.errors[src] = e.message; }
                 if (src === 'arbeitnow' || src === 'remotive') break;   // these do not take a location
             }
         }
-        saveBoard(b);
+        saveBoard(b); for (const fid of fresh_ids) queueAssess(fid);
         log({ kind: 'hunt', by, what: `Hunt: ${out.found} seen, ${out.added} new${Object.keys(out.errors).length ? `; errors: ${Object.entries(out.errors).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`, ms: Date.now() - hunting.started });
         record('activity', 'jobs-hunt', { actor: by, what: `${out.added} new jobs (${out.found} seen)` });
         return out;
@@ -291,12 +291,50 @@ export function appFiles(id) {
     const out = []; const walk = (d, rel = '') => { let l = []; try { l = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of l) { if (e.isDirectory()) walk(path.join(d, e.name), `${rel}${e.name}/`); else out.push({ path: `${rel}${e.name}`, size: fs.statSync(path.join(d, e.name)).size }); } };
     walk(a.folder); return { folder: a.folder, files: out };
 }
-export function saveAppFile(id, { name, data, sub = 'Application' }) {
+const SAFE_SEG = /^[A-Za-z0-9 &()._,'-]{1,60}$/;
+function safeSub(sub) { const segs = String(sub || 'Application').split('/').map(x => x.trim()).filter(Boolean); if (!segs.length || segs.length > 4 || segs.some(x => !SAFE_SEG.test(x) || x === '.' || x === '..')) throw httpError(400, 'Folder: up to 4 levels of letters, digits, spaces and . _ - & ( ).'); return segs.join('/'); }
+export function saveAppFile(id, { name, data, sub = 'Application', event = null }) {
+    const apps = applications(); const a = apps.find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
+    const safe = String(name || '').replace(/[\\/:*?"<>|]+/g, '_').replace(/^\.+/, '').slice(0, 120); if (!safe) throw httpError(400, 'Name the file.');
+    const folder = safeSub(sub); const buf = Buffer.from(String(data || ''), 'base64'); if (!buf.length || buf.length > 50 * 1024 * 1024) throw httpError(400, 'The file is empty or over 50 MB.');
+    const dir = path.join(a.folder, folder); fs.mkdirSync(dir, { recursive: true }); let cur = a.folder; for (const seg of folder.split('/')) { cur = path.join(cur, seg); share(cur); }
+    let f = path.join(dir, safe); for (let n = 2; fs.existsSync(f); n++) f = path.join(dir, safe.replace(/(\.[^.]*)?$/, m => ` (${n})${m}`));
+    fs.writeFileSync(f, buf); share(f); const rel = path.relative(a.folder, f).split(path.sep).join('/');
+    if (event) { const e = (a.events || []).find(x => x.id === event); if (e) { e.files = [...new Set([...(e.files || []), rel])]; saveApps(apps); } }
+    return { saved: rel };
+}
+export function appFilePath(id, rel) {
     const a = applications().find(x => x.id === id); if (!a) throw httpError(404, 'No such application.');
-    const safe = String(name || '').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120); if (!safe) throw httpError(400, 'Name the file.');
-    const folder = ['Application', 'CV & Cover Letter', 'Notes'].includes(sub) ? sub : 'Application';
-    const buf = Buffer.from(String(data || ''), 'base64'); if (!buf.length || buf.length > 25 * 1024 * 1024) throw httpError(400, 'The file is empty or over 25 MB.');
-    const f = path.join(a.folder, folder, safe); fs.writeFileSync(f, buf); share(f); return { saved: `${folder}/${safe}` };
+    const f = path.resolve(a.folder, String(rel || '')); const r = path.relative(a.folder, f); if (!r || r.startsWith('..') || path.isAbsolute(r) || !fs.existsSync(f) || !fs.statSync(f).isFile()) throw httpError(404, 'No such file.');
+    return f;
+}
+// Timeline: notes, tests, interviews, deadlines, emails, offers; each dated, with files attached.
+export const EVENT_TYPES = { note: 'Note', test: 'Test', interview: 'Interview', deadline: 'Deadline', email: 'Email', call: 'Call', offer: 'Offer', other: 'Other' };
+export function saveEvent(id, b, by = 'phone') {
+    const apps = applications(); const a = apps.find(x => x.id === id); if (!a) throw httpError(404, 'No such application.'); a.events ||= [];
+    let e = b.id ? a.events.find(x => x.id === b.id) : null; if (b.id && !e) throw httpError(404, 'No such event.');
+    if (!e) { e = { id: id6('e'), created: Date.now(), by, files: [] }; a.events.push(e); }
+    if (b.type !== undefined) e.type = EVENT_TYPES[b.type] ? b.type : 'note';
+    e.type ||= 'note';
+    for (const k of ['title', 'date', 'time', 'stage']) if (b[k] !== undefined) e[k] = clip(b[k], k === 'title' ? 200 : 40);
+    if (b.text !== undefined) e.text = clip(b.text, 10000);
+    if (b.done !== undefined) e.done = !!b.done;
+    if (e.date && !/^\d{4}-\d{2}-\d{2}$/.test(e.date)) throw httpError(400, 'Date: YYYY-MM-DD.');
+    e.updated = Date.now(); saveApps(apps);
+    if (!b.id) log({ kind: 'event', by, what: `${a.title}${a.company ? ` at ${a.company}` : ''}: ${EVENT_TYPES[e.type]}${e.title ? ` "${e.title}"` : ''}${e.date ? ` on ${e.date}` : ''}` });
+    return e;
+}
+export function removeEvent(id, eid) { const apps = applications(); const a = apps.find(x => x.id === id); if (!a) throw httpError(404, 'No such application.'); a.events = (a.events || []).filter(x => x.id !== eid); saveApps(apps); return { removed: eid }; }
+// What is coming up: dated events not done, next steps, and deadlines of jobs you are going for.
+export function upcoming(days = 60) {
+    const today = new Date().toISOString().slice(0, 10); const until = new Date(Date.now() + days * 864e5).toISOString().slice(0, 10); const out = [];
+    for (const a of applications()) {
+        if (['rejected', 'withdrawn', 'accepted'].includes(a.stage)) continue;
+        for (const e of a.events || []) if (e.date && !e.done && e.date <= until) out.push({ date: e.date, time: e.time || '', what: `${EVENT_TYPES[e.type]}${e.title ? `: ${e.title}` : ''}`, app: a.id, title: a.title, company: a.company, late: e.date < today, event: e.id });
+        if (a.nextDate && a.nextDate <= until) out.push({ date: a.nextDate, what: `Next: ${a.next || 'step'}`, app: a.id, title: a.title, company: a.company, late: a.nextDate < today });
+    }
+    for (const j of board().jobs) if (['shortlisted', 'applying'].includes(j.status) && j.deadline && j.deadline >= today && j.deadline <= until) out.push({ date: j.deadline, what: 'Application closes', job: j.id, title: j.title, company: j.company || '' });
+    return out.sort((x, y) => `${x.date}${x.time || ''}`.localeCompare(`${y.date}${y.time || ''}`));
 }
 
 // ---------- overview ----------
@@ -305,7 +343,7 @@ export function overview() {
     const today = new Date().toISOString().slice(0, 10);
     return { settings: settings(), counts: { jobs: b.jobs.filter(j => j.status !== 'hidden').length, new: b.jobs.filter(j => j.status === 'new').length, shortlisted: b.jobs.filter(j => j.status === 'shortlisted').length, scored: b.jobs.filter(j => j.match).length,
         applied: apps.filter(a => a.history.some(h => h.stage === 'applied')).length, inProgress: live.filter(a => a.stage !== 'preparing').length, toApply: b.jobs.filter(j => ['shortlisted', 'applying'].includes(j.status) && (!j.deadline || j.deadline >= today)).length,
-        me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, cvs: cvs().length } };
+        me: me().items.length, gaps: me().gaps.filter(g => g.status === 'open').length, cvs: cvs().length }, upcoming: upcoming(30).slice(0, 8), eventTypes: EVENT_TYPES };
 }
 
 // ---------- My CV: a LaTeX template with swappable sections ----------
@@ -524,12 +562,25 @@ kit.registerApp('jobs', {
     context(shell) { if (!shell?.cwd || !inJobs(shell.cwd)) { const e = new Error('Job Hunt tools work from a shell in the Job Hunt folder.'); e.status = 403; throw e; } return {}; },
     tools: [
         { name: 'me_summary', description: 'Everything about the person: projects, roles, skills, education, qualifications, achievements (id, kind, level, dates). Read this first.', inputSchema: kit.obj({ kind: kit.str('Only this kind: project, role, skill, education, cert, achievement, interest') }),
-            run: (c, a) => { const items = me().items.filter(i => !a.kind || i.kind === a.kind); return items.length ? items.map(meLine).join('\n') : 'Me is empty: ask the person about their experience (add_me) before judging fit.'; } },
+            run: (c, a) => { const m = me(); const items = m.items.filter(i => !a.kind || i.kind === a.kind); const notes = (m.notes || []).map(n => `note ${n.id}${n.topic ? ` [${n.topic}]` : ''}: ${n.text}`); return items.length ? [...items.map(meLine), ...(notes.length ? ['', 'Notes:', ...notes] : [])].join('\n') : 'Me is empty: ask the person about their experience (add_me) before judging fit.'; } },
         { name: 'me_item', description: 'One Me item in full: summary, evidence, tags, links.', inputSchema: kit.obj({ id: kit.str('Me item id') }, ['id']), run: (c, a) => { const i = me().items.find(x => x.id === a.id); if (!i) throw httpError(404, 'No such item.'); return i; } },
         { name: 'add_me', description: 'Add or update a Me item (same kind and title updates it). Only what the person told you or what their files show.', inputSchema: kit.obj({ kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), summary: kit.str('What it was and what they did'), level: kit.str('aware | working | strong | expert'), org: kit.str('Company, university or client'), from: kit.str('Start (YYYY or YYYY-MM)'), to: kit.str('End, or "now"'), tags: kit.arr('Skills and tools it shows'), evidence: kit.arr('Concrete evidence: results, numbers, links, files'), links: kit.arr('Ids of related Me items') }, ['kind', 'title']),
             run: (c, a, by) => meLine(addMe(a, by)) },
         { name: 'propose_me', description: 'Propose a Me item you found (in the person\'s CV or online) for them to confirm. Needs sources; say in "why" how you know it is theirs, and how sure you are.', inputSchema: kit.obj({ kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), summary: kit.str('What it was and what they did'), level: kit.str('aware | working | strong | expert, only if clear'), org: kit.str('Company, university or client'), from: kit.str('Start'), to: kit.str('End, or now'), tags: kit.arr('Skills and tools it shows'), evidence: kit.arr('Concrete evidence'), links: kit.arr('Ids of related Me items'), sources: kit.arr('Where it comes from', kit.obj({ url: kit.str('Link'), title: kit.str('Title'), note: kit.str('What it shows') })), why: kit.str('How you know it is this person'), confidence: kit.str('high | medium | low') }, ['kind', 'title', 'sources']),
             run: (c, a, by) => meLine(addMe({ ...a, proposed: true }, by)) },
+        { name: 'list_applications', description: 'Applications: stage, next step, and dated events.', inputSchema: kit.obj({}), run: () => applications().map(a => `${a.id} [${a.stage}] ${a.title}${a.company ? ` · ${a.company}` : ''} (job ${a.job})${a.next ? ` · next: ${a.next} ${a.nextDate || ''}` : ''}${(a.events || []).filter(e => !e.done && e.date).map(e => `\n    ${e.date} ${e.type}: ${e.title || ''}`).join('')}`).join('\n') || 'No applications.' },
+        { name: 'add_event', description: 'Add a dated item to an application\'s timeline (a test to take, an interview, a deadline, a note). Only what the person told you or an email they shared shows.', inputSchema: kit.obj({ app: kit.str('Application id'), type: kit.str('note | test | interview | deadline | email | call | offer | other'), title: kit.str('Title'), date: kit.str('YYYY-MM-DD'), time: kit.str('HH:MM'), text: kit.str('Details') }, ['app', 'type']),
+            run: (c, a, by) => { const e = saveEvent(a.app, a, by); return `Added ${e.type} ${e.date || ''}`; } },
+        { name: 'list_frameworks', description: 'Assessment frameworks employers use (SFIA, Civil Service Success Profiles, DDaT, e-CF, ECSF, NICE, CIISec, NHS KSF, or the advert\'s own competencies).', inputSchema: kit.obj({}), run: () => frameworks().map(f => `${f.id}: ${f.title} (${f.region})`).join('\n') },
+        { name: 'framework_info', description: 'One framework: its scale, levels, elements, how assessors score, and the official URL to read the real descriptions.', inputSchema: kit.obj({ id: kit.str('Framework id') }, ['id']), run: (c, a) => { const f = frameworks().find(x => x.id === a.id); if (!f) throw httpError(404, 'No such framework.'); return f; } },
+        { name: 'detect_framework', description: 'Which framework a job\'s advert points to (by its wording: grades, bands, framework names).', inputSchema: kit.obj({ job: kit.str('Job id') }, ['job']), run: (c, a) => detectFrameworks(a.job) },
+        { name: 'save_assessment', description: 'Save a framework assessment for a job: target grade or level, and per element the required level, the level the confirmed Me evidence supports (on the framework scale), the Me ids and a rationale. A blind second assessor then rates the same elements.', inputSchema: kit.obj({ job: kit.str('Job id'), framework: kit.str('Framework id'), target: kit.str('Grade, band or role level, e.g. "HEO", "SFIA 3", "DDaT associate"'), summary: kit.str('Likely sift outcome and why'), elements: kit.arr('Elements', kit.obj({ id: kit.str('Short id'), name: kit.str('Element name'), kind: kit.str('behaviour, skill, experience, technical…'), required: kit.str('Level required'), level: kit.num('Level the evidence supports'), evidence: kit.arr('Me ids'), rationale: kit.str('Why') })) }, ['job', 'framework', 'elements']),
+            run: (c, a, by) => { const r = saveAssessment(a.job, a, by); return `Saved ${r.elements.length} elements; the blind review has started.`; } },
+        { name: 'cpd_entries', description: 'The person\'s CPD log: what they did and learned, by date (new entries only unless all is true).', inputSchema: kit.obj({ all: kit.bool('Include entries already read into Me') }), run: (c, a) => cpd().filter(e => a.all || !e.processed).sort((x, y) => x.date.localeCompare(y.date)).map(e => `${e.id} ${e.date} [${e.type}${e.hours ? `, ${e.hours} h` : ''}]${e.project ? ` (${e.project}${e.meId ? ` = ${e.meId}` : ''})` : ''}${(e.tags || []).length ? ` #${e.tags.join(' #')}` : ''}: ${e.text}`).join('\n') || 'No new entries.' },
+        { name: 'mark_cpd_processed', description: 'Mark CPD entries as read into Me.', inputSchema: kit.obj({ ids: kit.arr('Entry ids') }, ['ids']), run: (c, a) => markCpd(a.ids || []) },
+        { name: 'add_me_note', description: 'Add a free note to Me: context that helps assessments (e.g. which example best shows a behaviour, what the person did in a group project). Not a level: levels are judged per job.', inputSchema: kit.obj({ text: kit.str('The note'), topic: kit.str('Short topic, e.g. "Delivering at Pace" or "SFIA: SCTY"') }, ['text']), run: (c, a, by) => addNote(a, by) },
+        { name: 'previous_assessments', description: 'Earlier assessments of other jobs against a framework, with the Me version they used (the current Me version is given). For consistency: levels are per job, but the same evidence should be read the same way.', inputSchema: kit.obj({ framework: kit.str('Framework id') }, ['framework']),
+            run: (c, a) => { const v = meVersion(); const out = board().jobs.flatMap(j => (j.assess || []).filter(x => x.framework === a.framework).map(x => `${j.title}${j.company ? ` · ${j.company}` : ''} [${x.target || ''}] Me ${x.meVersion === v ? 'unchanged' : 'changed since'}: ${x.elements.map(e => `${e.name} ${e.level ?? '–'}${e.blind !== undefined && e.blind !== null ? `/${e.blind}` : ''}`).join('; ')}`)); return `Current Me version ${v}\n${out.join('\n') || 'None yet.'}`; } },
         { name: 'link_me', description: 'Link Me items to each other (e.g. a skill to the project that shows it, an achievement to its role). Use after proposing, once both ids exist.', inputSchema: kit.obj({ id: kit.str('Me item id'), to: kit.arr('Ids to link it to') }, ['id', 'to']),
             run: (c, a) => { const m = me(); const it = m.items.find(i => i.id === a.id); if (!it) throw httpError(404, 'No such item.'); const ok = (a.to || []).filter(x => x !== a.id && m.items.some(i => i.id === x)); it.links = [...new Set([...(it.links || []), ...ok])].slice(0, 40); saveMe(m); return `${it.title}: ${it.links.length} links`; } },
         { name: 'doc_files', description: 'The person\'s own documents (reports, papers, theses, slides): id, name, kind, whether read into Me yet.', inputSchema: kit.obj({}), run: () => docs().map(x => `${x.id} ${x.name}${x.kind ? ` (${x.kind})` : ''}${x.read ? ' [read into Me]' : ''}`).join('\n') || 'No documents.' },
@@ -597,9 +648,7 @@ export function readDraft(id, name) { if (!DRAFT_NAME.test(name)) throw httpErro
 export function saveDraft(id, name, text, by = 'phone') {
     const j = getJob(id); const n = String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (!DRAFT_NAME.test(n)) throw httpError(400, 'Name the draft (letters, digits, dashes), e.g. cover-letter.');
     const t = String(text || ''); if (t.trim().length < 10 || t.length > 200_000) throw httpError(400, 'The draft is empty or too long.');
-    fs.mkdirSync(draftDir(id), { recursive: true }); share(P('drafts')); share(draftDir(id)); const f = path.join(draftDir(id), `${n}.md`); fs.writeFileSync(f, t); share(f);
-    const app = applications().find(a => a.job === id && !['rejected', 'withdrawn'].includes(a.stage));
-    if (app) { const sub = /letter|cv/.test(n) ? 'CV & Cover Letter' : 'Notes'; try { fs.writeFileSync(path.join(app.folder, sub, `${n}.md`), t); share(path.join(app.folder, sub, `${n}.md`)); } catch { /* folder gone */ } }
+    writeLetter(id, n, t, {}, 'agent'); const app = applications().find(a => a.job === id && !['rejected', 'withdrawn'].includes(a.stage));
     log({ kind: 'draft', by, what: `Draft "${n}" for ${j.title}${j.company ? ` at ${j.company}` : ''}` }); return { name: n, copiedTo: app ? path.relative(ROOT, app.folder) : null };
 }
 // The brief agents read: the Job Hunt brief, then the playbook (both editable under AI prompts).
@@ -609,7 +658,7 @@ export function writeBrief() {
 export function stagePrompt(j, stage, extra = '') {
     const head = `Job ${j.id}: "${j.title}"${j.company ? ` at ${j.company}` : ''}${j.location ? ` (${j.location})` : ''}. Follow the playbook in $PORTHOLE_SECURITY_FILE for this stage. Use the jobs tools (MCP server "jobs", or the \`jobhunt\` command). Read me_summary and show_job first.\n\n`;
     const tail = `${extra ? `\nThe person adds: ${clip(extra, 1500)}\n` : ''}\nOnly true things from Me; record gaps with add_gap. Never contact the employer or send anything. Finish with a two-line summary of what you saved.`;
-    if (stage === 'tailor') return `${head}Stage: Tailor.\n1. If the job has no requirements stored, read the advert and call set_requirements (essential first).\n2. compatibility, then save_match if not scored yet.\n3. cv_sections and cv_section_text, then suggest_cv_section (job ${j.id}) for the two or three sections that matter most for this job, in the template's LaTeX style.\n4. save_draft name "cover-letter": a UK one-page cover letter as the playbook describes, using any research in the job's advice (show_job shows it).\n5. If the advert has application questions, save_draft "application-answers".${tail}`;
+    if (stage === 'tailor') return `${head}Stage: Tailor.\n1. If the job has no requirements stored, read the advert and call set_requirements (essential first).\n2. compatibility, then save_match if not scored yet.\n3. cv_sections and cv_section_text, then suggest_cv_section (job ${j.id}) for the two or three sections that matter most for this job, in the template's LaTeX style.\n4. save_draft name "cover-letter": a UK one-page cover letter as the playbook describes, using any research in the job's advice (show_job shows it).\n5. If the advert has application questions, save_draft "application-answers".\n6. If show_job has a framework assessment, write to it: for Civil Service Success Profiles, save_draft "behaviour-statements" with one STAR example per behaviour assessed (about 250 words each, or the advert's limit) and "personal-statement" against the essential criteria; for SFIA, DDaT or similar, make the CV suggestions use the level language (autonomy, influence, complexity) honestly.${tail}`;
     if (stage === 'interview') return `${head}Stage: Interview.\nsave_draft name "interview-prep" with: the likely format; 6–8 STAR stories from Me mapped to the job's competencies (Situation, Task, Action (most of it), Result, first person); 10–15 likely questions (motivation, competency, technical, scenario) each with notes on which story or points to use; technical topics to revise; 5 questions to ask them drawn from the research; and a short logistics checklist. Where Me lacks a story for a competency, add_gap.${tail}`;
     if (stage === 'followup') return `${head}Stage: Follow up.\nsave_draft "thank-you": a short, specific thank-you message to send after the interview (leave [placeholders] for names and details the person must fill in). Also save_draft "offer-checklist": what to compare if an offer comes (pay, take-home vs living costs using save_money figures, pension, holiday, hybrid, training, progression, start date) and how to negotiate politely on facts.${tail}`;
     throw httpError(400, 'That stage has no agent work.');
@@ -641,4 +690,238 @@ export function docPrompt(d, extra = '') {
         `4. propose_me achievements or results worth a CV line (grades, awards, publications, measurable outcomes), linked to the project.\n` +
         `Every proposal: sources [{"title": "${d.name.replace(/"/g, "'")}", "note": "page or section it comes from"}], confidence high (it says so plainly), medium (clearly implied) or low (inferred). Only what the document supports; group work: say what was mine if it says, otherwise note it is unclear.\n` +
         `5. Link items with link_me once their ids exist (skills and results to the project).\n6. Finish with mark_doc_read (id ${d.id}) and a short summary of what you proposed.`;
+}
+
+// ---------- framework assessments (SFIA, Success Profiles, DDaT, …) with a blind second assessor ----------
+// Agent A assesses a job against the framework it uses: each element's required level, the level the confirmed Me
+// evidence supports, the Me ids it relied on and why. Then a blind assessor (a zero-trust agent that sees the rubric,
+// the required levels and the evidence text, but not the job, the employer or A's levels) rates the same elements.
+// Elements where the two differ by 2 or more are flagged. Profiles keep the person's levels per framework across jobs.
+import * as fw from './frameworks.js';
+export const frameworks = () => fw.list();
+export function detectFrameworks(id) { const j = getJob(id); return fw.detect(`${j.title} ${j.description || ''} ${(j.requirements || []).join(' ')} ${j.notes || ''}`); }
+const lvl = (f, v) => { const n = Number(v); return Number.isFinite(n) && Object.prototype.hasOwnProperty.call(f.scale, String(Math.round(n))) ? Math.round(n) : null; };
+function cleanElements(f, list, ids) {
+    return (Array.isArray(list) ? list : []).slice(0, 40).map(e => ({ id: clip(e.id || e.name, 60).toLowerCase().replace(/[^a-z0-9]+/g, '-'), name: clip(e.name || e.id, 120), kind: clip(e.kind, 30), required: e.required === undefined || e.required === null || e.required === '' ? null : clip(e.required, 40), level: lvl(f, e.level), evidence: (Array.isArray(e.evidence) ? e.evidence : String(e.evidence || '').split(',')).map(x => String(x).trim()).filter(x => ids.has(x)).slice(0, 8), rationale: clip(e.rationale, 800) })).filter(e => e.name);
+}
+export function saveAssessment(id, body, by = 'phone') {
+    const f = fw.get(String(body.framework || '')); const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) throw httpError(404, 'No such job.');
+    const ids = new Set(me().items.filter(i => i.status !== 'proposed').map(i => i.id));
+    const a = { framework: f.id, meVersion: meVersion(), title: f.title, target: clip(body.target, 120), summary: clip(body.summary, 1500), elements: cleanElements(f, body.elements, ids), by, at: Date.now(), blind: null };
+    if (!a.elements.length) throw httpError(400, 'An assessment needs elements (each with a name, the required level and the level the evidence supports).');
+    j.assess = [...(j.assess || []).filter(x => x.framework !== f.id), a]; j.updated = Date.now(); saveBoard(b);
+    log({ kind: 'assess', by, what: `${j.title}: assessed against ${f.title} (${a.elements.length} elements)` });
+    if (body.blind !== false) blindReview(id, f.id, by).catch(e => log({ kind: 'assess', by: 'box', what: `Blind review not started: ${e.message}` }));
+    return a;
+}
+function evidenceText(items) { return items.map(i => `[${i.id}] ${i.kind}: ${i.title}${i.from ? ` (${i.from}${i.to ? `–${i.to}` : ''})` : ''}\n${i.summary || ''}${(i.evidence || []).length ? `\nEvidence: ${i.evidence.join('; ')}` : ''}`).join('\n\n'); }
+// Read an assessor's ratings: a JSON array (preferred), or failing that a Markdown table "| element | level | why |".
+function parseRatings(answer, elements) {
+    const txt = String(answer || ''); const m = txt.match(/```(?:json)?\s*([\s\S]*?)```/) || txt.match(/(\[\s*\{[\s\S]*\}\s*\])/);
+    try { const arr = JSON.parse(m ? m[1] : txt); if (Array.isArray(arr)) return arr; } catch { /* try a table */ }
+    const norm = x => String(x).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); const out = [];
+    for (const line of txt.split('\n')) {
+        const cells = line.split('|').map(x => x.replace(/\*\*/g, '').trim()).filter((x, i, all) => !(x === '' && (i === 0 || i === all.length - 1)));
+        if (cells.length < 2) continue; const el = elements.find(e => norm(cells[0]) === norm(e.name) || norm(cells[0]) === norm(e.id) || norm(cells[0]).startsWith(norm(e.name)));
+        const lv = (cells[1].match(/-?\d+(?:\.\d+)?/) || [])[0]; if (!el || lv === undefined) continue;
+        out.push({ id: el.id, name: el.name, level: Number(lv), evidence: (line.match(/\bm[0-9a-f]{6}\b/g) || []), rationale: cells.slice(2).join(' ') });
+    }
+    return out.length ? out : null;
+}
+export async function blindReview(id, framework, by = 'phone') {
+    const j = getJob(id); const a = (j.assess || []).find(x => x.framework === framework); if (!a) throw httpError(404, 'Assess the job against that framework first.');
+    const f = fw.get(framework); const s = settings(); const items = me().items.filter(i => i.status !== 'proposed');
+    const q = `You are an impartial assessor using the ${f.title}. Rate a candidate on each element below using only the evidence given. You are not told the job, the employer or anyone else's rating.\n\n` +
+        `Scale: ${Object.entries(f.scale).map(([k, v]) => `${k} = ${v}`).join('; ')}.\nLevels in this framework: ${Object.entries(f.levels).map(([k, v]) => `${k} = ${v}`).join('; ')}.\nAssessor notes: ${f.notes}\n${f.url ? `Official descriptions: ${f.url}\n` : ''}\n` +
+        `Elements to rate (with the level the role requires):\n${a.elements.map(e => `- ${e.id}: ${e.name}${e.kind ? ` (${e.kind})` : ''}; required: ${e.required ?? 'not stated'}`).join('\n')}\n\n` +
+        `The candidate's evidence (everything on record; ids in brackets):\n${evidenceText(items).slice(0, 24000)}\n\n` +
+        `Rules: rate what the evidence shows the candidate personally did, not potential; claims without specifics score low; do not reward length or prestige. ` +
+        `Output ONLY one JSON array in a \`\`\`json block, no table and no other text: [{"id": "<element id exactly as listed>", "level": <number on the scale>, "evidence": ["<ids used>"], "rationale": "<one or two sentences>"}].`;
+    return probesKit.start(P('assess', id), { subject: `${f.title}: blind assessment`, question: q, agent: s.agent || 'claude', model: s.model || '', web: false, by, tag: framework,
+        onDone: p => {
+            const b = board(); const jj = b.jobs.find(x => x.id === id); const aa = jj?.assess?.find(x => x.framework === framework); if (!aa) return;
+            if (p.status !== 'done') { aa.blind = { status: 'failed', note: clip(p.answer, 300), at: Date.now() }; saveBoard(b); return; }
+            let arr = parseRatings(p.answer, aa.elements);
+            if (!arr) { aa.blind = { status: 'unreadable', note: clip(p.answer, 600), at: Date.now() }; saveBoard(b); log({ kind: 'assess', by: p.agent, what: `${jj.title}: blind review answer could not be read` }); return; }
+            const ids = new Set(items.map(i => i.id)); const els = cleanElements(f, arr, ids);
+            aa.blind = { status: 'done', by: p.agent, at: Date.now(), elements: els };
+            for (const e of aa.elements) { const o = els.find(x => x.id === e.id); e.blind = o ? o.level : null; e.flag = o && e.level !== null && o.level !== null && Math.abs(e.level - o.level) >= 2; }
+            saveBoard(b); log({ kind: 'assess', by: p.agent, what: `${jj.title}: blind ${f.title} review done; ${aa.elements.filter(e => e.flag).length} element(s) disagree by 2+` });
+        } });
+}
+export function assessPrompt(j, framework = '') {
+    const hint = framework ? `Use the framework "${framework}".` : `Find which framework the employer uses (detect_framework; the advert, the employer's careers pages and the grade or band named). If none, use "competency".`;
+    return `Job ${j.id}: "${j.title}"${j.company ? ` at ${j.company}` : ''}. Assess my fit the way this employer will assess me. ${hint}\n` +
+        `1. me_summary and show_job. framework_info for the framework, and read its official descriptions for the role and level (the URL it gives) so you apply the real level indicators.\n` +
+        `2. Work out the target (grade, band, role level) and the elements assessed (for Success Profiles: the behaviours, experience, technical and strength elements in the advert; for SFIA, DDaT, e-CF: the skills named or implied by the role).\n` +
+        `Levels are judged for this job's framework, grade and advert only; read Me notes, and previous_assessments for consistency (same evidence read the same way).\n3. save_assessment: per element the required level, the level my CONFIRMED evidence supports (on the framework's scale), the Me ids you relied on, and a short rationale. Be strict and fair, as a trained assessor would: score what I personally did, with specifics; where evidence is missing say so, and add_gap.\n` +
+        `A blind second assessor then rates the same elements without seeing yours. Finish with a summary: likely sift outcome, the weakest elements, and which examples to strengthen.`;
+}
+
+// ---------- Me notes, the Me version, and keeping assessments current ----------
+// Framework levels are not universal: each employer, grade and advert reads them differently, so they are assessed per
+// job and never stored as facts about the person. What is kept is Me itself (plus free notes, e.g. which example best
+// shows a behaviour), and each assessment records the Me version it used: a changed Me marks it stale.
+export function meVersion() {
+    const m = me(); const conf = m.items.filter(i => i.status !== 'proposed').map(i => [i.id, i.kind, i.title, i.summary, i.level, i.org, i.from, i.to, i.tags, i.evidence, i.links]);
+    return crypto.createHash('sha1').update(JSON.stringify([conf, (m.notes || []).map(n => [n.id, n.text])])).digest('hex').slice(0, 12);
+}
+export function addNote({ text, topic = '' }, by = 'phone') { const m = me(); m.notes ||= []; const t = clip(text, 4000); if (t.length < 3) throw httpError(400, 'Write the note.'); const n = { id: id6('n'), text: t, topic: clip(topic, 80), by, at: Date.now() }; m.notes.push(n); saveMe(m); log({ kind: 'me', by, what: `Note added${n.topic ? ` (${n.topic})` : ''}` }); return n; }
+export function removeNote(id) { const m = me(); m.notes = (m.notes || []).filter(n => n.id !== id); saveMe(m); return { removed: id }; }
+// Elements a job asks for, when the framework has a fixed list (Success Profiles behaviours, KSF dimensions).
+function namedElements(f, j) { const t = `${j.description || ''} ${(j.requirements || []).join(' ')}`.toLowerCase(); return (f.elements || []).filter(e => t.includes(e.name.toLowerCase())); }
+const gradeOf = j => (`${j.title} ${j.description || ''}`.match(/\b(AA|AO|EO|HEO|SEO|G7|G6|Grade 7|Grade 6|SCS ?[1-4]?|Band [2-9][abcd]?|SFIA (?:level )?[1-7])\b/i) || [])[1]?.toUpperCase().replace('GRADE ', 'G') || '';
+// Copy an assessment from another job when Me has not changed since, it used the same framework and grade, and it
+// covered every element this job names. Returns true when it could.
+function tryReuse(id, fid) {
+    const b = board(); const j = b.jobs.find(x => x.id === id); if (!j) return false; const f = fw.get(fid); const need = namedElements(f, j); const g = gradeOf(j); const v = meVersion();
+    if (!need.length || !g) return false;
+    for (const o of b.jobs) {
+        if (o.id === id) continue; const a = (o.assess || []).find(x => x.framework === fid && x.meVersion === v && x.blind?.status === 'done'); if (!a || gradeOf(o) !== g) continue;
+        if (!need.every(e => a.elements.some(x => x.id === e.id))) continue;
+        const els = a.elements.filter(x => need.some(e => e.id === x.id)).map(x => ({ ...x }));
+        j.assess = [...(j.assess || []).filter(x => x.framework !== fid), { framework: fid, meVersion: v, title: a.title, target: a.target, summary: `Reused from "${o.title}"${o.company ? ` at ${o.company}` : ''}: same framework and grade, and Me has not changed since. ${a.summary || ''}`.slice(0, 1500), elements: els, by: 'box (reused)', reusedFrom: o.id, at: Date.now(), blind: { ...a.blind, elements: a.blind.elements.filter(x => need.some(e => e.id === x.id)) } }];
+        saveBoard(b); log({ kind: 'assess', by: 'box', what: `${j.title}: ${f.title} assessment reused from ${o.title} (Me unchanged)` }); return true;
+    }
+    return false;
+}
+// New jobs that use a named framework are assessed on arrival: reused when possible, otherwise by an agent (one at a
+// time, up to settings.autoAssessPerDay a day, default 6). The server sets the runner (it starts one-shot shells).
+let runner = null; const queue = []; let busy = false;
+export function setAgentRunner(fn) { runner = fn; }
+export function queueAssess(id) {
+    const s = settings(); if (s.autoAssess === false) return;
+    let j; try { j = getJob(id); } catch { return; }
+    const top = fw.detect(`${j.title} ${j.description || ''}`)[0]; if (!top || top.id === 'competency') return;
+    if (tryReuse(id, top.id)) return;
+    if (!queue.some(q => q.id === id)) queue.push({ id, framework: top.id }); drain();
+}
+async function drain() {
+    if (busy || !runner || !queue.length) return; busy = true;
+    try {
+        while (queue.length) {
+            const q = queue.shift(); const s = settings(); const day = new Date().toISOString().slice(0, 10);
+            const used = readLog(2000).filter(e => e.kind === 'assess' && e.auto && new Date(e.t).toISOString().slice(0, 10) === day).length;
+            if (used >= (Number(s.autoAssessPerDay) || 6)) { log({ kind: 'assess', by: 'box', what: `Daily limit of automatic assessments reached; ${queue.length + 1} job(s) left for you to assess` }); queue.length = 0; break; }
+            if (tryReuse(q.id, q.framework)) continue;
+            let j; try { j = getJob(q.id); } catch { continue; }
+            if ((j.assess || []).some(a => a.framework === q.framework && a.meVersion === meVersion())) continue;
+            try { const name = await runner(assessPrompt(j, q.framework), `assess-${q.id.slice(1)}`); log({ kind: 'assess', by: 'box', auto: true, what: `${j.title}: automatic ${q.framework} assessment started` }); await waitShell(name); }
+            catch (e) { log({ kind: 'assess', by: 'box', what: `${j.title}: automatic assessment not started: ${e.message}` }); }
+        }
+    } finally { busy = false; }
+}
+function waitShell(name, ms = 20 * 60_000) { const f = path.join(config.state, 'oneshot', `${name}.json`); const t0 = Date.now(); return new Promise(ok => { const t = setInterval(() => { if (fs.existsSync(f) || Date.now() - t0 > ms) { clearInterval(t); ok(); } }, 5000); }); }
+
+// ---------- cover letters: an editor per job, built from your similar past letters, with a fit review ----------
+// Drafts are Markdown in /Jobs/drafts/<job>/<name>.md; every save keeps the previous text in .history/. "Generate"
+// finds your most similar past letters (other jobs' drafts and letter files in application folders, ranked by how alike
+// the jobs are) and has an agent adapt them, or write a new one. The fit review checks each requirement and framework
+// element against the letter; the AI review is a zero-trust agent that quotes where each is met and suggests fixes.
+const histDir = id => path.join(draftDir(id), '.history');
+export function letter(id, name = 'cover-letter') {
+    if (!DRAFT_NAME.test(name)) throw httpError(400, 'Bad draft name.'); getJob(id);
+    const f = path.join(draftDir(id), `${name}.md`); const ok = fs.existsSync(f);
+    let history = []; try { history = fs.readdirSync(histDir(id)).filter(x => x.startsWith(`${name}.`) && x.endsWith('.md')).map(x => ({ version: x.slice(name.length + 1, -3), at: Number(x.slice(name.length + 1, -3)) })).sort((a, b) => b.at - a.at).slice(0, 50); } catch { /* none */ }
+    return { name, text: ok ? fs.readFileSync(f, 'utf8') : '', mtime: ok ? fs.statSync(f).mtimeMs : 0, history, review: readJson(path.join(draftDir(id), `${name}.review.json`), null) };
+}
+export function writeLetter(id, name, text, { baseMtime = 0 } = {}, by = 'phone') {
+    if (!DRAFT_NAME.test(name)) throw httpError(400, 'Bad draft name.'); getJob(id);
+    const t = String(text ?? ''); if (t.length > 200_000) throw httpError(413, 'Too long.');
+    fs.mkdirSync(histDir(id), { recursive: true }); share(P('drafts')); share(draftDir(id)); share(histDir(id));
+    const f = path.join(draftDir(id), `${name}.md`);
+    if (fs.existsSync(f)) {
+        if (baseMtime && fs.statSync(f).mtimeMs > Number(baseMtime) + 1) throw httpError(409, 'An agent changed this letter since you opened it. Reload to see its version (yours is still in the editor).');
+        const old = fs.readFileSync(f, 'utf8'); if (old !== t) { const hf = path.join(histDir(id), `${name}.${Date.now()}.md`); fs.writeFileSync(hf, old); share(hf); }
+    }
+    fs.writeFileSync(f, t); share(f);
+    const app = applications().find(a => a.job === id && !['rejected', 'withdrawn'].includes(a.stage));
+    if (app) { try { const sub = /letter|cv/.test(name) ? 'CV & Cover Letter' : 'Notes'; fs.writeFileSync(path.join(app.folder, sub, `${name}.md`), t); share(path.join(app.folder, sub, `${name}.md`)); } catch { /* folder gone */ } }
+    if (by !== 'phone') log({ kind: 'draft', by, what: `Letter "${name}" written for ${getJob(id).title}` });
+    return { ok: true, mtime: fs.statSync(f).mtimeMs };
+}
+export function restoreLetter(id, name, version) {
+    if (!DRAFT_NAME.test(name) || !/^\d{10,16}$/.test(String(version))) throw httpError(400, 'Bad version.');
+    const hf = path.join(histDir(id), `${name}.${version}.md`); if (!fs.existsSync(hf)) throw httpError(404, 'No such version.');
+    return writeLetter(id, name, fs.readFileSync(hf, 'utf8'), {}, 'phone');
+}
+// Your past letters, most similar job first.
+export async function similarLetters(id, max = 3) {
+    const j = getJob(id); const mine = new Set(words(`${j.title} ${(j.requirements || []).join(' ')} ${j.category || ''}`));
+    const sim = o => { const w = new Set(words(`${o.title} ${(o.requirements || []).join(' ')} ${o.category || ''}`)); let n = 0; for (const x of w) if (mine.has(x)) n++; return n / Math.max(1, Math.min(mine.size, w.size)); };
+    const out = []; const jobsById = new Map(board().jobs.map(o => [o.id, o]));
+    for (const o of board().jobs) { if (o.id === id) continue; for (const d of drafts(o.id)) if (/letter/.test(d.name)) out.push({ job: o.id, title: o.title, company: o.company || '', file: path.join(draftDir(o.id), `${d.name}.md`), label: `${d.name}.md`, score: sim(o) }); }
+    for (const a of applications()) {
+        if (a.job === id) continue; const o = jobsById.get(a.job) || { title: a.title, requirements: [] }; const dir = path.join(a.folder, 'CV & Cover Letter');
+        let files = []; try { files = fs.readdirSync(dir); } catch { continue; }
+        for (const fn of files) if (/cover|letter/i.test(fn) && /\.(md|txt|docx|odt|pdf|tex)$/i.test(fn) && !out.some(x => x.job === a.job && x.label === fn)) out.push({ job: a.job, title: a.title, company: a.company, file: path.join(dir, fn), label: fn, score: sim(o) + (['interview', 'final', 'offer', 'accepted'].includes(a.stage) ? 0.15 : 0), stage: a.stage });
+    }
+    out.sort((x, y) => y.score - x.score);
+    const top = out.slice(0, max);
+    for (const t of top) { try { t.text = (await fileText(t.file)).slice(0, 7000); } catch { t.text = ''; } }
+    return top.filter(t => t.text && t.text.length > 200 && !/^Could not extract/.test(t.text));
+}
+export async function letterPrompt(id, { name = 'cover-letter', extra = '', fresh = false } = {}) {
+    const j = getJob(id); const sim = fresh ? [] : await similarLetters(id);
+    const base = sim.length ? `My most similar past letters (adapt the best parts: structure, voice and strong examples, but make every specific fit THIS job and employer; never copy another employer's name or details):\n\n${sim.map((s2, i) => `--- Letter ${i + 1}: for "${s2.title}"${s2.company ? ` at ${s2.company}` : ''}${s2.stage ? ` (that application reached: ${s2.stage})` : ''} ---\n${s2.text}`).join('\n\n')}\n\n` : 'I have no similar past letters: write a new one.\n\n';
+    return `Write my cover letter for job ${j.id}: "${j.title}"${j.company ? ` at ${j.company}` : ''}. Follow the playbook (Tailor). Use the jobs tools: me_summary, show_job, job_advice (company research: use one specific, true reason for this employer), and any framework assessment on the job (write in its terms).\n\n${base}` +
+        `Save it with save_draft, name "${name}", in Markdown: a UK one-page letter (about 300–400 words), addressed to a named person if the research found one, otherwise "Dear Hiring Manager". Back two or three of the job's key requirements with short STAR-style evidence from my confirmed Me items; leave [placeholders] for anything you would have to guess. No clichés.${extra ? `\n\nI also want: ${clip(extra, 1500)}` : ''}\nFinish with two lines: what you based it on, and what I should check.`;
+}
+// Which requirements and framework elements the letter covers (by the words they share), with Me evidence for each.
+export function coverage(id, name = 'cover-letter') {
+    const j = getJob(id); const text = letter(id, name).text.toLowerCase(); const lw = new Set(words(text));
+    const reqs = (j.requirements || []).map(r => ({ kind: 'requirement', text: r }));
+    for (const a of j.assess || []) for (const e of a.elements) reqs.push({ kind: a.title, text: e.name, level: e.level, required: e.required });
+    const cands = candidates(reqs.map(r => r.text));
+    return reqs.map((r, i) => { const rw = words(r.text); const hit = rw.filter(w => lw.has(w)); const share = rw.length ? hit.length / rw.length : 0; return { ...r, status: share >= 0.5 ? 'covered' : share > 0 ? 'partly' : 'missing', words: hit, evidence: cands[i].candidates }; });
+}
+// The AI review: a zero-trust agent sees the advert's requirements and the letter (not Me), quotes and suggests.
+export async function reviewLetter(id, name = 'cover-letter', by = 'phone') {
+    const j = getJob(id); const l = letter(id, name); if (l.text.trim().length < 100) throw httpError(400, 'Write (or generate) the letter first.'); const s = settings();
+    const reqs = coverage(id, name).map(r => `- ${r.kind === 'requirement' ? '' : `[${r.kind}] `}${r.text}`).join('\n') || '(no requirements stored: judge against the advert)';
+    const q = `Review this cover letter for the job "${j.title}"${j.company ? ` at ${j.company}` : ''} like an experienced recruiter.\n\nThe job's requirements and assessed elements:\n${reqs}\n\nThe advert (excerpt):\n${(j.description || '').slice(0, 3000)}\n\nThe letter:\n${l.text.slice(0, 12000)}\n\n` +
+        `Answer with one JSON object in a \`\`\`json block: {"requirements": [{"requirement": "...", "verdict": "covered|weak|missing", "quote": "<the letter's words that address it, or empty>", "suggestion": "<how to cover it better, one sentence>"}], "overall": {"length": "<words and whether it fits one page>", "tone": "...", "specificity": "<is the employer-specific reason real and specific?>", "cliches": ["..."], "top_fixes": ["...", "...", "..."]}}`;
+    const dir = path.join(draftDir(id)); fs.mkdirSync(dir, { recursive: true });
+    return probesKit.start(P('reviews', id), { subject: `${j.title}: cover letter review`, question: q, agent: s.agent || 'claude', model: s.model || '', web: false, by, tag: name,
+        onDone: p => { let r = null; const m = String(p.answer).match(/```(?:json)?\s*([\s\S]*?)```/); try { r = JSON.parse(m ? m[1] : p.answer); } catch { r = null; } const out = { at: Date.now(), by: p.agent, status: p.status === 'done' && r ? 'done' : 'failed', mtime: l.mtime, ...(r || { note: clip(p.answer, 800) }) }; try { fs.writeFileSync(path.join(dir, `${name}.review.json`), JSON.stringify(out, null, 2)); share(path.join(dir, `${name}.review.json`)); } catch { /* gone */ } log({ kind: 'draft', by: p.agent, what: `Letter review for ${j.title}: ${out.status}` }); } });
+}
+
+// ---------- CPD log: what you did and learned, day by day ----------
+// Entries in /Jobs/cpd.json. "Update Me from my log" (and, once 5 or more entries are new, at most once a day by itself)
+// has an agent turn new entries into proposals: new skills, fresh evidence and progress on ongoing projects, notes.
+export const CPD_TYPES = { work: 'Work', learning: 'Learning', course: 'Course or training', reading: 'Reading', event: 'Event or talk', project: 'Project', finding: 'Finding', cert: 'Certification', other: 'Other' };
+const cpdFile = () => P('cpd.json');
+export function cpd() { return (readJson(cpdFile(), { entries: [] }) || { entries: [] }).entries; }
+export function saveCpd(b, by = 'phone') {
+    const list = cpd(); let e = b.id ? list.find(x => x.id === b.id) : null; if (b.id && !e) throw httpError(404, 'No such entry.');
+    const text = b.text !== undefined ? clip(b.text, 6000) : e?.text; if (!text || text.length < 3) throw httpError(400, 'Write what you did or learned.');
+    if (!e) { e = { id: id6('p'), created: Date.now(), by, processed: null }; list.push(e); }
+    e.text = text; e.date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : e.date || new Date().toISOString().slice(0, 10);
+    if (b.type !== undefined) e.type = CPD_TYPES[b.type] ? b.type : 'work'; e.type ||= 'work';
+    if (b.project !== undefined) e.project = clip(b.project, 160);
+    if (b.meId !== undefined) e.meId = me().items.some(i => i.id === b.meId) ? b.meId : null;
+    if (b.hours !== undefined) { const h = Number(b.hours); e.hours = Number.isFinite(h) && h > 0 ? Math.round(h * 4) / 4 : null; }
+    if (b.tags !== undefined) e.tags = [...new Set((Array.isArray(b.tags) ? b.tags : String(b.tags).split(',')).map(t => clip(t, 40).toLowerCase()).filter(Boolean))].slice(0, 15);
+    if (b.text !== undefined && e.processed) e.processed = null;   // edited: read it again
+    e.updated = Date.now(); writeJson(cpdFile(), { entries: list }); if (!b.id) log({ kind: 'cpd', by, what: `CPD: ${text.slice(0, 80)}` });
+    maybeAutoCpd(); return e;
+}
+export function removeCpd(id) { writeJson(cpdFile(), { entries: cpd().filter(x => x.id !== id) }); return { removed: id }; }
+export function markCpd(ids) { const list = cpd(); const set = new Set(ids); for (const e of list) if (set.has(e.id)) e.processed = Date.now(); writeJson(cpdFile(), { entries: list }); return { marked: ids.length }; }
+export function cpdCsv() {
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    return ['Date,Type,Project,Hours,Tags,Activity and what I learned', ...cpd().sort((a, b) => a.date.localeCompare(b.date)).map(e => [e.date, CPD_TYPES[e.type] || e.type, e.project || '', e.hours ?? '', (e.tags || []).join('; '), e.text].map(q).join(','))].join('\r\n') + '\r\n';
+}
+export function cpdPrompt() {
+    return `Update my Me map from my CPD log. cpd_entries (new entries only) and me_summary first.\n` +
+        `For each new entry: if it shows a skill I have not got in Me, or a higher or broader use of one I have, propose_me it (kind skill, evidence quoting what I did, a level only if the entries clearly support it, links to the project). If it is progress on an ongoing project or role, propose_me that item again with the same kind and title so the new evidence and dates are added (it will not overwrite what I confirmed). Courses, certifications and talks become cert, education or achievement items when they are complete. Many small entries on one theme can become one skill with combined evidence. Useful context that is not an item (what was mine in a team, what I am working towards) goes in add_me_note.\n` +
+        `Every proposal: sources [{"title": "CPD log", "note": "<dates of the entries>"}]. Do not invent; routine entries with nothing new can be skipped. Then mark_cpd_processed with the ids you read, and finish with a short summary of what changed.`;
+}
+let cpdBusy = false;
+function maybeAutoCpd() {
+    const s = settings(); if (s.autoCpd === false || cpdBusy || !runner) return;
+    const fresh = cpd().filter(e => !e.processed); if (fresh.length < 5) return;
+    const today = new Date().toISOString().slice(0, 10); if (readLog(500).some(e => e.kind === 'cpd' && e.auto && new Date(e.t).toISOString().slice(0, 10) === today)) return;
+    cpdBusy = true; log({ kind: 'cpd', by: 'box', auto: true, what: `Updating Me from ${fresh.length} new CPD entries` });
+    runner(cpdPrompt(), 'cpd').then(name => waitShell(name)).catch(e => log({ kind: 'cpd', by: 'box', what: `CPD update not started: ${e.message}` })).finally(() => { cpdBusy = false; });
 }
