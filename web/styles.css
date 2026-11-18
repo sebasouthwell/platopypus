@@ -1488,3 +1488,11 @@ input[type=month] { color-scheme: dark; }
 .jh-wrow { background: var(--sea-2); border-radius: 12px; padding: 8px 10px; } .jh-wrow .h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; } .jh-wrow .h b { flex: 1; font-size: 14px; } .jh-wrow select { width: auto; padding: 8px 10px; }
 .jh-job .m .wants { color: #FF7AA8; font-family: var(--mono); }
 .jh-wantsline { color: #FF7AA8; font-size: 13.5px; }
+
+.jh-tbtn.on { color: var(--brass); border-color: rgba(240,184,64,.5); }
+.jh-selbar { position: sticky; top: 56px; z-index: 2; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 10px; padding: 8px 10px; background: var(--hull-2); border: 1px solid var(--rail); border-radius: 12px; font-size: 14px; }
+.jh-selbar > span { flex: 1; font-weight: 600; } .jh-selbar .btn { min-height: 40px; }
+.jh-job.selmode { padding-left: 10px; } .jh-job.sel { border-color: var(--brass); background: rgba(240,184,64,.07); }
+.jh-tick { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--dim); display: grid; place-items: center; color: var(--brass-ink); }
+.jh-job.sel .jh-tick { background: var(--brass); border-color: var(--brass); } .jh-tick svg.i { width: 15px; height: 15px; }
+.jh-dellist { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; max-height: 40vh; overflow: auto; }

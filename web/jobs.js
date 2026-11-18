@@ -5,7 +5,7 @@
 // Applications (a folder and tracker per application), Activity, Setup (what to search, keys, money assumptions).
 
 let C = null;
-const S = { tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
+const S = { sel: null, tab: 'board', ov: null, filter: 'active', sort: 'match', choice: {}, poll: null, meView: matchMedia('(min-width: 720px)').matches ? 'map' : 'list' };
 const VERDICT = { meets: 'Meets', partly: 'Partly', gap: 'Gap' };
 const ROUTE = { realistic: 'Apply now', stretch: 'Stretch', entry: 'Way in', goal: 'Goal' };
 const STANDING = { 'in-field': 'In your field', adjacent: 'A step across', 'career change': 'A career change' };
@@ -63,7 +63,9 @@ async function renderBoard(box) {
           <button class="jh-tbtn" data-hunt title="Search the job sites">${icon('refresh')}<span>Job sites</span></button>
           <button class="jh-tbtn" data-web title="Search the web">${icon('globe')}<span>Web</span></button>
           <button class="jh-tbtn" data-add title="Add a job">${icon('plus')}<span>Add</span></button>
+          <button class="jh-tbtn ${S.sel ? 'on' : ''}" data-select title="Select jobs to delete">${icon('check')}<span>Select</span></button>
         </div>
+        ${S.sel ? `<div class="jh-selbar"><span>${S.sel.size} selected</span><button class="text-btn" data-selall>Select all shown</button><button class="text-btn" data-selnone>Clear</button><button class="btn danger-btn" data-seldel ${S.sel.size ? '' : 'disabled'}>${icon('trash')}Delete</button></div>` : ''}
         <div class="jh-jobs">${jobCards(b.jobs) || `<p class="note">${b.jobs.length ? 'Nothing here with this filter.' : 'No jobs yet. Say what you want above, or set the search in Setup and search the job sites.'}</p>`}</div>`;
     const ta = $('#jh-wish-t', box); const grow = () => { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`; }; ta.oninput = grow;
     ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('[data-wish]', box).requestSubmit(); } };
@@ -77,10 +79,16 @@ async function renderBoard(box) {
     $$('[data-watch]', box).forEach(x => x.onclick = () => C.openTerminal(x.dataset.watch, 'Job Hunt').catch(e => C.toast(e.message, true)));
     $$('[data-f]', box).forEach(x => x.onclick = () => { S.filter = x.dataset.f; renderBoard(box); });
     $('[data-sort]', box).onchange = e => { S.sort = e.target.value; renderBoard(box); };
-    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.classList.add('busy'); try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new job${r.added === 1 ? '' : 's'}${r.duplicates ? `, ${r.duplicates} already on the board` : ''}${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.classList.remove('busy'); } };
+    $('[data-hunt]', box).onclick = async e => { const btn = e.currentTarget; btn.disabled = true; btn.classList.add('busy'); try { const r = await C.api('/api/jobs/hunt', { method: 'POST' }); C.toast(`${r.added} new job${r.added === 1 ? '' : 's'}${r.duplicates ? `, ${r.duplicates} already on the board` : ''}${r.skipped ? `, ${r.skipped} you deleted` : ''}${Object.keys(r.errors).length ? `; ${Object.keys(r.errors).join(', ')} failed` : ''}`); reload(); } catch (x) { C.toast(x.message, true); btn.disabled = false; btn.classList.remove('busy'); } };
     $('[data-web]', box).onclick = () => runAgent('/api/jobs/websearch', {}, 'An agent is searching career pages and job boards. New jobs appear here.');
     $('[data-add]', box).onclick = addJobDialog;
-    $$('[data-job]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.job));
+    $$('[data-job]', box).forEach(x => x.onclick = () => { if (!S.sel) return jobDialog(x.dataset.job); S.sel.has(x.dataset.job) ? S.sel.delete(x.dataset.job) : S.sel.add(x.dataset.job); renderBoard(box); });
+    $('[data-select]', box).onclick = () => { S.sel = S.sel ? null : new Set(); renderBoard(box); };
+    if (S.sel) {
+        $('[data-selall]', box).onclick = () => { $$('[data-job]', box).forEach(x => S.sel.add(x.dataset.job)); renderBoard(box); };
+        $('[data-selnone]', box).onclick = () => { S.sel.clear(); renderBoard(box); };
+        $('[data-seldel]', box).onclick = () => deleteJobs([...S.sel], () => { S.sel = null; reload(); });
+    }
     $$('[data-upjob]', box).forEach(x => x.onclick = () => jobDialog(x.dataset.upjob));
     $$('[data-upapp]', box).forEach(x => x.onclick = async () => { const { apps } = await C.api('/api/jobs/apps'); appDialog(apps.find(a => a.id === x.dataset.upapp)); });
     if (live.length) S.poll = setInterval(() => { if (S.tab === 'board' && !document.hidden && $('#dialog').hidden && document.activeElement !== ta) renderBoard(box).catch(() => {}); }, 20_000);
@@ -94,7 +102,7 @@ function jobCards(jobs) {
     return list.map(j => {
         const sc = j.match?.score; const tone = sc === undefined ? 'none' : sc >= 70 ? 'hi' : sc >= 45 ? 'mid' : 'lo';
         const late = j.deadline && j.deadline < today;
-        return `<button class="jh-job" data-job="${esc(j.id)}">
+        return `<button class="jh-job ${S.sel?.has(j.id) ? 'sel' : ''} ${S.sel ? 'selmode' : ''}" data-job="${esc(j.id)}" ${S.sel ? `aria-pressed="${S.sel.has(j.id)}"` : ''}>${S.sel ? `<span class="jh-tick">${S.sel.has(j.id) ? icon('check') : ''}</span>` : ''}
             <span class="jh-fit ${tone}" style="--v:${sc ?? 0}"><b>${sc ?? '–'}</b></span>
             <span class="main"><span class="t">${j.route ? `<span class="jh-route ${j.route}">${ROUTE[j.route]}</span>` : ''}${esc(j.title)}</span><span class="s">${esc([j.company, j.location].filter(Boolean).join(' · '))}</span>
               <span class="m">${j.salary ? `<span>${esc(j.salary)}</span>` : ''}${j.match?.wants ? `<span class="wants" title="${esc(j.match.wants.note || '')}">♥ ${j.match.wants.score}</span>` : ''}${j.money?.left !== undefined && j.money?.left !== null ? `<span class="left">${money(j.money.left, j.money.currency)} left / yr</span>` : ''}${j.deadline ? `<span class="${late ? 'late' : ''}">closes ${esc(j.deadline)}</span>` : ''}${j.status !== 'new' ? `<span class="st">${esc(j.status)}</span>` : ''}<span class="src">${esc(j.source || j.by || '')}</span></span></span>
@@ -130,7 +138,7 @@ async function jobDialog(id) {
         <div class="jh-actions jh-footbar">
           ${j.status !== 'shortlisted' ? `<button class="btn" data-st="shortlisted">${icon('pin')}Shortlist</button>` : `<button class="btn on" data-st="new">${icon('pin')}Shortlisted</button>`}
           ${['applying', 'applied'].includes(j.status) ? '' : `<button class="btn pri" data-apply>${icon('folder-plus')}Apply</button>`}
-          ${j.status !== 'hidden' ? `<button class="btn jh-sq" data-st="hidden" aria-label="Hide this job" title="Hide">${icon('eye')}</button>` : `<button class="btn" data-st="new">Show again</button>`}
+          ${j.status !== 'hidden' ? `<button class="btn jh-sq" data-st="hidden" aria-label="Hide this job" title="Hide">${icon('eye')}</button>` : `<button class="btn" data-st="new">Show again</button>`}<button class="btn jh-sq" data-jdel aria-label="Delete this job" title="Delete">${icon('trash')}</button>
         </div>
         <h3 class="jh-h" id="js-project">This job as a project</h3>
         <div class="jh-stages" role="tablist">${d.plan.map((s, i) => { const n = s.items.filter(([k]) => plan.done[`${s.id}.${k}`]).length; return `<button data-stage="${s.id}" class="${s.id === cur.id ? 'on' : ''} ${n === s.items.length ? 'full' : ''}" role="tab" aria-selected="${s.id === cur.id}"><span class="i">${i + 1}</span>${esc(s.title)}<span class="c">${n}/${s.items.length}</span></button>`; }).join('')}</div>
@@ -178,6 +186,7 @@ async function jobDialog(id) {
     $$('[data-draft]', panel).forEach(x => { if (/letter/.test(x.dataset.draft)) x.onclick = () => window.open(`/letter.html?job=${id}&name=${encodeURIComponent(x.dataset.draft)}`, '_blank', 'noopener'); });
     $$('[data-draft]', panel).filter(x => !/letter/.test(x.dataset.draft)).forEach(x => x.onclick = async () => { try { const r = await C.api(`/api/jobs/job/${id}/draft?name=${encodeURIComponent(x.dataset.draft)}`); const dd = C.openDialog(`<h2>${icon('file-text')}${esc(r.name)}</h2><div class="jh-answer jh-draft">${md(r.text)}</div><div class="buttons"><button data-copy>Copy</button><button data-close>Close</button></div>`); $('[data-copy]', dd.panel).onclick = () => navigator.clipboard.writeText(r.text).then(() => C.toast('Copied')); } catch (e) { C.toast(e.message, true); } });
     $$('[data-st]', panel).forEach(x => x.onclick = async () => { try { await C.api(`/api/jobs/job/${id}`, { method: 'POST', body: { status: x.dataset.st } }); close(); reload(); } catch (e) { C.toast(e.message, true); } });
+    $('[data-jdel]', panel).onclick = () => deleteJobs([id], () => { close(); reload(); });
     const ap = $('[data-apply]', panel); if (ap) ap.onclick = () => { close(); startApplication(j); };
     $('[data-save]', panel).onclick = async () => { try { await C.api(`/api/jobs/job/${id}`, { method: 'POST', body: { notes: $('#jd-notes', panel).value } }); C.toast('Saved'); } catch (e) { C.toast(e.message, true); } };
     $('[data-advice]', panel).onclick = async () => {
@@ -607,4 +616,21 @@ function wantsDialog(pl, wk, done) {
     $$('[data-wk]', panel).forEach(b => b.onclick = () => { ws.push({ kind: b.dataset.wk, detail: '', importance: 'important' }); draw(); const ins = $$('[data-wd]', panel); ins[ins.length - 1]?.focus(); });
     draw();
     $('[data-ok]', panel).onclick = async () => { try { await C.api('/api/jobs/wants', { method: 'POST', body: { wants: ws } }); close(); done(); } catch (e) { C.toast(e.message, true); } };
+}
+
+// Delete jobs: at once when they hold nothing of yours; otherwise say what would go and ask.
+async function deleteJobs(ids, done) {
+    const { esc, icon } = C;
+    try { const r = await C.api('/api/jobs/board/delete', { method: 'POST', body: { ids } }); C.toast(`Deleted ${r.deleted} job${r.deleted === 1 ? '' : 's'}`); done(); }
+    catch (e) {
+        if (e.status !== 409) return C.toast(e.message, true);
+        let info = null; try { info = await fetch('/api/jobs/board/delete', { method: 'POST', headers: { 'X-Plato': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then(r => r.json()); } catch { /* fall back */ }
+        const list = info?.needConfirm || [];
+        const { panel, close } = C.openDialog(`<h2>${icon('trash')}Delete ${ids.length} job${ids.length === 1 ? '' : 's'}?</h2>
+            <p class="muted">${list.length ? `${list.length === ids.length ? (ids.length === 1 ? 'This job has' : 'These jobs have') : `${list.length} of them have`} things of yours on ${list.length === 1 ? 'it' : 'them'}. They go with the job; applications stay (their folder and tracker are kept).` : esc(e.message)}</p>
+            ${list.length ? `<ul class="jh-dellist">${list.map(x => `<li><b>${esc(x.title)}</b>${x.company ? ` · ${esc(x.company)}` : ''}<br><span class="muted">${esc(x.data.join(', '))}</span></li>`).join('')}</ul>` : ''}
+            <p class="muted">Deleted jobs aren't added again by searches.</p>
+            <div class="buttons"><button class="danger" data-ok>Delete</button><button data-close>Cancel</button></div>`, { size: 'small' });
+        C.$('[data-ok]', panel).onclick = async () => { try { const r = await C.api('/api/jobs/board/delete', { method: 'POST', body: { ids, confirm: true } }); close(); C.toast(`Deleted ${r.deleted} job${r.deleted === 1 ? '' : 's'}`); done(); } catch (x) { C.toast(x.message, true); } };
+    }
 }

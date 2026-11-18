@@ -913,6 +913,12 @@ phone's Update button. Mechanism:
   - **Documents are read into Me by themselves** (`autoRead`, default on): one at a time, up to 20 a day, resumed 30 s
     after the server starts.
 
+- **2.19.1**: Delete jobs, one at a time (the job sheet) or many (Select on the board). Jobs with nothing of yours go at
+  once; jobs with your data (an application, notes, a score, an assessment, project progress, money figures, drafts,
+  research, a status past "new") need a confirmation that lists it. Applications are never deleted (folder and tracker
+  stay). Deleted jobs' fingerprints are kept in `board.dismissed`, so hunts and agents skip them (hunts report how many);
+  adding one yourself brings it back. A document read interrupted by a restart is retried after 30 minutes.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

@@ -162,6 +162,7 @@ function indexOf(b) { const ix = new Map(); for (const x of b.jobs) for (const k
 function upsertJob(b, j, by) {
     const url = clip(j.url, 800); const keys = fingerprints({ ...j, url });
     b._ix ||= indexOf(b); let it = null; for (const k of keys) { if (b._ix.has(k)) { it = b._ix.get(k); break; } }
+    if (!it && (b.dismissed || []).length && keys.some(k => b.dismissed.includes(k))) { if (by !== 'phone') return { it: null, fresh: false, dismissed: true }; b.dismissed = b.dismissed.filter(k => !keys.includes(k)); }
     const fresh = !it;
     if (fresh) { it = { id: id6('j'), status: 'new', found: Date.now(), by }; b.jobs.push(it); }
     // A new job takes everything; a duplicate only fills what is missing (your board copy wins) and records the source.
@@ -209,7 +210,7 @@ export function dedupeBoard() {
 }
 export function addJob(body, by = 'phone') {
     const b = board(); if (!clip(body.title, 10)) throw httpError(400, 'A job needs a title.');
-    const { it, fresh } = upsertJob(b, body, by); saveBoard(b); if (fresh) queueAssess(it.id);
+    const { it, fresh, dismissed } = upsertJob(b, body, by); if (dismissed) throw httpError(409, 'That job was deleted from the board; it is not added again.'); saveBoard(b); if (fresh) queueAssess(it.id);
     if (fresh) log({ kind: 'job', by, what: `Found: ${it.title}${it.company ? ` at ${it.company}` : ''}${it.source ? ` (${it.source})` : ''}` });
     return it;
 }
@@ -280,7 +281,7 @@ export async function hunt(by = 'phone') {
                     const list = await FETCH[src]({ keywords: s.keywords, location, salaryMin: s.salaryMin, country }, kv);
                     for (const j of list) {
                         if (!j.title) continue; if (want.length && !want.some(w => `${j.title} ${j.category || ''}`.toLowerCase().includes(w))) continue; if (exclude.some(w => `${j.title} ${j.company || ''}`.toLowerCase().includes(w))) continue;
-                        out.found++; const { it: nj, fresh } = upsertJob(b, j, `hunt (${src})`); if (!fresh) out.duplicates = (out.duplicates || 0) + 1; if (fresh) { fresh_ids.push(nj.id); out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
+                        out.found++; const { it: nj, fresh, dismissed } = upsertJob(b, j, `hunt (${src})`); if (dismissed) { out.skipped = (out.skipped || 0) + 1; continue; } if (!fresh) out.duplicates = (out.duplicates || 0) + 1; if (fresh) { fresh_ids.push(nj.id); out.added++; out.bySource[src] = (out.bySource[src] || 0) + 1; }
                     }
                 } catch (e) { out.errors[src] = e.message; }
                 if (src === 'arbeitnow' || src === 'remotive') break;   // these do not take a location
@@ -1047,7 +1048,7 @@ export function planPrompt() {
 let docBusy = false;
 export function queueDocReads() {
     const s = settings(); if (s.autoRead === false || docBusy || !runner) return;
-    const unread = docs().filter(d => !d.read && !d.queued); if (!unread.length) return;
+    const unread = docs().filter(d => !d.read && (!d.queued || Date.now() - d.queued > 30 * 60_000)); if (!unread.length) return;
     const day = new Date().toISOString().slice(0, 10); const used = readLog(3000).filter(e => e.kind === 'doc' && e.auto && new Date(e.t).toISOString().slice(0, 10) === day).length;
     if (used >= 20) return;
     docBusy = true; const d = unread[0];
@@ -1055,4 +1056,30 @@ export function queueDocReads() {
     log({ kind: 'doc', by: 'box', auto: true, what: `Reading "${d.name}" into Me` });
     runner(docPrompt(d), `doc-${d.id.slice(1)}`).then(name => waitShell(name)).catch(e => log({ kind: 'doc', by: 'box', what: `Could not read "${d.name}": ${e.message}` }))
         .finally(() => { const l2 = docs(); const y = l2.find(z => z.id === d.id); if (y) { delete y.queued; if (!y.read) y.read = Date.now(); writeJson(docsFile(), { docs: l2 }); } docBusy = false; queueDocReads(); });
+}
+
+// ---------- deleting jobs ----------
+// A job with nothing of yours on it goes at once; one with your data (an application, notes, a score, research,
+// drafts, an assessment, project progress) needs confirm. Applications are never deleted: their folder and tracker stay.
+// Deleted jobs leave their fingerprints behind (board.dismissed), so hunts and agents don't add them again; adding one
+// yourself still works.
+export function jobData(j) {
+    const out = []; const apps = applications();
+    if (apps.some(a => a.job === j.id)) out.push('an application (kept)');
+    if (j.notes) out.push('your notes'); if (j.match) out.push('a fit score'); if ((j.assess || []).length) out.push('a framework assessment');
+    if (j.plan && Object.keys(j.plan.done || {}).length) out.push('project progress'); if (j.money) out.push('money figures');
+    if (drafts(j.id).length) out.push('drafts'); if (adviceFor(j.id).length) out.push('research');
+    if (['shortlisted', 'applying', 'applied'].includes(j.status)) out.push(`status "${j.status}"`);
+    return out;
+}
+export function deleteJobs(ids, { confirm = false } = {}, by = 'phone') {
+    const b = board(); const set = new Set((Array.isArray(ids) ? ids : [ids]).map(String)); const hits = b.jobs.filter(j => set.has(j.id));
+    if (!hits.length) throw httpError(404, 'No such jobs.');
+    const withData = hits.map(j => ({ id: j.id, title: j.title, company: j.company || '', data: jobData(j) })).filter(x => x.data.length);
+    if (withData.length && !confirm) { const e = httpError(409, hits.length === 1 ? 'This job has your data on it.' : `${withData.length} of these ${hits.length} jobs ${withData.length === 1 ? 'has' : 'have'} your data on ${withData.length === 1 ? 'it' : 'them'}.`); e.needConfirm = withData; throw e; }
+    b.dismissed = [...new Set([...(b.dismissed || []), ...hits.flatMap(j => j.keys || fingerprints(j))])].slice(-5000);
+    b.jobs = b.jobs.filter(j => !set.has(j.id)); delete b._ix; saveBoard(b);
+    for (const j of hits) for (const dir of ['drafts', 'advice', 'assess', 'reviews']) { try { fs.rmSync(P(dir, j.id), { recursive: true, force: true }); } catch { /* gone */ } }
+    log({ kind: 'job', by, what: `Deleted ${hits.length} job${hits.length === 1 ? '' : 's'}${withData.length ? ` (${withData.length} with your data)` : ''}` });
+    return { deleted: hits.length };
 }
