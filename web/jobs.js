@@ -439,7 +439,7 @@ async function renderSetup(box) {
         </div>
         <h3 class="jh-h">Agents</h3>
         <div class="card jh-form">
-          <div class="jh-two"><div class="field"><label for="st-a">Agent for wishes and advice</label><select id="st-a">${['claude', 'codex', 'cline'].map(a => `<option value="${a}" ${(s.agent || 'claude') === a ? 'selected' : ''}>${esc(C.agentTitle ? C.agentTitle(a) : a)}</option>`).join('')}</select></div><div class="field"><label for="st-mo">Model</label><input id="st-mo" value="${esc(s.model || '')}" placeholder="default (or oss:<ollama model>)"></div></div>
+          <div class="jh-two"><div class="field"><label for="st-a">Agent for wishes and advice</label><select id="st-a">${['claude', 'codex', 'cline', 'antigravity'].map(a => `<option value="${a}" ${(s.agent || 'claude') === a ? 'selected' : ''}>${esc(C.agentTitle ? C.agentTitle(a) : a)}</option>`).join('')}</select></div><div class="field"><label for="st-mo">Model</label><input id="st-mo" value="${esc(s.model || '')}" placeholder="default (or oss:<ollama model>)"></div></div>
         </div>
         <div class="card jh-form" style="margin-top:8px"><label class="jh-check"><input type="checkbox" id="st-ac" ${s.autoCpd === false ? '' : 'checked'}>Update Me from my CPD log by itself (when 5+ entries are new, at most once a day)</label><label class="jh-check"><input type="checkbox" id="st-aa" ${s.autoAssess === false ? '' : 'checked'}>Assess new jobs that use a framework (Civil Service, SFIA…) automatically</label><div class="field"><label for="st-ad">At most this many agent assessments a day (reused ones are free)</label><input id="st-ad" type="number" min="0" max="50" value="${esc(s.autoAssessPerDay ?? 6)}"></div></div>
         <h3 class="jh-h">Money</h3>

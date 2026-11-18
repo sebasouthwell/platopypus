@@ -168,7 +168,7 @@ export function modelArgs(agent, model) {
     if (!MODEL_OK.test(m)) throw httpError(400, 'Model: a plain model name (letters, numbers, dots, dashes).');
     if (agent === 'cline') return ['-m', m];
     const oss = ossModel(agent, m); if (oss) return ['--oss', '--local-provider', 'ollama', '-c', 'model_provider=ollama', '-m', oss];   // Codex on your Ollama server (CODEX_OSS_BASE_URL is set by the shell)
-    return agent === 'claude' || agent === 'codex' ? ['--model', m] : [];     // Antigravity picks its model in its own settings
+    return ['claude', 'codex', 'antigravity'].includes(agent) ? ['--model', m] : [];
 }
 export function command({ agent = 'claude', yolo = false, resume = false, profile = 'default', login = false, model = '' }) {
     const a = catalog[agent];

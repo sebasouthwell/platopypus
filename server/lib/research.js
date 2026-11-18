@@ -222,7 +222,7 @@ export function addNote(slug, text) {
 
 // ---------- which agent (and model) does the research ----------
 // One setting for the box: used by Ask, the editor's agent and citation check, and as the default for a research
-// session you start by hand. Unattended runs need an agent with a run-once mode (Claude Code or Codex).
+// session you start by hand. Unattended runs need an agent with a run-once mode (Claude Code, Codex, Cline or Antigravity).
 const settingsFile = () => path.join(config.state, 'research-settings.json');
 const AGENTS = ['claude', 'codex', 'antigravity', 'cline'], MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,59}$/;
 export function settings() {
@@ -241,7 +241,7 @@ export function setSettings(body = {}) {
     return cur;
 }
 // What an unattended run uses: the chosen agent if it can run once, otherwise Claude Code.
-export function runner() { const s = settings(); const agent = ['claude', 'codex', 'cline'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }
+export function runner() { const s = settings(); const agent = ['claude', 'codex', 'cline', 'antigravity'].includes(s.agent) ? s.agent : 'claude'; return { agent, model: s.models[agent] || '', fellBack: agent !== s.agent }; }
 
 // ---------- deleting ----------
 // A topic goes to the box's trash (state/trash), whole, with its history: nothing is lost until the trash is emptied.

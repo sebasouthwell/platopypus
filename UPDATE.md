@@ -864,6 +864,13 @@ phone's Update button. Mechanism:
   - New jobs tools: list_frameworks, framework_info, detect_framework, save_assessment, add_me_note,
     previous_assessments, list_applications, add_event.
 
+- **2.18.1**: Antigravity can do the work, not only answer questions. One-shot runs (Job Hunt wishes, letters,
+  assessments, CPD updates, Research questions and edits, Conspiracy runs) accept `antigravity`: `agy -p … 
+  --dangerously-skip-permissions`, with `--model` when one is set. Its sessions get their app's MCP server through
+  `~/.gemini/config/mcp_config.json` (agy has no per-run MCP flag; the entry is merged in and each server checks the calling
+  shell). Job Hunt's and Research's agent pickers include it. A wish whose agent ends without a summary now shows the
+  agent's last words, and says plainly when the agent is not signed in.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

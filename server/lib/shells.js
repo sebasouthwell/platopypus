@@ -68,7 +68,7 @@ export const scratchRoot = path.join(config.home, 'scratch');
 
 export async function create({ name, kind = 'shell', cwd = '', agent, yolo = false, resume = false, profile = 'default', login = false, scratch = false, runAs = null, session = null, firstPrompt = null, oneshot = false, model = '', ackClaude = false }) {
     if (oneshot) {
-        if (kind !== 'agent' || !['claude', 'codex', 'cline'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code, Codex or Cline.');
+        if (kind !== 'agent' || !['claude', 'codex', 'cline', 'antigravity'].includes(agent)) throw httpError(400, 'One-shot runs need Claude Code, Codex, Cline or Antigravity.');
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
         // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
         // A Conspiracy run works its case (as the agent user only: it is auto-approved; checked below).
@@ -118,7 +118,7 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             // throwaway folder. Output is tee'd to /tmp so PlatOpypus can keep it after the shell and folder are gone.
             const bin = agents.catalog[agent].bin;
             const mf = agents.modelArgs(agent, model).map(a => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
-            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} ${mcpFlags} -- "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"`;
+            const run1 = agent === 'claude' ? `${bin} -p --dangerously-skip-permissions ${mf} ${mcpFlags} -- "$PORTHOLE_FIRST_PROMPT"` : agent === 'cline' ? `${bin} --auto-approve true ${mf} "$PORTHOLE_FIRST_PROMPT"` : agent === 'antigravity' ? `${bin} -p "$PORTHOLE_FIRST_PROMPT" --dangerously-skip-permissions ${mf}` : `${bin} exec --dangerously-bypass-approvals-and-sandbox ${mf} ${mcpFlags} "$PORTHOLE_FIRST_PROMPT"`;
             const out = `/tmp/porthole-oneshot-${name}.log`;
             command = `${run1} 2>&1 | tee ${out}; echo; echo "[porthole] one-shot finished — this shell closes in 60 s (output is kept under Home → Temp ▾ → Results)"; sleep 60`;
             if (agent === 'claude' && runAs === 'root') agentEnv.IS_SANDBOX = '1';
@@ -159,6 +159,18 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         }
     }
 
+    // Antigravity reads MCP servers from ~/.gemini/config/mcp_config.json (no per-run flag): add this session's app server
+    // there (each server checks the calling shell, so an entry left in place does nothing outside its app's folder).
+    if (kind === 'agent' && agent === 'antigravity' && !login && agents.MCP_FOR[session]) {
+        const m = agents.MCP_FOR[session]; const au = runAs === 'agent' ? agentUser.info() : null; const home = au ? au.home : config.home;
+        const f = path.join(home, '.gemini', 'config', 'mcp_config.json');
+        try {
+            let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* new */ }
+            cfg.mcpServers ||= {}; cfg.mcpServers[m.name] = { command: m.command, args: m.args || [], disabled: false };
+            fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+            if (au) for (const x of [path.join(home, '.gemini'), path.join(home, '.gemini', 'config'), f]) { try { fs.chownSync(x, au.uid, au.gid); } catch { /* best effort */ } }
+        } catch (e) { log('shell', `antigravity MCP config not written: ${e.message}`); }
+    }
     // Codex on your Ollama server (model "oss:<name>"): it talks to the same server Cline is set up with.
     if (kind === 'agent' && agents.ossModel(agent, model)) { const ep = clineLib.settings().endpoint; if (!ep) throw httpError(412, 'Set your Ollama server first (More → AI agents → Cline); Codex uses the same one for local models.'); agentEnv.CODEX_OSS_BASE_URL = `${ep}/v1`; }
     // Cline: write its Ollama provider settings for the user who runs it.

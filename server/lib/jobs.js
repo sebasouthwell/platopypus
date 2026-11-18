@@ -521,7 +521,7 @@ export async function askAdvice(id, { topics = ['company', 'role'], extra = '', 
 // Wishes are kept so the board can show what was asked and what came of it.
 export function wishes() {
     const list = (readJson(P('wishes.json'), { wishes: [] }) || { wishes: [] }).wishes; let changed = false;
-    for (const w of list) if (w.status === 'started' && fs.existsSync(path.join(config.state, 'oneshot', `wish-${w.id.slice(1)}.json`))) { w.status = 'ended'; w.summary = 'The agent finished without a summary. Its output is under Home → Temp → Results.'; w.finished = Date.now(); changed = true; }
+    for (const w of list) if (w.status === 'started' && fs.existsSync(path.join(config.state, 'oneshot', `wish-${w.id.slice(1)}.json`))) { w.status = 'ended'; let tail = ''; try { tail = String(JSON.parse(fs.readFileSync(path.join(config.state, 'oneshot', `wish-${w.id.slice(1)}.json`), 'utf8')).output || '').replace(/https?:\/\/\S{80,}/g, '[link]').trim().slice(-400); } catch { /* none */ } w.summary = /Authentication required|log ?in|sign ?in|not signed/i.test(tail) ? `The agent is not signed in on this box (More → AI agents). It said: ${tail.slice(0, 200)}` : `The agent finished without a summary.${tail ? ` Its last words: ${tail}` : ''}`; w.finished = Date.now(); changed = true; }
     if (changed) writeJson(P('wishes.json'), { wishes: list });
     return list;
 }
