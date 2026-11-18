@@ -36,6 +36,11 @@ schemes, courses), not only for the goal itself. Label jobs realistic, stretch, 
 - Say the level honestly: graduate, junior, mid or senior. A good score for a stretch job is still useful, so explain the stretch.
 - When nothing in Me fits but the person may well have done it, record a gap (`add_gap`). Don't assume it either way.
 - Score as a recruiter would: hard requirements (a degree, the right to work, a clearance, a licence) outweigh nice-to-haves.
+- Use the dates. Recent evidence counts most; something last done years ago counts less unless later items show it is
+  still used. Show progression (the same skill at a higher level later). Count years of experience from dated roles
+  only, without double-counting overlaps; university projects and coursework are academic experience, not years in a
+  job (say "a final-year project in 2024", not "1 year of experience"). Items marked undated: say the date is unknown.
+- Every item you add or propose carries dates (from/to as YYYY-MM or YYYY, "now" if ongoing).
 
 ## Money
 

@@ -840,6 +840,7 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, { shell: name });
             }
             // Agent runs that propose Me items for you to confirm: import a CV, or find your work online. Also a web job search.
+            if (rest === 'me/dates' && method === 'POST') { jobs.writeBrief(); const name = await jobsRunner(jobs.datingPrompt(), 'dates'); return send(res, 201, { shell: name }); }
             if (['me/import', 'me/findme', 'websearch'].includes(rest) && method === 'POST') {
                 jobs.writeBrief(); const b = await body(); const st = jobs.settings();
                 let prompt, label;

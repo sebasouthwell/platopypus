@@ -932,6 +932,17 @@ phone's Update button. Mechanism:
   - **Requests from the box** (root only): `jobhunt request findme --name "…" --links "…" --hints "…"`, `wish --text`,
     `code --url --identities`, `cpd`, `plan`, `docs`. Files in `<state>/jobs-requests/`, picked up every 20 s.
 
+- **2.20.1**: Dates and notebooks.
+  - Every agent that proposes Me items must date them (from/to as YYYY-MM or YYYY, "now"), from git history, document
+    dates, the academic year or file dates, and say how. Matching weighs evidence by how recent it is (`recency`: 1 for
+    current, down to 0.4 for ten years old) and shows each candidate's dates; the brief says to count years of
+    experience from dated roles only and to treat university work as academic experience. Me lists newest first, marks
+    undated items, and offers **Date my items** (an agent dates them from their sources; `datingPrompt`).
+  - Jupyter notebooks in uploaded code become `<name>.ipynb.md` (markdown and code cells; outputs and images dropped)
+    and the original is deleted; checkpoints are removed.
+  - Requests from the box gain `codezip` (a zip already on the box, deleted after unpacking; optional `period`),
+    `dates`, and `docnote` (set document notes).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
