@@ -675,7 +675,7 @@ function migrateLegacy() {
 export function templates() {
     migrateLegacy(); let ids = []; try { ids = fs.readdirSync(TROOT()).filter(x => TPL_RE.test(x)); } catch { return []; }
     const def = settings().cvDefault;
-    return ids.map(tid => { const m = readJson(TD(tid, 'meta.json'), {}) || {}; const s = readJson(TD(tid, 'cv.json'), {}) || {}; registerWs(tid); return { id: tid, name: m.name || s.name || 'CV', style: m.style || '', contexts: m.contexts || [], starter: m.starter || null, filling: !!m.filling && Date.now() - m.filling < 40 * 60_000, inUse: templateUse(tid).length > 0, filled: m.filled || null, by: m.by, created: m.created, sections: (s.sections || []).length, versions: (s.versions || []).length, default: tid === def }; }).sort((a, b) => (b.default - a.default) || a.created - b.created);
+    return ids.map(tid => { const m = readJson(TD(tid, 'meta.json'), {}) || {}; const s = readJson(TD(tid, 'cv.json'), {}) || {}; registerWs(tid); return { id: tid, name: m.name || s.name || 'CV', style: m.style || '', contexts: m.contexts || [], starter: m.starter || null, filling: !!m.filling && Date.now() - m.filling < 40 * 60_000, inUse: templateUse(tid, { saved: false }).length > 0, filled: m.filled || null, by: m.by, created: m.created, sections: (s.sections || []).length, versions: (s.versions || []).length, default: tid === def }; }).sort((a, b) => (b.default - a.default) || a.created - b.created);
 }
 const tidOr = tid => { if (tid && TPL_RE.test(tid)) return tid; const t = templates(); if (!t.length) throw httpError(409, 'Add a CV template first.'); return t[0].id; };
 const cvState = tid => readJson(TD(tid, 'cv.json'), null);
@@ -698,10 +698,10 @@ export function duplicateTemplate(tid, by = 'phone') {
     const src = cvState(tid); const dst = cvState(t.id); dst.sections = src.sections; writeJson(TD(t.id, 'cv.json'), dst); return cvTemplate(t.id);
 }
 // How a template is in use: the default, saved PDFs, applications whose CV it made. Unused ones delete without asking.
-export function templateUse(tid) {
+export function templateUse(tid, { saved = true } = {}) {
     const s = cvState(tid) || {}; const out = [];
     if (settings().cvDefault === tid) out.push('your default template');
-    if ((s.versions || []).length) out.push(`${s.versions.length} saved PDF${s.versions.length === 1 ? '' : 's'}`);
+    if (saved && (s.versions || []).length) out.push(`${s.versions.length} saved PDF${s.versions.length === 1 ? '' : 's'}`);
     const apps = applications().filter(a => a.cvTemplate === tid); if (apps.length) out.push(`the CV for ${apps.length === 1 ? `"${apps[0].title}"` : `${apps.length} applications`} (those files stay)`);
     return out;
 }
@@ -784,6 +784,14 @@ export async function saveVersion({ name, choice, categories = [], template }, b
     const v = { id, name: n, choice: choice || {}, categories: [...new Set((Array.isArray(categories) ? categories : String(categories).split(',')).map(x => clip(x, 40)).filter(Boolean))], pdf: !!r.pdf, at: Date.now(), by };
     s.versions = [...(s.versions || []), v]; writeJson(TD(tid, 'cv.json'), s); log({ kind: 'cv', by, what: `CV version saved: ${n}` });
     return { ...v, note: r.note || null };
+}
+// Delete one saved version (its PDF and .tex). Its own files only; copies in application folders stay.
+export function removeVersion(id, tid0) {
+    const tid = tidOr(tid0); const s = cvState(tid); if (!/^cv[0-9a-f]{6}$/.test(id)) throw httpError(400, 'Bad version id.');
+    const v = (s.versions || []).find(x => x.id === id); if (!v) throw httpError(404, 'No such version.');
+    s.versions = s.versions.filter(x => x.id !== id); writeJson(TD(tid, 'cv.json'), s);
+    fs.rmSync(TD(tid, 'versions', id), { recursive: true, force: true }); log({ kind: 'cv', by: 'phone', what: `CV version deleted: ${v.name}` });
+    return { deleted: id };
 }
 export function versionFile(id, ext = 'pdf', tid0) { const f = TD(tidOr(tid0), 'versions', id, `CV.${ext === 'tex' ? 'tex' : 'pdf'}`); if (!/^cv[0-9a-f]{6}$/.test(id) || !fs.existsSync(f)) throw httpError(404, 'No such file.'); return f; }
 export async function previewCv(choice, tid0) { const tid = tidOr(tid0); const r = await buildCv(choice || {}, TD(tid, 'preview'), 'preview', tid); return { pdf: !!r.pdf, note: r.note || null }; }

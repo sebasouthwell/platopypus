@@ -962,6 +962,7 @@ const server = http.createServer(async (req, res) => {
             if (rest === 'cv/preview' && method === 'POST') { const b = await body(); return send(res, 200, await jobs.previewCv(b.choice || {}, b.template || tq)); }
             if (rest === 'cv/preview.pdf' && method === 'GET') return fileOut(jobs.previewFile(tq), 'application/pdf', 'CV preview.pdf');
             if (rest === 'cv/version' && method === 'POST') { const b = await body(); return send(res, 201, await jobs.saveVersion({ ...b, template: b.template || tq }, 'phone')); }
+            if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\/delete$/)) && method === 'POST') { const b = await body(); return send(res, 200, jobs.removeVersion(jm[1], b.template || tq)); }
             if ((jm = rest.match(/^cv\/version\/(cv[0-9a-f]{6})\.(pdf|tex)$/)) && method === 'GET') return fileOut(jobs.versionFile(jm[1], jm[2], tq), typeOf(`x.${jm[2]}`), `CV.${jm[2]}`, url.searchParams.get('download') !== '1');
             if (rest === 'apps' && method === 'GET') return send(res, 200, { apps: jobs.applications().map(a => ({ ...a, folder: path.relative(config.root, a.folder) })) });
             if (rest === 'apps' && method === 'POST') { const a = jobs.createApplication(await body(), 'phone'); return send(res, 201, { ...a, folder: path.relative(config.root, a.folder) }); }

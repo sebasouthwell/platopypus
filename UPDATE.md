@@ -1005,6 +1005,9 @@ phone's Update button. Mechanism:
   Unused templates go at once; a template that is the default, has saved PDFs or made an application's CV needs a
   confirmation that says so (`templateUse`). Applications record the template that made their CV (`cvTemplate`).
 
+- **2.22.2**: Saved CV versions can be deleted (bin on each row in Saved versions). Saved PDFs no longer make a
+  template count as "in use" (they belong to the template), so "Select unused" picks it; deleting it still lists them.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
