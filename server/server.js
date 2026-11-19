@@ -847,6 +847,10 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 201, { shell: name });
             }
             // Agent runs that propose Me items for you to confirm: import a CV, or find your work online. Also a web job search.
+            if (rest === 'me/tidy' && method === 'POST') { jobs.writeBrief(); const name = await jobsRunner(jobs.tidyPrompt(), 'tidy'); jobs.log({ kind: 'me', by: 'phone', what: 'Agent tidying Me' }); return send(res, 201, { shell: name }); }
+            if (rest === 'me/tidy/apply' && method === 'POST') return send(res, 200, jobs.applyTidy(await body()));
+            if (rest === 'me/tidy/dismiss' && method === 'POST') return send(res, 200, jobs.dismissTidy(await body()));
+            if (rest === 'me/tidy/undo' && method === 'POST') return send(res, 200, jobs.undoTidy((await body()).id));
             if (rest === 'me/dates' && method === 'POST') { jobs.writeBrief(); const name = await jobsRunner(jobs.datingPrompt(), 'dates'); return send(res, 201, { shell: name }); }
             if (['me/import', 'me/findme', 'websearch'].includes(rest) && method === 'POST') {
                 jobs.writeBrief(); const b = await body(); const st = jobs.settings();

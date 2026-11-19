@@ -1562,3 +1562,20 @@ input[type=month] { color-scheme: dark; }
   .dialog.tall:not(.small) .dialog-panel { width: min(900px, 64vw); }
 }
 @media (min-width: 1500px) { #page-jobs { --content: 1400px; } }
+
+/* Me tidy-up suggestions */
+.jh-tidybar { display: grid; gap: 8px; padding: 12px; margin-bottom: 10px; background: linear-gradient(180deg, var(--hull-2), var(--hull)); border: 1px solid var(--rail); border-radius: 14px; }
+.jh-tidybar > div:first-child { display: grid; gap: 2px; } .jh-tidybar .muted { font-size: 12.5px !important; margin: 0 !important; }
+.jh-tidybar .b { display: flex; flex-wrap: wrap; gap: 6px; } .jh-tidybar .btn { min-height: 42px; }
+.jh-tidys { display: grid; gap: 8px; margin-bottom: 14px; }
+.jh-tidy { padding: 12px; background: var(--hull); border: 1px solid var(--rail); border-left: 4px solid var(--kelp); border-radius: 14px; display: grid; gap: 6px; font-size: 14px; }
+.jh-tidy.fix { border-left-color: var(--dock, #6FB1F0); } .jh-tidy.remove { border-left-color: var(--flare); }
+.jh-tidy .h { display: flex; align-items: center; gap: 6px; font-weight: 600; } .jh-tidy .h svg.i { width: 16px; height: 16px; }
+.jh-tidy ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; } .jh-tidy li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; } .jh-tidy li .muted { font-size: 12.5px !important; margin: 0 !important; }
+.jh-tidy ul.keep li b { color: var(--foam); } .jh-tidy .lbl { font-size: 12px; color: var(--dim); }
+.jh-tidy .set { font-size: 13px; color: var(--foam); } .jh-tidy .set span { display: inline-block; min-width: 54px; margin-right: 6px; font-size: 12px; color: var(--dim); }
+.jh-tidy .why { font-size: 13px; color: var(--mist); font-style: italic; }
+.jh-tidy .acts { display: flex; gap: 6px; } .jh-tidy .acts .btn { min-height: 40px; }
+.jh-tidylog { margin: 0 0 14px; } .jh-tidylog summary { cursor: pointer; color: var(--mist); font-size: 13.5px; padding: 6px 2px; }
+@media (min-width: 1024px) { .jh-tidys { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .jh-tidybar { grid-template-columns: 1fr auto; align-items: center; } }
+@media (max-width: 560px) { .jh-tidy .acts .btn { flex: 1; } }

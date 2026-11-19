@@ -123,6 +123,85 @@ export function verifyMe(id, action) {
     delete it.status; delete it.confidence; it.verified = Date.now(); saveMe(m); log({ kind: 'me', by: 'phone', what: `Confirmed: ${it.title}` }); return it;
 }
 export function removeMe(id) { const m = me(); const n = m.items.length; m.items = m.items.filter(i => i.id !== id); for (const i of m.items) i.links = (i.links || []).filter(x => x !== id); if (m.items.length === n) throw httpError(404, 'No such item.'); saveMe(m); return { removed: id }; }
+// ---------- tidying Me ----------
+// An agent looks for duplicates (the same project under two names, a skill spelled twice, a role entered again) and
+// for items that need fixing, and suggests merges, fixes and removals. Nothing changes until the person applies a
+// suggestion; every applied one can be undone (the items it touched are kept in tidyLog, the last 15).
+const TIDY_STOP = new Set(['the', 'a', 'an', 'and', 'of', 'for', 'in', 'on', 'with', 'my', 'to', 'at', 'by', 'project', 'using']);
+const tidyWords = t => new Set(String(t || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9+#]+/g, ' ').split(' ').filter(w => w && !TIDY_STOP.has(w)));
+function tidyScore(a, b) {
+    const A = tidyWords(a.title), B = tidyWords(b.title); if (!A.size || !B.size) return 0;
+    let n = 0; for (const w of A) if (B.has(w)) n++;
+    let sc = Math.max(n / (A.size + B.size - n), (n / Math.min(A.size, B.size)) * 0.85);
+    if (a.org && b.org && a.org.toLowerCase() === b.org.toLowerCase()) sc += 0.15;
+    if ((a.from || a.to) && (b.from || b.to) && String(a.from || a.to).slice(0, 4) === String(b.from || b.to).slice(0, 4)) sc += 0.1;
+    return Math.min(1, sc);
+}
+// Likely duplicates, grouped: same kind, overlapping title words (plus the same organisation or year).
+export function dupeCandidates(limit = 60) {
+    const items = me().items; const parent = new Map(items.map(i => [i.id, i.id])); const find = x => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
+    const pairs = [];
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) { const a = items[i], b = items[j]; if (a.kind !== b.kind) continue; const sc = tidyScore(a, b); if (sc >= 0.6) { pairs.push([a.id, b.id, sc]); parent.set(find(a.id), find(b.id)); } }
+    const groups = new Map(); for (const [a, b] of pairs) { const r = find(a); if (!groups.has(r)) groups.set(r, new Set()); groups.get(r).add(a).add(b); }
+    return [...groups.values()].map(g => [...g].map(id => items.find(i => i.id === id))).sort((x, y) => y.length - x.length).slice(0, limit);
+}
+const TIDY_FIELDS = ['title', 'kind', 'summary', 'org', 'from', 'to', 'where'];
+function tidyClean(set = {}) { const o = {}; for (const k of TIDY_FIELDS) if (set[k] !== undefined && set[k] !== null && String(set[k]).trim() !== '') o[k] = k === 'kind' ? (ME_KINDS[set[k]] ? set[k] : undefined) : clip(set[k], k === 'summary' ? 3000 : k === 'title' ? 160 : 120); for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]; return o; }
+export function suggestTidy(b, by = 'agent') {
+    const m = me(); const has = id => m.items.some(i => i.id === id); const type = ['merge', 'fix', 'remove'].includes(b.type) ? b.type : 'merge';
+    const t = { id: id6('td'), type, why: clip(b.why, 600), by, at: Date.now() };
+    if (type === 'merge') { t.keep = b.keep; t.drop = [...new Set((Array.isArray(b.drop) ? b.drop : String(b.drop || '').split(',')).map(x => String(x).trim()))].filter(x => x && x !== b.keep); if (!has(t.keep)) throw httpError(400, `No item ${t.keep}.`); const bad = t.drop.filter(x => !has(x)); if (bad.length || !t.drop.length) throw httpError(400, bad.length ? `No item ${bad.join(', ')}.` : 'Say which items to merge into it.'); t.set = tidyClean(b); }
+    else { t.item = b.id || b.item; if (!has(t.item)) throw httpError(400, `No item ${t.item}.`); if (type === 'fix') { t.set = tidyClean(b); if (!Object.keys(t.set).length) throw httpError(400, 'Say what to change.'); } }
+    if (t.why.length < 4) throw httpError(400, 'Say why.');
+    const key = x => JSON.stringify([x.type, x.keep || x.item, [...(x.drop || [])].sort()]);
+    m.tidy = (m.tidy || []).filter(x => key(x) !== key(t)); m.tidy.push(t); saveMe(m);
+    return `Suggested ${type} ${t.id}`;
+}
+const uniq = (arr, k = x => x) => arr.filter((x, i) => arr.findIndex(y => k(y) === k(x)) === i);
+function applyOne(m, t) {
+    const byId = id => m.items.find(i => i.id === id); const snap = new Map(); const touch = it => { if (it && !snap.has(it.id)) snap.set(it.id, JSON.parse(JSON.stringify(it))); };
+    const removed = [];
+    if (t.type === 'merge') {
+        const K = byId(t.keep); const D = t.drop.map(byId).filter(Boolean); if (!K || !D.length) throw httpError(409, 'Those items have changed since; ask for a new tidy.');
+        touch(K); D.forEach(touch); const all = [K, ...D];
+        K.sources = uniq(all.flatMap(i => i.sources || []), x => `${x.url}|${x.title}`).slice(0, 30);
+        K.evidence = [...new Set(all.flatMap(i => i.evidence || []))].slice(0, 30);
+        K.tags = [...new Set(all.flatMap(i => i.tags || []))].slice(0, 30);
+        const gone = new Set(D.map(i => i.id));
+        K.links = [...new Set(all.flatMap(i => i.links || []))].filter(x => x !== K.id && !gone.has(x)).slice(0, 40);
+        if (!K.summary) K.summary = D.map(i => i.summary || '').sort((a, b) => b.length - a.length)[0] || '';
+        for (const k of ['org', 'where']) if (!K[k]) K[k] = D.find(i => i[k])?.[k];
+        const froms = all.map(i => i.from).filter(Boolean).sort(); if (!K.from && froms.length) K.from = froms[0];
+        if (!K.to) K.to = all.map(i => i.to).filter(Boolean).sort().pop();
+        if (K.status === 'proposed' && D.some(i => i.status !== 'proposed')) { delete K.status; delete K.confidence; K.verified = Date.now(); }
+        Object.assign(K, t.set || {}); K.merged = [...new Set([...(K.merged || []), ...D.map(i => i.title)])].slice(0, 20); K.updated = Date.now();
+        for (const i of m.items) if (!gone.has(i.id) && i !== K && (i.links || []).some(x => gone.has(x))) { touch(i); i.links = [...new Set(i.links.map(x => (gone.has(x) ? K.id : x)))].filter(x => x !== i.id); }
+        m.items = m.items.filter(i => !gone.has(i.id)); removed.push(...gone);
+    } else if (t.type === 'fix') { const it = byId(t.item); if (!it) throw httpError(409, 'That item has gone.'); touch(it); Object.assign(it, t.set || {}); it.updated = Date.now(); }
+    else { const it = byId(t.item); if (!it) throw httpError(409, 'That item has gone.'); touch(it); for (const i of m.items) if ((i.links || []).includes(it.id)) { touch(i); i.links = i.links.filter(x => x !== it.id); } m.items = m.items.filter(i => i.id !== it.id); removed.push(it.id); }
+    m.tidyLog = [{ id: t.id, type: t.type, label: tidyLabel(t, [...snap.values()]), at: Date.now(), before: [...snap.values()], removed }, ...(m.tidyLog || [])].slice(0, 15);
+}
+function tidyLabel(t, items) { const T = id => (items.find(i => i.id === id) || {}).title || id; return t.type === 'merge' ? `Merged ${t.drop.length + 1} into "${t.set?.title || T(t.keep)}"` : t.type === 'fix' ? `Fixed "${T(t.item)}"` : `Removed "${T(t.item)}"`; }
+export function applyTidy({ ids, all = false } = {}) {
+    const m = me(); const list = (m.tidy || []).filter(t => all || (ids || []).includes(t.id)); let n = 0; const failed = [];
+    for (const t of list) { try { applyOne(m, t); n++; } catch (e) { failed.push(`${t.id}: ${e.message}`); } m.tidy = m.tidy.filter(x => x.id !== t.id); }
+    saveMe(m); log({ kind: 'me', by: 'phone', what: `Tidied Me: ${n} change${n === 1 ? '' : 's'} applied` });
+    return { applied: n, failed };
+}
+export function dismissTidy({ ids, all = false } = {}) { const m = me(); const before = (m.tidy || []).length; m.tidy = (m.tidy || []).filter(t => !(all || (ids || []).includes(t.id))); saveMe(m); return { dismissed: before - m.tidy.length }; }
+export function undoTidy(id) {
+    const m = me(); const e = (m.tidyLog || []).find(x => x.id === id); if (!e) throw httpError(404, 'Nothing to undo.');
+    for (const b of e.before) { const ix = m.items.findIndex(i => i.id === b.id); if (ix >= 0) m.items[ix] = b; else m.items.push(b); }
+    m.tidyLog = m.tidyLog.filter(x => x.id !== id); saveMe(m); log({ kind: 'me', by: 'phone', what: `Undid: ${e.label}` }); return { undone: id };
+}
+export function tidyPrompt() {
+    return `Tidy my Me map. Suggest changes; I apply them, so nothing you suggest changes Me until I do.\n` +
+        `1. me_summary for everything, tidy_suggestions for what is already suggested, then me_duplicates for likely duplicate groups (also look yourself: the same thing can have quite different titles).\n` +
+        `2. me_item on each candidate to compare summaries, organisations, dates and sources.\n` +
+        `3. When two or more items are the same real thing (one project under two names, a skill entered twice like "Python" and "Python scripting", a role entered again, a module listed as both a project and an achievement of the same work), suggest_merge: keep the fullest (confirmed over proposed), drop the rest, and give a title or summary only if a combined one is truer and clearer. Keep different things apart even when related (a degree and its modules, a project and the award it won, two jobs at one employer): link them with link_me instead.\n` +
+        `4. suggest_fix for an item with the wrong kind, dates that contradict its sources, or a vague title; suggest_remove for an empty, nonsense or test item, or one that its own sources show is not mine. Say why every time.\n` +
+        `True facts only; never invent dates or details. Finish with one line: how many merges, fixes and removals you suggested.`;
+}
 // Gaps: what a job asked for that Me has no evidence of. The user answers (adds an example) or dismisses them.
 export function addGap(b, by = 'phone') { const m = me(); const text = clip(b.text, 400); if (text.length < 4) throw httpError(400, 'Describe the gap.'); const g = m.gaps.find(x => x.text.toLowerCase() === text.toLowerCase() && x.status === 'open') || { id: id6('g'), text, job: b.job || null, status: 'open', by, at: Date.now() }; if (!m.gaps.includes(g)) m.gaps.push(g); saveMe(m); return g; }
 export function closeGap(id, { answer = '', status = 'answered' } = {}) { const m = me(); const g = m.gaps.find(x => x.id === id); if (!g) throw httpError(404, 'No such gap.'); g.status = ['answered', 'dismissed'].includes(status) ? status : 'answered'; g.answer = clip(answer, 2000); g.closed = Date.now(); saveMe(m); return g; }
@@ -917,6 +996,15 @@ kit.registerApp('jobs', {
             run: (c, a) => { const v = meVersion(); const out = board().jobs.flatMap(j => (j.assess || []).filter(x => x.framework === a.framework).map(x => `${j.title}${j.company ? ` · ${j.company}` : ''} [${x.target || ''}] Me ${x.meVersion === v ? 'unchanged' : 'changed since'}: ${x.elements.map(e => `${e.name} ${e.level ?? '–'}${e.blind !== undefined && e.blind !== null ? `/${e.blind}` : ''}`).join('; ')}`)); return `Current Me version ${v}\n${out.join('\n') || 'None yet.'}`; } },
         { name: 'link_me', description: 'Link Me items to each other (e.g. a skill to the project that shows it, an achievement to its role). Use after proposing, once both ids exist.', inputSchema: kit.obj({ id: kit.str('Me item id'), to: kit.arr('Ids to link it to') }, ['id', 'to']),
             run: (c, a) => { const m = me(); const it = m.items.find(i => i.id === a.id); if (!it) throw httpError(404, 'No such item.'); const ok = (a.to || []).filter(x => x !== a.id && m.items.some(i => i.id === x)); it.links = [...new Set([...(it.links || []), ...ok])].slice(0, 40); saveMe(m); return `${it.title}: ${it.links.length} links`; } },
+        { name: 'me_duplicates', description: 'Groups of Me items that look like duplicates (same kind, overlapping titles, same organisation or year). A starting point: check each with me_item.', inputSchema: kit.obj({}),
+            run: () => dupeCandidates().map((g, n) => `Group ${n + 1}:\n${g.map(i => `  ${meLine(i)}`).join('\n')}`).join('\n') || 'No likely duplicates by title.' },
+        { name: 'tidy_suggestions', description: 'Tidy suggestions already waiting for the person (so you do not repeat them).', inputSchema: kit.obj({}), run: () => (me().tidy || []).map(t => `${t.id} ${t.type} ${t.keep ? `${t.keep} <- ${t.drop.join(', ')}` : t.item}: ${t.why}`).join('\n') || 'None waiting.' },
+        { name: 'suggest_merge', description: 'Suggest merging duplicate Me items: keep one, fold the others into it (sources, evidence, tags and links are combined; links to the dropped items move to the kept one). The person applies it.', inputSchema: kit.obj({ keep: kit.str('Id of the item to keep'), drop: kit.arr('Ids of the duplicates to fold in'), title: kit.str('A better combined title (optional)'), summary: kit.str('A combined summary (optional; true facts from the items only)'), from: kit.str('Start, if the merged dates should differ'), to: kit.str('End, if the merged dates should differ'), org: kit.str('Organisation (optional)'), why: kit.str('Why these are the same thing') }, ['keep', 'drop', 'why']),
+            run: (c, a, by) => suggestTidy({ ...a, type: 'merge' }, by) },
+        { name: 'suggest_fix', description: 'Suggest a correction to one Me item (kind, title, dates, organisation, summary). The person applies it.', inputSchema: kit.obj({ id: kit.str('Me item id'), kind: kit.str('project | role | skill | education | cert | achievement | interest'), title: kit.str('Title'), from: kit.str('Start'), to: kit.str('End'), org: kit.str('Organisation'), summary: kit.str('Summary'), why: kit.str('Why, and what shows it') }, ['id', 'why']),
+            run: (c, a, by) => suggestTidy({ ...a, type: 'fix' }, by) },
+        { name: 'suggest_remove', description: 'Suggest removing a Me item that is empty, a test, nonsense, or shown by its own sources not to be the person\'s. The person applies it.', inputSchema: kit.obj({ id: kit.str('Me item id'), why: kit.str('Why') }, ['id', 'why']),
+            run: (c, a, by) => suggestTidy({ ...a, type: 'remove' }, by) },
         { name: 'doc_files', description: 'The person\'s own documents (reports, papers, theses, slides): id, name, kind, whether read into Me yet.', inputSchema: kit.obj({}), run: () => docs().map(x => `${x.id} ${x.name}${x.kind ? ` (${x.kind})` : ''}${x.read ? ' [read into Me]' : ''}`).join('\n') || 'No documents.' },
         { name: 'read_doc', description: 'The text of one of the person\'s documents (page breaks and slides marked).', inputSchema: kit.obj({ id: kit.str('Document id') }, ['id']), run: async (c, a) => docText(a.id) },
         { name: 'mark_doc_read', description: 'Mark a document as read into Me.', inputSchema: kit.obj({ id: kit.str('Document id') }, ['id']), run: (c, a) => { markDocRead(a.id); return 'ok'; } },
@@ -1485,6 +1573,7 @@ export async function takeRequests(start) {
             else if (r.type === 'code') await addCodeGit(r, 'box');
             else if (r.type === 'codezip') await addCodeZipFile(r, 'box');
             else if (r.type === 'dates') await start(datingPrompt(), 'dates');
+            else if (r.type === 'tidy') await start(tidyPrompt(), 'tidy');
             else if (r.type === 'cvstarters') { for (const st of (r.starters || Object.keys(STARTERS))) { const t = createTemplate({ starter: st }, 'box'); if (r.fill !== false) queueFill(t.template.id); } }
             else if (r.type === 'cvfill') queueFill(r.template);
             else if (r.type === 'docnote') { const list = docs(); for (const [id, note] of Object.entries(r.notes || {})) { const d = list.find(x => x.id === id); if (d) d.notes = clip(note, 1000); } writeJson(docsFile(), { docs: list }); }

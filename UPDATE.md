@@ -1013,6 +1013,12 @@ phone's Update button. Mechanism:
   broader job sheet. The Me map saves as a PDF (PDF on the board bar): readable A3 tiles or the whole map on one page,
   then a list of every item by kind. "Fill from Me" sits with the template's actions.
 
+- **2.24.0**: Tidy up Me. "Tidy up" (Me, Items) starts an agent that finds duplicates (`me_duplicates` groups by
+  kind, title words, organisation and year) and items to fix, and suggests merges, fixes and removals
+  (`suggest_merge`, `suggest_fix`, `suggest_remove`). They wait at the top of "To confirm"; apply one by one or all.
+  A merge keeps one item and folds in the others' sources, evidence, tags and links (links to dropped items move).
+  Every applied change can be undone under "Recently tidied" (`tidyLog`, last 15). Box request: `tidy`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
