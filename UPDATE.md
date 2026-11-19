@@ -1008,6 +1008,11 @@ phone's Update button. Mechanism:
 - **2.22.2**: Saved CV versions can be deleted (bin on each row in Saved versions). Saved PDFs no longer make a
   template count as "in use" (they belong to the template), so "Select unused" picks it; deleting it still lists them.
 
+- **2.23.0**: Job Hunt fits a computer screen: a wider page (1240px, 1400px on big screens), jobs and applications in
+  columns, two-column CV sections and confirm list, a template grid instead of a scrolling row, a taller map and a
+  broader job sheet. The Me map saves as a PDF (PDF on the board bar): readable A3 tiles or the whole map on one page,
+  then a list of every item by kind. "Fill from Me" sits with the template's actions.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

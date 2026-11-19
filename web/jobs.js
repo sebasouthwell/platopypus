@@ -223,7 +223,7 @@ async function renderMe(box) {
         ${props.length ? `<div class="jh-bulk"><div class="t"><b>${props.length} waiting</b><span class="muted">Found by agents; not used for matching until you confirm.</span></div><div class="b">${[['high', 'Confirm high-confidence', props.filter(i => (i.confidence || 'medium') === 'high').length], ['high,medium', 'High + medium', props.filter(i => (i.confidence || 'medium') !== 'low').length], ['all', 'Confirm all', props.length]].filter(([, , n]) => n).map(([k, l, n], ix) => `<button class="btn ${ix === 0 ? 'pri' : ''}" data-bulk="${k}">${icon('check')}${l} <em>${n}</em></button>`).join('')}</div>${(() => { const srcs = {}; for (const i of props) for (const x of i.sources || []) { const k = x.title || x.url; if (k) srcs[k] = (srcs[k] || 0) + 1; } const top = Object.entries(srcs).sort((a, b) => b[1] - a[1]).slice(0, 12); return top.length > 1 ? `<div class="srcs"><select data-bsrc aria-label="Confirm everything from one source"><option value="">Everything from one source…</option>${top.map(([k, n]) => `<option value="${esc(k)}">${esc(k.length > 60 ? `${k.slice(0, 57)}…` : k)} (${n})</option>`).join('')}</select><button class="btn" data-bsrcok>${icon('check')}Confirm</button><button class="btn" data-bsrcno>${icon('x')}Reject</button></div>` : ''; })()}</div>` : ''}
         ${props.length ? `<div class="jh-props">${props.map(i => `<div class="jh-prop ${esc(i.confidence || 'medium')}"><div class="main"><div class="t"><span class="kdot" style="--k:${KIND_COLOR[i.kind]}"></span>${esc(i.title)}<span class="conf">${esc(i.confidence || 'medium')}</span></div><div class="muted">${esc([kinds[i.kind], i.org, i.from && `${i.from}${i.to ? `–${i.to}` : ''}`].filter(Boolean).join(' · '))}</div>${i.summary ? `<div class="s">${esc(i.summary)}</div>` : ''}${i.why ? `<div class="why">${esc(i.why)}</div>` : ''}<div class="src">${(i.sources || []).map(x => x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : `<span>${esc(x.title)}</span>`).join('')}</div></div><div class="acts"><button class="btn pri" data-ok-me="${i.id}">${icon('check')}It's me</button><button class="btn" data-me="${i.id}">Edit</button><button class="btn" data-no-me="${i.id}">${icon('x')}No</button></div></div>`).join('')}</div>` : ''}
         ${gaps.length ? `<div class="jh-gaps"><h3 class="jh-h">Jobs keep asking about</h3>${gaps.map(g => `<div class="jh-gap"><div class="main">${esc(g.text)}</div><button class="text-btn" data-gap="${g.id}">Answer</button><button class="text-btn dim" data-dismiss="${g.id}">Not me</button></div>`).join('')}</div>` : ''}</div>
-        <div data-sub="map" ${S.meSub === 'map' ? '' : 'hidden'}>${me.items.length && S.meSub === 'map' ? `<div class="jh-pbbar"><div class="jh-chips">${[['confirmedOnly', 'Confirmed only'], ['allSkills', 'All skills']].map(([k, l]) => `<button data-pbo="${k}" class="${S.pbOpt[k] ? 'on' : ''}">${l}</button>`).join('')}</div><span class="z"><button class="jh-iconbtn" data-pbz="out" aria-label="Zoom out">−</button><button class="jh-iconbtn" data-pbz="fit" aria-label="Fit">⤢</button><button class="jh-iconbtn" data-pbz="in" aria-label="Zoom in">+</button></span></div>${mePinboard(me.items, kinds, S.pbOpt)}<p class="muted jh-maphint">Drag to move, pinch or scroll to zoom. Strings join skills to where you used them; dashed cards are waiting for you to confirm.</p>` : me.items.length ? '' : '<p class="note">Nothing here yet. Add documents or code under Sources, or talk to an agent about your projects and jobs.</p>'}</div>
+        <div data-sub="map" ${S.meSub === 'map' ? '' : 'hidden'}>${me.items.length && S.meSub === 'map' ? `<div class="jh-pbbar"><div class="jh-chips">${[['confirmedOnly', 'Confirmed only'], ['allSkills', 'All skills']].map(([k, l]) => `<button data-pbo="${k}" class="${S.pbOpt[k] ? 'on' : ''}">${l}</button>`).join('')}</div><span class="z"><button class="jh-iconbtn" data-pbz="out" aria-label="Zoom out">−</button><button class="jh-iconbtn" data-pbz="fit" aria-label="Fit">⤢</button><button class="jh-iconbtn" data-pbz="in" aria-label="Zoom in">+</button></span><button class="btn jh-pbx" data-pbx>${icon('download')}PDF</button></div>${mePinboard(me.items, kinds, S.pbOpt)}<p class="muted jh-maphint">Drag to move, pinch or scroll to zoom. Strings join skills to where you used them; dashed cards are waiting for you to confirm.</p>` : me.items.length ? '' : '<p class="note">Nothing here yet. Add documents or code under Sources, or talk to an agent about your projects and jobs.</p>'}</div>
         <div data-sub="notes" ${S.meSub === 'notes' ? '' : 'hidden'}>
         <h3 class="jh-h">Notes</h3>
         <p class="note">Context that helps assessors: which example best shows a behaviour, what was yours in a group project, anything a CV line can't say. Levels are judged per job, so they aren't stored here.</p>
@@ -271,6 +271,7 @@ async function renderMe(box) {
     $$('[data-ms]', box).forEach(x => x.onclick = () => { S.meSub = x.dataset.ms; renderMe(box); });
     $$('[data-pbo]', box).forEach(x => x.onclick = () => { S.pbOpt[x.dataset.pbo] = !S.pbOpt[x.dataset.pbo]; renderMe(box); });
     if (S.meSub === 'map') wireBoard(box);
+    const pbx = $('[data-pbx]', box); if (pbx) pbx.onclick = () => exportMapDialog(me.items, kinds);
     $$('[data-me]', box).forEach(x => x.onclick = () => meDialog(me.items.find(i => i.id === x.dataset.me), kinds, me.items));
     $$('[data-gap]', box).forEach(x => x.onclick = () => gapDialog(me.gaps.find(g => g.id === x.dataset.gap), kinds));
     $$('[data-dismiss]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/gap/${x.dataset.dismiss}`, { method: 'POST', body: { status: 'dismissed' } }).catch(e => C.toast(e.message, true)); reload(); });
@@ -334,7 +335,7 @@ async function renderCv(box) {
     } else {
         html += `<div class="jh-tplbar"><span class="muted">${t.templates.length} template${t.templates.length === 1 ? '' : 's'}</span><button class="text-btn" data-tplman>${S.tplSel ? 'Done' : 'Manage'}</button></div>${S.tplSel ? `<div class="jh-selbar"><span>${S.tplSel.size} selected</span><button class="text-btn" data-tplunused>Select unused</button><button class="btn danger-btn" data-tpldel ${S.tplSel.size ? '' : 'disabled'}>${icon('trash')}Delete</button></div>` : ''}<div class="jh-tpls" role="list">${t.templates.map(x => `<button class="jh-tpl ${S.tplSel ? (S.tplSel.has(x.id) ? 'sel' : '') : x.id === t.template.id ? 'on' : ''}" data-tpl="${x.id}" role="listitem" ${S.tplSel ? `aria-pressed="${S.tplSel.has(x.id)}"` : ''}>${S.tplSel ? `<span class="jh-tick">${S.tplSel.has(x.id) ? icon('check') : ''}</span>` : ''}<b>${esc(x.name)}${x.default ? ' <span class="jh-def">default</span>' : ''}</b><span>${esc(x.style || '')}</span>${x.contexts.length ? `<em>${x.contexts.map(esc).join(' · ')}</em>` : ''}<i>${x.filling ? 'filling from Me…' : `${x.sections} sections · ${x.versions} saved${x.inUse ? ' · in use' : ''}`}</i></button>`).join('')}${S.tplSel ? '' : `<button class="jh-tpl add" data-tpladd>${icon('plus')}<b>Add a template</b><span>Starters, your own .tex, or designed by AI</span></button>`}</div>
         <div class="jh-cvbar"><div><b>${esc(t.template.name)}</b><span class="muted"> · ${t.sections.length} sections</span> <button class="text-btn" data-tplmeta>Details</button></div>
-            <div class="r-actions"><a class="btn" href="/editor.html?ws=${t.template.ws}" target="_blank" rel="noopener">${icon('file-code')}Edit LaTeX</a><button class="btn" data-preview>${icon('eye')}Preview PDF</button><button class="btn pri" data-version>${icon('save')}Save as version</button></div></div>
+            <div class="r-actions"><a class="btn" href="/editor.html?ws=${t.template.ws}" target="_blank" rel="noopener">${icon('file-code')}Edit LaTeX</a><button class="btn" data-preview>${icon('eye')}Preview PDF</button><button class="btn" data-fillnow ${t.templates.find(x => x.id === t.template.id)?.filling ? 'disabled' : ''}>${icon('claude')}${t.templates.find(x => x.id === t.template.id)?.filling ? 'Filling…' : 'Fill from Me'}</button><button class="btn pri" data-version>${icon('save')}Save as version</button></div></div>
             ${t.hasLatex ? '' : '<p class="jh-banner">LaTeX is not on this box yet, so PDFs cannot be built. Add the Research app (Apps tab) to get it.</p>'}
             <div class="jh-sections">${t.sections.map(s => { const cur = S.choice[s.name] ?? 'base'; const v = s.variants.find(x => x.id === cur); return `<div class="jh-sec ${cur === 'off' ? 'off' : ''}">
                 <div class="jh-sechead"><b>${esc(s.name)}</b><select data-sec="${esc(s.name)}" aria-label="${esc(s.name)} version">${s.variants.map(x => `<option value="${x.id}" ${cur === x.id ? 'selected' : ''}>${esc(x.label)}${x.job ? ' · for a job' : ''}${x.by && x.by !== 'phone' && x.id !== 'base' ? ' · AI' : ''}</option>`).join('')}<option value="off" ${cur === 'off' ? 'selected' : ''}>Leave out</option></select></div>
@@ -361,6 +362,7 @@ async function renderCv(box) {
     $$('[data-use]', box).forEach(x => x.onclick = () => { const v = t.versions.find(y => y.id === x.dataset.use); S.choice = { ...Object.fromEntries(Object.entries(v.choice).map(([k, val]) => [k, val === null ? 'off' : val])) }; renderCv(box); C.toast(`Loaded "${v.name}"`); });
     const pv = $('[data-preview]', box); if (pv) pv.onclick = async () => { const w = window.open('', '_blank'); pv.disabled = true; try { const r = await C.api('/api/jobs/cv/preview', { method: 'POST', body: { choice: choice(), template: S.tpl } }); if (r.pdf) { if (w) w.location = `/api/jobs/cv/preview.pdf?t=${S.tpl}&r=${Date.now()}`; } else { w?.close(); C.toast(r.note || 'No PDF.', true); } } catch (e) { w?.close(); C.toast(e.message, true); } pv.disabled = false; };
     $$('[data-delver]', box).forEach(x => x.onclick = async () => { const v = t.versions.find(y => y.id === x.dataset.delver); if (!await C.confirmDialog({ title: `Delete "${v.name}"?`, text: 'Its PDF and .tex are deleted. A copy already put in an application folder stays.', action: 'Delete' })) return; try { await C.api(`/api/jobs/cv/version/${v.id}/delete`, { method: 'POST', body: { template: S.tpl } }); lastWrite = Date.now(); JC.invalidate(); C.toast(`Deleted "${v.name}"`); } catch (e) { C.toast(e.message, true); } renderCv(box); });
+    const fn = $('[data-fillnow]', box); if (fn) fn.onclick = async () => { if (!await C.confirmDialog({ title: `Fill "${t.template.name}" from Me?`, text: 'An agent rewrites every section with your confirmed Me content in this template\'s style, then builds it. Section versions you saved stay; the original text is replaced.', action: 'Fill it' })) return; try { await C.api(`/api/jobs/cv/templates/${t.template.id}/fill`, { method: 'POST' }); C.toast('An agent is filling it from Me; the card says when it is done.'); } catch (e) { C.toast(e.message, true); } renderCv(box); };
     const sv = $('[data-version]', box); if (sv) sv.onclick = () => saveVersionDialog(cats);
     $$('[data-cvdef]', box).forEach(x => x.onclick = async () => { await C.api(`/api/jobs/cvs/${x.dataset.cvdef}`, { method: 'POST', body: { defaultFor: x.dataset.cat } }).catch(e => C.toast(e.message, true)); renderCv(box); });
     $$('[data-cvedit]', box).forEach(x => x.onclick = () => cvFileDialog(u.cvs.find(c => c.id === x.dataset.cvedit)));
@@ -808,4 +810,69 @@ async function deleteTemplates(ids, done) {
         <ul class="jh-dellist">${r.data.needConfirm.map(x => `<li><b>${esc(x.name)}</b><br><span class="muted">${esc(x.use.join(', '))}</span></li>`).join('')}</ul>
         <div class="buttons"><button class="danger" data-ok>Delete</button><button data-close>Cancel</button></div>`, { size: 'small' });
     C.$('[data-ok]', panel).onclick = async () => { const r2 = await call(true); close(); if (r2.status === 200) { lastWrite = Date.now(); JC.invalidate(); C.toast(`Deleted ${r2.data.deleted} template${r2.data.deleted === 1 ? '' : 's'}`); done(); } else C.toast(r2.data.error || 'Could not delete.', true); };
+}
+
+// ---------- the map as a PDF ----------
+// A print view in a new window (Save as PDF from the print dialog; on iPhone, Share then Print). The board is laid out
+// as on screen, then either shrunk onto one A3 page or cut into readable A3 tiles, with a list of every item after it.
+function exportMapDialog(items, kinds) {
+    const { $, icon } = C;
+    const { panel, close } = C.openDialog(`<h2>${icon('download')}Save the map as a PDF</h2><p class="muted">Opens a print view. Pick "Save as PDF" as the printer (on iPhone: Share, then Print, then Share again to save).</p>
+        <div class="field"><label>Layout</label>
+        <label class="jh-check"><input type="radio" name="mx-l" value="pages" checked>Readable: split across A3 pages</label>
+        <label class="jh-check"><input type="radio" name="mx-l" value="one">The whole map on one A3 page</label></div>
+        <label class="jh-check"><input type="checkbox" id="mx-i" checked>Add a list of every item after the map</label>
+        <label class="jh-check"><input type="checkbox" id="mx-c" ${S.pbOpt.confirmedOnly ? 'checked' : ''}>Confirmed items only</label>
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Open print view</button></div>`, { size: 'small' });
+    $('[data-ok]', panel).onclick = () => {
+        const o = { layout: panel.querySelector('[name="mx-l"]:checked').value, index: $('#mx-i', panel).checked, confirmedOnly: $('#mx-c', panel).checked };
+        const w = window.open('', '_blank'); close();
+        if (!w) return C.toast('The print view was blocked. Allow pop-ups for this site and try again.', true);
+        printMap(w, items, kinds, o);
+    };
+}
+function printMap(w, items, kinds, o) {
+    const { esc } = C; const opt = { ...S.pbOpt, confirmedOnly: o.confirmedOnly };
+    const L = boardLayout(items, opt); const board = mePinboard(items, kinds, opt);
+    const PW = 1500, PH = 960;                       // A3 landscape inside 10 mm margins, less the page header (CSS px)
+    // Readable: about 60% size, then shrunk a little (up to ~15% a side) so the map fills whole pages, not slivers.
+    let z = o.layout === 'one' ? Math.min(1, PW / L.width, PH / L.height) : Math.min(1, Math.max(0.6, PH / L.height));
+    const rows = Math.max(1, Math.ceil(L.height * z / PH - 0.15)); z = Math.min(z, rows * PH / L.height);
+    const cols = Math.max(1, Math.ceil(L.width * z / PW - 0.15)); z = Math.min(z, cols * PW / L.width);
+    const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const tiles = []; for (let r = 0; r < rows; r++) for (let c2 = 0; c2 < cols; c2++) tiles.push([r, c2]);
+    const pages = tiles.map(([r, c2], n) => `<section class="mp"><div class="hd"><b>My map</b><span>${esc(date)}${tiles.length > 1 ? ` · part ${n + 1} of ${tiles.length}${rows > 1 ? ` (row ${r + 1}, column ${c2 + 1})` : ''}` : ''}</span></div>
+        <div class="clip" style="width:${Math.min(PW, L.width * z - c2 * PW)}px;height:${Math.min(PH, L.height * z - r * PH)}px"><div class="mv" style="width:${L.width}px;height:${L.height}px;transform:translate(${-c2 * PW}px,${-r * PH}px) scale(${z})">${board}</div></div></section>`);
+    const show = items.filter(i => !o.confirmedOnly || i.status !== 'proposed');
+    const dk = i => yearOf(i.to) ?? yearOf(i.from) ?? (i.to === 'present' ? 9999 : 0);
+    const dates = i => [i.from, i.to].filter(Boolean).join('–');
+    const idx = o.index ? `<section class="idx"><h1>Everything on the map</h1>${[...LANES, ['skill', 'Skills']].map(([k, l]) => { const its = show.filter(i => i.kind === k).sort((a, b) => dk(b) - dk(a)); if (!its.length) return '';
+        if (k === 'skill') return `<h2 style="--k:${KIND_COLOR[k]}">${esc(l)} <span>${its.length}</span></h2><p class="sk">${its.map(i => `<span>${esc(i.title)}${i.status === 'proposed' ? '*' : ''}</span>`).join('')}</p>`;
+        return `<h2 style="--k:${KIND_COLOR[k]}">${esc(kinds[k] || l)} <span>${its.length}</span></h2>${its.map(i => `<div class="it"><div class="d">${esc(dates(i) || 'undated')}</div><div><b>${esc(i.title)}${i.status === 'proposed' ? ' <em>not yet confirmed</em>' : ''}</b>${i.org ? `<span class="org"> · ${esc(i.org)}</span>` : ''}${i.summary ? `<p>${esc(i.summary)}</p>` : ''}</div></div>`).join('')}`; }).join('')}
+        ${show.some(i => i.status === 'proposed') ? '<p class="fn">* not yet confirmed</p>' : ''}</section>` : '';
+    const css = `@page { size: A3 landscape; margin: 10mm; }
+        html, body { height: auto !important; background: #fff !important; color: #1d232c; overscroll-behavior: auto; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .mp { break-after: page; page-break-after: always; }
+        .hd { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: #555; margin: 0 0 6px; } .hd b { color: #1d232c; font-size: 15px; }
+        .clip { position: relative; overflow: hidden; border-radius: 6px; background: #17110c; }
+        .mv { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+        .mv .jh-pbw { width: 100%; height: 100%; border: 0; border-radius: 0; cursor: default; }
+        .mv .jh-pbin { transform: none !important; }
+        .idx { max-width: 1100px; font-size: 13px; line-height: 1.45; } .idx h1 { font-size: 22px; margin: 0 0 10px; color: #1d232c; }
+        .idx h2 { font-size: 15px; margin: 18px 0 6px; padding-left: 10px; border-left: 4px solid var(--k); color: #1d232c; break-after: avoid; } .idx h2 span { color: #888; font-weight: 400; font-size: 12px; }
+        .idx .it { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding: 5px 0; border-bottom: 1px solid #eee; break-inside: avoid; }
+        .idx .d { color: #666; font-variant-numeric: tabular-nums; font-size: 12px; } .idx .org { color: #555; } .idx p { margin: 2px 0 0; color: #333; } .idx em { font-style: normal; font-size: 11px; color: #a06a00; margin-left: 6px; }
+        .idx .sk { display: flex; flex-wrap: wrap; gap: 4px 6px; } .idx .sk span { border: 1px solid #ddd; border-radius: 10px; padding: 1px 8px; font-size: 12px; } .idx .fn { color: #888; font-size: 11px; }
+        .bar { position: sticky; top: 0; display: flex; gap: 10px; align-items: center; padding: 10px 0 14px; background: #fff; font: 14px system-ui, sans-serif; color: #444; }
+        .bar button { font: 600 14px system-ui, sans-serif; padding: 9px 16px; border-radius: 10px; border: 0; background: #1d232c; color: #fff; cursor: pointer; }
+        @media screen { body { padding: 16px 20px 40px; } .mp { margin-bottom: 28px; } .clip { box-shadow: 0 2px 10px rgba(0,0,0,.2); } }
+        @media print { .bar { display: none; } body { padding: 0; } }`;
+    const d = w.document; d.open();
+    d.write(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My map ${esc(date)}</title><link rel="stylesheet" href="${location.origin}/styles.css"><style>${css}</style></head><body><div class="bar"><button data-print>Save as PDF</button><span>${tiles.length} page${tiles.length === 1 ? '' : 's'} of map${o.index ? ', then the list' : ''}. A3 landscape.</span></div>${pages.join('')}${idx}</body></html>`);
+    d.close();
+    const go = () => { try { w.focus(); w.print(); } catch { /* the button is there */ } };
+    d.querySelector('[data-print]').onclick = go;
+    const ready = async () => { try { await d.fonts?.ready; } catch { /* print anyway */ } setTimeout(go, 250); };
+    const link = d.querySelector('link[rel=stylesheet]'); if (link.sheet) ready(); else { link.onload = ready; link.onerror = ready; }
 }

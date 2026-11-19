@@ -1544,3 +1544,21 @@ input[type=month] { color-scheme: dark; }
 
 .jh-tplbar { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 6px; } .jh-tplbar .muted { font-size: 12.5px !important; margin: 0 !important; }
 .jh-tpl.sel { border-color: var(--brass); background: rgba(240,184,64,.08); } .jh-tpl .jh-tick { margin-bottom: 4px; }
+
+/* Job Hunt on a computer: a wider page, cards in columns, the job sheet as a broad side panel. */
+.jh-pbbar .jh-pbx { min-height: 38px; padding: 0 12px; font-size: 13.5px; }
+@media (min-width: 1024px) {
+  #page-jobs { --content: 1240px; }
+  #jobs-body p.note, #jobs-body .jh-ask-h { max-width: 80ch; }
+  .jh-jobs { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; }
+  .jh-apps { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 8px; }
+  #jobs-body .jh-up { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .jh-props { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .jh-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .jh-tpls, .jh-starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); overflow: visible; margin: 0 0 12px; padding: 0; }
+  .jh-tpls .jh-tpl, .jh-starters .jh-tpl { flex: none; }
+  .jh-melist { column-count: 2; column-gap: 28px; } .jh-melist > .jh-h { break-after: avoid; } .jh-melist > .row { break-inside: avoid; }
+  .jh-pbw { height: min(76vh, 900px); }
+  .dialog.tall:not(.small) .dialog-panel { width: min(900px, 64vw); }
+}
+@media (min-width: 1500px) { #page-jobs { --content: 1400px; } }
