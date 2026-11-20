@@ -159,7 +159,7 @@ async function packageFindings(target, pkgs) {
         const adv = h.ids.map(v => ({ id: v.id, ...(details[v.id] || { summary: '', aliases: [], severity: 'moderate', affected: [] }) }));
         // Per advisory, the smallest fixed version above what is installed (advisories list a fix per release line);
         // the version that fixes them all is the highest of those.
-        const fixes = adv.map(a => (a.affected || []).filter(x => !x.name || x.name === h.p.name).flatMap(x => x.fixed).filter(v => cmpVer(v, h.p.version) > 0).sort(cmpVer)[0]).filter(Boolean).sort(cmpVer);
+        const fixes = adv.map(a => (a.affected || []).filter(x => (!x.name || x.name === h.p.name) && (!x.ecosystem || x.ecosystem === h.p.ecosystem)).flatMap(x => x.fixed).filter(v => cmpVer(v, h.p.version) > 0).sort(cmpVer)[0]).filter(Boolean).sort(cmpVer);
         const kevHit = adv.some(isKev);
         const sev = kevHit ? 'critical' : adv.reduce((m, a) => (sevN(a.severity) > sevN(m) ? a.severity : m), 'info');
         const malicious = adv.some(a => /^MAL-/.test(a.id));
@@ -297,23 +297,23 @@ const CORE = { nginx: 'nginx', openssl: 'OpenSSL', openssh: 'OpenSSH', sudo: 'su
 // from there to the Ubuntu package it came from. Plus the core above and the running kernel.
 async function liveSystem(apt) {
     const srcOf = new Map(); for (const [bin, v] of apt.map) { const s = v.source; if (!srcOf.has(s)) srcOf.set(s, { source: s, version: v.version, binaries: [] }); srcOf.get(s).binaries.push(bin); }
-    const exes = new Map();   // exe path -> { units: Set, listening: Set, names: Set }
-    const add = (pid, k, v) => { let exe; try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { return; } if (!exes.has(exe)) exes.set(exe, { units: new Set(), listening: new Set(), names: new Set() }); exes.get(exe)[k].add(v); };
+    const procs = new Map();   // pid -> { exe, units: Set, listening: Set, names: Set }
+    const add = (pid, k, v) => { if (!procs.has(pid)) { let exe; try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { return; } procs.set(pid, { exe, units: new Set(), listening: new Set(), names: new Set() }); } procs.get(pid)[k].add(v); };
     const units = (await sh('systemctl', ['list-units', '--type=service', '--state=running', '--no-legend', '--plain'])).out.split('\n').map(l => l.split(/\s+/)[0]).filter(u => u.endsWith('.service'));
     // systemctl show prints one block per unit (blank line between) with its properties in its own order.
     if (units.length) { const sp = await sh('systemctl', ['show', '-p', 'Id', '-p', 'MainPID', ...units], { timeout: 30_000 }); for (const blk of sp.out.split(/\n\s*\n/)) { const id = blk.match(/^Id=(.+)$/m)?.[1]; const pid = Number(blk.match(/^MainPID=(\d+)$/m)?.[1] || 0); if (id && pid > 0) add(String(pid), 'units', id.replace(/\.service$/, '')); } }
     const ssr = await sh('ss', ['-tulnpH'], { timeout: 15_000 });
     for (const l of ssr.out.split('\n')) { const cols = l.trim().split(/\s+/); if (cols.length < 5) continue; const addr = cols[4]; for (const m of l.matchAll(/\("([^"]+)",pid=(\d+)/g)) { add(m[2], 'listening', `${cols[0]} ${addr}`); add(m[2], 'names', m[1]); } }
-    const paths = [...exes.keys()]; const owner = new Map();
+    const paths = [...new Set([...procs.values()].map(x => x.exe))]; const owner = new Map();
     if (paths.length) { const d = await sh('dpkg', ['-S', ...paths], { timeout: 30_000 }); for (const l of d.out.split('\n')) { const m = l.match(/^([^:\s,]+)(?::[a-z0-9]+)?(?:, [^:]+)*: (\/.+)$/); if (m) owner.set(m[2], m[1]); } }
     const pkgs = new Map(); const services = [];
     const want = (src, extra = {}) => { const s = srcOf.get(src); if (!s) return null; if (!pkgs.has(src)) pkgs.set(src, { ...s, label: CORE[src] || null, core: !!CORE[src], units: [], listening: [] }); const p = pkgs.get(src); for (const k of ['units', 'listening']) for (const v of extra[k] || []) if (!p[k].includes(v)) p[k].push(v); if (extra.label && !p.label) p.label = extra.label; return p; };
     for (const src of Object.keys(CORE)) want(src);
     const kr = (await sh('uname', ['-r'])).out.trim(); const kbin = [...apt.map.keys()].find(b => b === `linux-image-${kr}` || b === `linux-image-unsigned-${kr}`);
     if (kbin) { const p = want(apt.map.get(kbin).source, { label: `Linux kernel ${kr}` }); if (p) { p.core = true; p.version = apt.map.get(kbin).version; } }
-    for (const [exe, v] of exes) {
-        const bin = owner.get(exe) || owner.get(exe.replace(/^\/usr/, '')); const src = bin ? apt.map.get(bin.replace(/:.*/, ''))?.source : null;
-        const row = { exe, name: [...v.names][0] || path.basename(exe), units: [...v.units], listening: [...v.listening], package: bin || null, source: src || null, version: src ? srcOf.get(src)?.version : null };
+    for (const [pid, v] of procs) {
+        const exe = v.exe; const bin = owner.get(exe) || owner.get(exe.replace(/^\/usr/, '')); const src = bin ? apt.map.get(bin.replace(/:.*/, ''))?.source : null;
+        const row = { pid: Number(pid), exe, name: [...v.names][0] || path.basename(exe), units: [...v.units], listening: [...v.listening], package: bin || null, source: src || null, version: src ? srcOf.get(src)?.version : null };
         services.push(row); if (src) want(src, { units: row.units, listening: row.listening });
     }
     services.sort((a, b) => b.listening.length - a.listening.length || a.name.localeCompare(b.name));

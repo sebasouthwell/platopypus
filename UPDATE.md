@@ -1062,6 +1062,10 @@ phone's Update button. Mechanism:
   installed version already fixes, so a headline CVE can be seen to have been checked. Fix: running services were
   matched to the wrong executables (systemctl show prints MainPID before Id).
 
+- **2.26.2**: Self-check fixes: a fixed version is taken only from the package's own ecosystem (Ubuntu advisories list
+  every release, so 24.04 was shown 26.04's version); processes are tracked one by one, not per executable (two
+  python processes were merged).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
