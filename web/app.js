@@ -259,6 +259,7 @@ function push(page) {
     if (page === 'alerts') loadAlerts().catch(e => toast(e.message, true));
     if (page === 'backups') loadBackups().catch(e => toast(e.message, true));
     if (page === 'schedules') loadSchedules().catch(e => toast(e.message, true));
+    if (page === 'selfcheck') selfcheckUI().then(m => m.load()).catch(e => toast(e.message, true));
     if (page === 'prompts') promptsUI().then(m => m.loadPrompts()).catch(e => toast(e.message, true));
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
@@ -3529,6 +3530,11 @@ async function casesUI() {
 }
 function openCases() { go('apps'); push('cases'); }
 // ---------- Job Hunt (web/jobs.js, loaded when first opened) ----------
+let selfcheckMod = null;
+async function selfcheckUI() {
+    if (!selfcheckMod) { selfcheckMod = await import(`/selfcheck.js?v=${ASSET_V}`); selfcheckMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, openTerminal, $, $$ }); }
+    return selfcheckMod;
+}
 let jobsMod = null;
 async function jobsUI() {
     if (!jobsMod) { jobsMod = await import(`/jobs.js?v=${ASSET_V}`); jobsMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, push, go, state, openTerminal, agentTitle, enterSubmits, $, $$ }); }

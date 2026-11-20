@@ -48,6 +48,7 @@ import * as schedules from './lib/schedules.js';
 import * as cases from './lib/cases.js';
 import * as jobs from './lib/jobs.js';
 import * as kitTools from './lib/kit/tools.js';
+import * as selfcheck from './lib/selfcheck.js';
 import * as workspaces from './lib/kit/workspaces.js';
 import * as zipstream from './lib/zipstream.js';
 import * as prefs from './lib/prefs.js';
@@ -1127,6 +1128,16 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { ok: true, message: 'Powering off in a few seconds.' });
         }
         // Scheduled routines (More → Schedules).
+        // Self-check: scan what is live, fix with agents, log what changed (server/lib/selfcheck.js).
+        if (p === '/api/selfcheck' && method === 'GET') return send(res, 200, selfcheck.overview());
+        if (p === '/api/selfcheck/scan' && method === 'POST') { if (selfcheck.scanStatus().running) return send(res, 409, { error: 'A scan is already running.' }); selfcheck.scan('manual').catch(e => log('selfcheck', `scan failed: ${e.message}`)); return send(res, 202, { running: true }); }
+        if (p === '/api/selfcheck/fix' && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 202, selfcheck.fix(b.targets, { trigger: 'manual', minSeverity: b.minSeverity || 'low', grantRoot: b.grantRoot === true, autoApply: b.autoApply === true })); }
+        if (p === '/api/selfcheck/settings' && method === 'POST') return send(res, 200, selfcheck.setSettings(await readJson(req, 64 * 1024)));
+        { const sm = p.match(/^\/api\/selfcheck\/runs\/(r[0-9a-z]{6,20})(?:\/(merge|rollback|apply|discard))?$/);
+          if (sm && method === 'GET' && !sm[2]) return send(res, 200, selfcheck.getRun(sm[1]));
+          if (sm && method === 'POST' && sm[2] === 'merge') return send(res, 200, await selfcheck.mergeRun(sm[1]));
+          if (sm && method === 'POST' && (sm[2] === 'apply' || sm[2] === 'discard')) return send(res, 200, await selfcheck.approveRun(sm[1], { apply: sm[2] === 'apply' }));
+          if (sm && method === 'POST' && sm[2] === 'rollback') return send(res, 200, await selfcheck.rollbackRun(sm[1])); }
         if (p === '/api/schedules' && method === 'GET') return send(res, 200, schedules.list());
         if (p === '/api/schedules' && method === 'POST') return send(res, 201, schedules.create(await readJson(req, 96 * 1024)));
         {
@@ -1294,6 +1305,8 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.
 
 // Daily update check against the public repo (first one a minute after boot).
 update.schedule();
+// Self-check fix runs: one-shot agents as the agent user (auto-approved, so never root), with the self-check tools.
+selfcheck.start(async ({ prompt, cwd, base, agent, model }) => { const name = `${base}-${Math.random().toString(36).slice(2, 5)}`; await shells.create({ name, kind: 'agent', agent: agent || 'claude', model: model || '', runAs: 'agent', session: 'selfcheck', cwd: path.relative(config.root, cwd) || '.', firstPrompt: prompt, oneshot: true }); return name; });
 
 function groupExists(name) { try { return fs.readFileSync('/etc/group', 'utf8').split('\n').some(l => l.startsWith(name + ':')); } catch { return false; } }
 // PlatOpypus first: raise its own priority (the systemd unit does this too; this covers Docker mode and old units).

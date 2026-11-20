@@ -154,6 +154,7 @@
       <button class="row" data-page="creds"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-key"/></svg></span><div class="main"><div class="title">Shared credentials</div><div class="sub" id="more-creds-sub">Logins agents handed to you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="security"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Security</div><div class="sub" id="more-security-sub">Two-step codes, signed-in devices</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="backups"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-cloud-up"/></svg></span><div class="main"><div class="title">Backups</div><div class="sub" id="more-backups-sub">Project data to your private S3 bucket</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
+      <button class="row" data-page="selfcheck"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-shield"/></svg></span><div class="main"><div class="title">Self-check</div><div class="sub" id="more-selfcheck-sub">Find and fix vulnerable services and tools</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="schedules"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-clock"/></svg></span><div class="main"><div class="title">Schedules</div><div class="sub" id="more-schedules-sub">Routines the box runs on a timetable</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="prompts"><span class="ico kelp"><svg class="i"><use href="/sprite.svg#i-file-text"/></svg></span><div class="main"><div class="title">AI prompts</div><div class="sub" id="more-prompts-sub">The instructions agents get</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
       <button class="row" data-page="alerts"><span class="ico brass"><svg class="i"><use href="/sprite.svg#i-bell"/></svg></span><div class="main"><div class="title">Alerts</div><div class="sub" id="more-alerts-sub">Telegram messages when something needs you</div></div><svg class="i chev"><use href="/sprite.svg#i-chevron"/></svg></button>
@@ -272,6 +273,14 @@
     </header>
     <div id="backups-body"></div>
     <p class="note gap">One archive per run: the project's <span class="mono">backup.paths</span> plus every data folder its containers mount, with owners kept, to your bucket under <span class="mono">&lt;project&gt;/&lt;time&gt;.tar.zst</span>. The service is frozen for the seconds the files are read, never stopped. Restore stops the service, keeps what was there in <span class="mono">.porthole/restore-undo-…</span>, puts the archive back and starts it again. The bucket key stays in the Vault and is never given to agents.</p>
+  </section>
+
+  <section id="page-selfcheck" class="tab page" hidden>
+    <header class="topbar compact">
+      <button class="text-btn back" data-back><svg class="i"><use href="/sprite.svg#i-back"/></svg>More</button>
+      <h1>Self-check</h1>
+    </header>
+    <div id="sc-body"></div>
   </section>
 
   <section id="page-schedules" class="tab page" hidden>

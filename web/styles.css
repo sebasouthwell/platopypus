@@ -1579,3 +1579,48 @@ input[type=month] { color-scheme: dark; }
 .jh-tidylog { margin: 0 0 14px; } .jh-tidylog summary { cursor: pointer; color: var(--mist); font-size: 13.5px; padding: 6px 2px; }
 @media (min-width: 1024px) { .jh-tidys { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } .jh-tidybar { grid-template-columns: 1fr auto; align-items: center; } }
 @media (max-width: 560px) { .jh-tidy .acts .btn { flex: 1; } }
+
+/* Self-check (More → Self-check) */
+.sc-head { display: grid; gap: 10px; }
+.sc-sum { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-pill { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--hull-2); color: var(--mist); border: 1px solid var(--rail); }
+.sc-pill b { font-family: var(--mono); color: var(--foam); }
+.sc-pill.sm { padding: 1px 8px; font-size: 11.5px; font-weight: 600; }
+.sc-pill.critical { background: rgba(244,106,92,.18); border-color: rgba(244,106,92,.55); color: #ffb3aa; } .sc-pill.critical b { color: #ffd2cc; }
+.sc-pill.high { background: rgba(240,140,64,.16); border-color: rgba(240,140,64,.5); color: #ffc79a; } .sc-pill.high b { color: #ffdcbf; }
+.sc-pill.moderate { background: rgba(240,184,64,.12); border-color: rgba(240,184,64,.4); color: #f3d38a; }
+.sc-pill.low, .sc-pill.info { color: var(--mist); }
+.sc-meta { font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .sc-meta svg.i { width: 14px; height: 14px; }
+.sc-err { color: var(--flare); font-size: 13px; margin: 0; }
+.sc-targets { display: grid; gap: 8px; }
+.sc-target { background: var(--hull); border: 1px solid var(--rail); border-left: 4px solid var(--rail); border-radius: 14px; padding: 10px 12px; }
+.sc-target.critical { border-left-color: var(--flare); } .sc-target.high { border-left-color: #f08c40; } .sc-target.moderate { border-left-color: var(--brass); } .sc-target.clean { border-left-color: var(--kelp); }
+.sc-th { display: flex; align-items: center; gap: 10px; }
+.sc-tick input { width: 22px; height: 22px; accent-color: var(--brass); }
+.sc-tmain { flex: 1; min-width: 0; text-align: left; display: grid; gap: 3px; padding: 4px 0; }
+.sc-tmain .title { font-weight: 600; font-size: 15px; } .sc-tmain .sub { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; }
+.sc-svc { color: var(--dim); font-size: 12.5px; } .sc-svc.on { color: var(--kelp); }
+.sc-busy { font-size: 11px; color: var(--brass-ink); background: var(--brass); border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+.sc-counts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; } .sc-ok svg.i { color: var(--kelp); width: 18px; height: 18px; }
+.sc-warn { margin: 8px 0 4px; padding: 8px 10px; border-radius: 10px; background: rgba(240,184,64,.08); border: 1px solid rgba(240,184,64,.3); font-size: 13px; color: var(--mist); }
+.sc-tools { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0; font-size: 12.5px; color: var(--mist); } .sc-tools b { color: var(--foam); font-weight: 600; } .sc-tools i { color: var(--brass); font-style: normal; }
+.sc-finds { display: grid; gap: 2px; margin-top: 8px; border-top: 1px solid var(--rail); padding-top: 6px; }
+.sc-find { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.sc-find .sc-pill { flex: none; min-width: 74px; justify-content: center; margin-top: 1px; }
+.sc-find .main { min-width: 0; display: grid; gap: 2px; font-size: 13.5px; } .sc-find .t { word-break: break-word; } .sc-find .mono { font-family: var(--mono); font-size: 12.5px; } .sc-find .ok { color: var(--kelp); }
+.sc-find .n { color: var(--mist); font-size: 12.5px; } .sc-find .a { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; } .sc-find .a a { color: var(--dock, #6FB1F0); font-family: var(--mono); }
+.sc-mal { color: var(--flare); } .sc-new { font-size: 11px; color: var(--brass-ink); background: var(--brass); border-radius: 6px; padding: 0 5px; }
+.sc-fixbar { position: sticky; bottom: calc(var(--sab, 0px) + 12px); z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--hull-2) 96%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--rail); box-shadow: 0 10px 24px -12px rgba(0,0,0,.7); }
+.sc-fixbar span { color: var(--mist); font-size: 13.5px; }
+.sc-runs { display: grid; gap: 8px; }
+.sc-run { background: var(--hull); border: 1px solid var(--rail); border-radius: 14px; padding: 12px; display: grid; gap: 6px; }
+.sc-run .h { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; } .sc-run .st { font-size: 12.5px; font-weight: 600; color: var(--brass); }
+.sc-run.done .st { color: var(--kelp); } .sc-run.failed .st, .sc-run.blocked .st, .sc-run.rolled-back .st { color: var(--flare); } .sc-run.skipped .st { color: var(--dim); }
+.sc-run .sub { font-size: 12.5px; } .sc-run .sum { margin: 0; font-size: 13.5px; } .sc-run .mono { font-family: var(--mono); }
+.sc-tail { font-family: var(--mono); font-size: 12px; color: var(--mist); background: var(--sea); border-radius: 10px; padding: 8px 10px; display: grid; gap: 2px; } .sc-tail .ag { color: var(--foam); }
+.sc-textdlg { padding-top: 16px; } .sc-pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.45; background: var(--sea); border: 1px solid var(--rail); border-radius: 10px; padding: 10px 12px; max-height: 65vh; overflow: auto; user-select: text; }
+.sc-check { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 14.5px; } .sc-check input { width: 20px; height: 20px; accent-color: var(--brass); }
+.sc-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; } .sc-h3 { font-size: 15px; margin: 18px 0 2px; } .sc-autolist { display: grid; }
+@media (min-width: 1024px) { #page-selfcheck { --content: 1100px; } .sc-runs { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+.sc-hint { margin: -4px 0 10px 30px !important; font-size: 12.5px !important; } .sc-check { align-items: flex-start; } .sc-check input { flex: none; margin-top: 1px; }
+.sc-run.approval { border-color: var(--brass); } .sc-run.discarded .st { color: var(--dim); }

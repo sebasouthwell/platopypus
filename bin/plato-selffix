@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# PlatOpypus self-remediation applier (server/lib/selfcheck.js starts it detached, like the updater).
+#   apply:    snapshot the app, copy the files a self-check agent changed from its staged copy, reinstall packages if
+#             the lockfile changed, restart, health-check for 45 s; roll back from the snapshot if it fails.
+#   rollback: put a snapshot back and restart.
+# Env: PLATO_APP, PLATO_STATE, SELFFIX_MODE, SELFFIX_STAGE, SELFFIX_FILES (|-separated, relative to the app),
+#      SELFFIX_SNAPSHOT, SELFFIX_RESULT, SELFFIX_DEPS (1 if server/package-lock.json changed), SELFFIX_RUN.
+# Only the listed files and (with SELFFIX_DEPS) server/node_modules are touched; state, nginx and user files are not.
+set -uo pipefail
+cd /
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+APP="${PLATO_APP:-/opt/platopypus}"; STATE="${PLATO_STATE:-/root/.platopypus}"; PORT="${PLATO_PORT:-${PORTHOLE_PORT:-7331}}"
+for envf in /etc/porthole.env /etc/platopypus.env; do [ -f "$envf" ] && { set -a; . "$envf"; set +a; }; done
+PORT="${PLATO_PORT:-${PORTHOLE_PORT:-$PORT}}"
+MODE="${SELFFIX_MODE:-apply}"; STAGE="${SELFFIX_STAGE:-}"; SNAP="${SELFFIX_SNAPSHOT:?}"; RESULT="${SELFFIX_RESULT:?}"; RUN="${SELFFIX_RUN:-?}"
+FILES="$(printf '%s' "${SELFFIX_FILES:-}" | tr '|' '\n')"
+LOG="$STATE/selfcheck/apply.log"; mkdir -p "$(dirname "$LOG")" "$(dirname "$RESULT")"
+# stdout is apply.log when PlatOpypus starts this; run by hand it is the terminal, and the log gets a copy.
+say() { local l; l="$(printf '%s [selffix %s] %s' "$(date -u +%FT%TZ)" "$RUN" "$*")"; echo "$l"; if [ -t 1 ]; then echo "$l" >> "$LOG"; fi; return 0; }
+result() { printf '{"ok":%s,"mode":"%s","message":%s,"at":%s}\n' "$1" "$MODE" "$(printf '%s' "$2" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')" "$(date +%s000)" > "$RESULT"; say "$2"; }
+finish() { result "$1" "$2"; exit 0; }
+unit() { if systemctl cat platopypus >/dev/null 2>&1; then echo platopypus; else echo porthole; fi; }
+has_systemd() { command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$(unit)" 2>/dev/null; }
+# Container (no service manager): the node server is PID 1 and the runtime restarts it. Nothing after the signal is
+# sure to run, so the result is written first and the restarted server finishes the run.
+container_restart() { result "$1" "$2"; kill -TERM 1 2>/dev/null || pkill -TERM -f 'node server.js' 2>/dev/null; exit 0; }
+restart() {
+    if has_systemd; then systemctl restart "$(unit)"; return 0; fi
+    container_restart true "${1:-applied}; restarted (no service manager here: the check is that the server starts again)"
+}
+healthy() {
+    curl -fsS "http://127.0.0.1:$PORT/api/login" >/dev/null 2>&1 || return 1
+    local page v; page="$(curl -fsS "http://127.0.0.1:$PORT/" 2>/dev/null)" || return 1
+    v="$(printf '%s' "$page" | sed -n 's/.*\/app\.js?v=\([^"]*\)".*/\1/p' | head -1)"; [ -n "$v" ] || return 1
+    [ "$(curl -fsS -o /dev/null -w '%{size_download}' "http://127.0.0.1:$PORT/app.js?v=$v" 2>/dev/null || echo 0)" -gt 10000 ] || return 1
+    node --check "$APP/server/server.js" >/dev/null 2>&1 || return 1
+}
+wait_healthy() { for _ in $(seq 1 45); do sleep 1; healthy && return 0; done; return 1; }
+reinstall() { ( cd "$APP/server" && { npm ci --omit=dev --no-audit --no-fund --loglevel=error || npm install --omit=dev --no-audit --no-fund --loglevel=error; } ) >> "$LOG" 2>&1; }
+restore() {
+    say "restoring the snapshot"
+    while IFS= read -r f; do [ -n "$f" ] && rm -f "$APP/$f"; done <<< "$FILES"
+    [ "${SELFFIX_DEPS:-}" = 1 ] && rm -rf "$APP/server/node_modules"
+    tar -xzf "$SNAP" -C "$APP" >> "$LOG" 2>&1
+}
+
+if [ "$MODE" = rollback ]; then
+    [ -f "$SNAP" ] || finish false "no snapshot at $SNAP"
+    restore
+    has_systemd || container_restart true "restored from the snapshot; restarting"
+    systemctl restart "$(unit)"
+    wait_healthy && finish true "restored from the snapshot and healthy" || finish false "restored, but the health check fails: look at journalctl -u $(unit)"
+fi
+
+[ -d "$STAGE" ] || finish false "staged copy missing: $STAGE"
+# 1. snapshot: the files about to change (and node_modules when packages change)
+LIST="$(mktemp)"; while IFS= read -r f; do [ -n "$f" ] && [ -e "$APP/$f" ] && echo "$f"; done <<< "$FILES" > "$LIST"
+[ "${SELFFIX_DEPS:-}" = 1 ] && [ -d "$APP/server/node_modules" ] && echo server/node_modules >> "$LIST"
+tar -czf "$SNAP" -C "$APP" -T "$LIST" >> "$LOG" 2>&1 || { rm -f "$LIST"; finish false "snapshot failed; nothing changed"; }
+rm -f "$LIST"; say "snapshot $(du -h "$SNAP" | cut -f1) at $SNAP"
+# 2. copy the changed files (a file the agent deleted is deleted)
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in /*|*..*) say "refusing path $f"; continue;; esac
+    if [ -e "$STAGE/$f" ]; then mkdir -p "$APP/$(dirname "$f")"; cp -a "$STAGE/$f" "$APP/$f"; chown root:root "$APP/$f" 2>/dev/null; else rm -f "$APP/$f"; fi
+    say "updated $f"
+done <<< "$FILES"
+# 3. packages
+if [ "${SELFFIX_DEPS:-}" = 1 ]; then
+    say "installing packages from the new lockfile"
+    if ! reinstall; then restore; reinstall; finish false "npm install failed; restored the snapshot (PlatOpypus was not restarted)"; fi
+fi
+# 4. restart and health check
+node --check "$APP/server/server.js" >/dev/null 2>&1 || { restore; finish false "server.js does not parse after the change; restored the snapshot"; }
+restart "applied"
+if wait_healthy; then finish true "applied; PlatOpypus is healthy"; fi
+say "health check failed; rolling back"
+restore; [ "${SELFFIX_DEPS:-}" = 1 ] && reinstall
+systemctl restart "$(unit)"; wait_healthy
+finish false "health check failed after the change; rolled back to the snapshot"

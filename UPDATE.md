@@ -1019,6 +1019,28 @@ phone's Update button. Mechanism:
   A merge keeps one item and folds in the others' sources, evidence, tags and links (links to dropped items move).
   Every applied change can be undone under "Recently tidied" (`tidyLog`, last 15). Box request: `tidy`.
 
+- **2.25.0**: Self-check (More → Self-check, `server/lib/selfcheck.js`). A scan lists every target: PlatOpypus itself
+  (installed node_modules against OSV, plus direct dependencies with newer releases), the box (nginx, certbot and
+  certificate expiry, OpenSSL, OpenSSH, sudo, git, tmux, Python, Docker, runc, Node.js against nodejs.org security
+  releases, npm, cloudflared, Tailscale, code-server, the agent CLIs, MCP servers agents start, Ubuntu security
+  updates with their CVEs, reboot-required) and each project with a live service or registered server (its
+  lockfiles: npm, yarn, pip, Pipfile, poetry, uv, Cargo, Bundler, Go). Tick targets and Fix: one auto-approved agent
+  per target, as the agent user, with the `selfcheck` MCP tools (`selfcheck_findings`, `selfcheck_log`,
+  `selfcheck_report`). Projects: new branch `plato/remediate-<time>`, commits, tests, running services restarted on
+  it (reverted with git revert if one does not come back); Merge and Roll back from the page. PlatOpypus: a staged copy
+  in the agent's home, a drift limit (dependencies plus at most 6 files / 150 lines of code; never auth, vault,
+  elevation, users, firewall, install, update, migrations), then `bin/plato-selffix` applies it with a snapshot,
+  a 45 s health check and automatic rollback; each run keeps a copyable note with the patch for the developers, and
+  local fixes are listed until an update replaces them. Box: an elevation grant for the run, /etc/nginx snapshotted
+  first, packages before/after recorded, never starts stopped services. Schedule (cron, default 06:00 daily): scan,
+  alert (new `selfcheck` alert kind) and optionally fix pre-ticked targets. State: `<state>/selfcheck/`
+  (settings.json, scan.json, drift.json, apt.json, osv-cache.json, runs/<id>.json, snapshots/, apply/).
+  New shell session type `selfcheck` (one-shot only, agent user only).
+  Nothing bypasses elevate unless you say so per run: box agents' root commands wait for approval on the phone one by
+  one unless "run root commands without asking" is ticked (then an elevation grant for that run only), and a
+  PlatOpypus fix stops at "Waiting for your approval" (Apply / Discard, after "What changed") unless "apply without
+  asking" is ticked. Scheduled auto-fixes follow `autoRoot` and `autoApply` in settings (both off by default).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

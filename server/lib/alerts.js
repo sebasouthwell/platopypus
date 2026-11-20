@@ -24,11 +24,12 @@ export const KINDS = [
     { key: 'schedule', title: 'Scheduled routines', sub: 'An agent proposed a routine, or one failed, hit its time limit, or did not run because its script changed.', def: true },
     { key: 'backup', title: 'A backup fails', sub: 'A project backup to S3 did not complete.', def: true },
     { key: 'crash', title: 'A server stops by itself', sub: 'A registered server or live service was running and is not any more, without anyone stopping it.', def: true },
+    { key: 'selfcheck', title: 'Self-check', sub: 'A scheduled self-check found something new, or a fix run finished.', def: true },
     { key: 'egress', title: 'Connections to somewhere new', sub: 'An agent or a service connected to a host it has not used before.', def: false },
     { key: 'credential', title: 'Agents using Vault values', sub: 'Every vault run and vault get by an agent. Can be busy.', def: false },
     { key: 'commit', title: 'Agent commits', sub: 'A commit by an agent in a project under /Projects.', def: false },
 ];
-const ICON = { root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', autostop: '🌙', research: '📚', backup: '💾', schedule: '⏰', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
+const ICON = { selfcheck: '🩺', root: '🔐', signin: '🔑', link: '🌐', crash: '💥', limit: '🧯', autostop: '🌙', research: '📚', backup: '💾', schedule: '⏰', egress: '📡', credential: '🗝', commit: '📝', test: '✅' };
 
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 function load() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } }

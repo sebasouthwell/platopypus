@@ -72,15 +72,16 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
         if (!firstPrompt || !String(firstPrompt).trim()) throw httpError(400, 'One-shot runs need a message.');
         // A one-shot normally gets a throwaway folder. A research one answers a question inside its topic instead.
         // A Conspiracy run works its case (as the agent user only: it is auto-approved; checked below).
-        if (session !== 'research' && session !== 'case' && session !== 'jobs') scratch = true;
+        if (session !== 'research' && session !== 'case' && session !== 'jobs' && session !== 'selfcheck') scratch = true;
     }
     // Default: agents and Remote Control run without root once their logins live with the agent user; plain shells as root.
     if (runAs === null) runAs = (kind === 'agent' || kind === 'claude' || kind === 'remote-control') && agentUser.available() && agentUser.loginsMoved() ? 'agent' : 'root';
-    if (oneshot && (session === 'case' || session === 'jobs') && runAs !== 'agent') throw httpError(400, 'This one-shot runs as the agent user (it is auto-approved, so never as root).');
+    if (oneshot && (session === 'case' || session === 'jobs' || session === 'selfcheck') && runAs !== 'agent') throw httpError(400, 'This one-shot runs as the agent user (it is auto-approved, so never as root).');
     if (firstPrompt !== null && (typeof firstPrompt !== 'string' || firstPrompt.length > 20000)) throw httpError(400, 'firstPrompt: text up to 20 000 characters.');
     if (!['root', 'agent'].includes(runAs)) throw httpError(400, 'runAs: root or agent.');
     if (oneshot && session === 'research' && runAs !== 'agent') throw httpError(412, 'Unattended research runs need the agent user (AI agents page: move logins to the agent user).');
-    if (session !== null && !['control', 'project', 'research', 'lab', 'case', 'jobs'].includes(session)) throw httpError(400, 'session: control, project, research, lab, case or jobs.');
+    if (session !== null && !['control', 'project', 'research', 'lab', 'case', 'jobs', 'selfcheck'].includes(session)) throw httpError(400, 'session: control, project, research, lab, case, jobs or selfcheck.');
+    if (session === 'selfcheck' && !oneshot) throw httpError(400, 'Self-check sessions are started by PlatOpypus only.');
     // Autonomous testing with Claude: allowed, after the user has read the warning (the app asks; this enforces it).
     if (session === 'lab' && kind === 'agent' && (agent || 'claude') === 'claude' && !ackClaude) { const e = httpError(428, 'Using Claude as a Security Lab agent needs your confirmation first.'); e.needAck = 'claude-lab'; throw e; }
     if (!validName(name)) throw httpError(400, 'Name: letters, numbers, dash or underscore, up to 40 characters.');
@@ -149,6 +150,9 @@ export async function create({ name, kind = 'shell', cwd = '', agent, yolo = fal
             const slug = research.topicOf(dir); if (!slug) throw httpError(400, 'A research session starts inside a topic: open one under Research first.');
             const tdir = path.join(research.ROOT, slug);
             security = 'research'; sessionEnv = { PORTHOLE_SESSION: 'research', PORTHOLE_SECURITY_LEVEL: 'research', PORTHOLE_SECURITY_FILE: path.join(tdir, '.platopypus', 'research.md'), PORTHOLE_PROJECT_ROOT: tdir };
+        } else if (session === 'selfcheck') {
+            // A self-check fix run (server/lib/selfcheck.js): the project, a staged copy of PlatOpypus, or the agent user's home for box fixes.
+            security = 'selfcheck'; sessionEnv = { PORTHOLE_SESSION: 'selfcheck', PORTHOLE_SECURITY_LEVEL: 'selfcheck', PORTHOLE_PROJECT_ROOT: dir };
         } else if (session === 'control') { security = 'control'; sessionEnv = { PORTHOLE_SESSION: 'control', PORTHOLE_SECURITY_LEVEL: 'control', PORTHOLE_SECURITY_FILE: secProfile.controlDoc() }; }
         else {
             const g = secProfile.get(dir);
