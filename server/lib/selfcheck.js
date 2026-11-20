@@ -422,6 +422,31 @@ function staleProcesses(services) {
     return out;
 }
 
+// Findings an agent marked as waiting on an upstream release: kept out of fixing until that package or tool has a
+// newer version (npm is looked up; others are offered again after 30 days).
+async function markWaiting(ts) {
+    const w = readJ(f('upstream.json'), {}); const latest = new Map(); let changed = false;
+    for (const [id, e] of Object.entries(w)) {
+        let gone = Date.now() - e.at > (e.ecosystem === 'npm' ? 90 : 30) * 86400_000;
+        if (!gone && e.ecosystem === 'npm') { if (!latest.has(e.on)) latest.set(e.on, await latestNpm(e.on)); const now = latest.get(e.on); if (now && cmpVer(now, e.version) > 0) gone = true; }
+        if (gone) { delete w[id]; changed = true; }
+    }
+    if (changed) writeJ(f('upstream.json'), w);
+    for (const t of ts) { for (const x of t.findings) if (w[x.id]) x.waiting = { on: w[x.id].on, version: w[x.id].version, why: w[x.id].why, since: w[x.id].at }; t.waiting = t.findings.filter(x => x.waiting).length; }
+}
+// Agent CLIs a project carries in its own dependencies (an SDK embeds its CLI): checked like the box's agent CLIs.
+const AGENT_PKGS = { '@anthropic-ai/claude-code': 'Claude Code', '@anthropic-ai/claude-agent-sdk': 'Claude Agent SDK', '@openai/codex': 'Codex CLI', '@openai/codex-sdk': 'Codex SDK', '@google/gemini-cli': 'Gemini CLI' };
+async function embeddedAgents(target, pkgs) {
+    const out = []; const seen = new Set();
+    for (const p of pkgs.filter(x => x.ecosystem === 'npm' && AGENT_PKGS[x.name])) {
+        if (seen.has(p.name)) continue; seen.add(p.name);
+        const latest = await latestNpm(p.name); if (!latest || cmpVer(latest, p.version) <= 0) continue;
+        const jump = major(latest) !== major(p.version);
+        out.push(finding(target, { area: 'agent', ecosystem: 'npm', name: p.name, version: p.version, latest, fixed: jump ? null : latest, file: p.file, severity: jump ? 'low' : 'moderate', note: `${AGENT_PKGS[p.name]} inside this project (its own copy of the agent, separate from the box's). AI agent releases often fix prompt-injection and sandbox escapes: update it here.` }));
+    }
+    return out;
+}
+
 // nginx server blocks that speak HTTP/2 (several nginx advisories only apply with it on).
 async function nginxHttp2() {
     const files = []; const read = d => { let es = []; try { es = fs.readdirSync(d); } catch { return; } for (const e of es) { const p = path.join(d, e); try { const t = fs.readFileSync(p, 'utf8'); if (/^\s*listen\s[^;]*\bhttp2\b|^\s*http2\s+on\s*;/m.test(t)) files.push(p); } catch { /* unreadable */ } } };
@@ -500,7 +525,7 @@ export async function scan(trigger = 'manual') {
                 else if (t.kind === 'box') { const b = await boxFindings(); t.findings = b.findings; t.tools = b.tools; t.services = b.services; t.installed = b.installed; t.patched = b.patched; }
                 else {
                     const inv = inventory(t.path); t.packages = inv.packages.length; t.lockfiles = inv.files; t.git = !!gitRoot(t.path);
-                    t.findings = await packageFindings(t.id, inv.packages);
+                    t.findings = [...await packageFindings(t.id, inv.packages), ...await embeddedAgents(t.id, inv.packages)];
                     for (const s of t.running.filter(s => s.image)) { const c = containers.find(x => x.image === s.image); if (c?.days > 120) t.findings.push(finding(t.id, { area: 'container', name: s.image, version: `${c.days} days old`, severity: c.days > 365 ? 'moderate' : 'low', note: 'The image has not been rebuilt or pulled for a long time; pull a newer tag of it.' })); }
                 }
             } catch (e) { errors.push(`${t.name}: ${e.message}`); t.findings ||= []; t.error = e.message; }
@@ -511,6 +536,7 @@ export async function scan(trigger = 'manual') {
         const box = ts.find(t => t.id === 'box'); for (const c of others) if (c.days > 180) box.findings.push(finding('box', { area: 'container', name: `${c.name} (${c.image})`, version: `${c.days} days old`, severity: 'low', note: 'A container whose image is old; pull a newer tag.' }));
         const prevIds = new Set((prev?.targets || []).flatMap(t => (t.findings || []).map(x => x.id)));
         for (const t of ts) for (const x of t.findings) x.new = !!prev && !prevIds.has(x.id);
+        scanning.step = 'Checking what waits on upstream releases'; await markWaiting(ts);
         const sc = { at: Date.now(), took: Date.now() - scanning.started, trigger, targets: ts, errors, drift: drift().filter(d => d.state === 'applied').length };
         writeJ(f('scan.json'), sc);
         const total = ts.reduce((n, t) => n + t.findings.length, 0);
@@ -541,7 +567,7 @@ export function fix(targetIds, { trigger = 'manual', minSeverity = 'low', grantR
     const made = [];
     for (const id of ids) {
         const t = sc.targets.find(x => x.id === id); if (!t) throw httpError(404, `Not in the last scan: ${id}.`);
-        const fx = t.findings.filter(x => sevN(x.severity) >= sevN(minSeverity) && x.area !== 'container' && !(x.area === 'os' && x.name === 'reboot'));
+        const fx = t.findings.filter(x => sevN(x.severity) >= sevN(minSeverity) && !x.waiting && x.area !== 'container' && !(x.area === 'os' && x.name === 'reboot'));
         if (!fx.length) continue;
         if (queue.some(q => q.target === id) || runs(100).some(r => r.target === id && ['queued', 'running', 'applying', 'approval'].includes(r.status))) continue;
         const r = { id: `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, target: id, kind: t.kind, name: t.name, path: t.path, trigger, grantRoot: !!grantRoot && t.kind === 'box', autoApply: !!autoApply && t.kind === 'plato', status: 'queued', created: Date.now(), findings: fx, running: (t.running || []).filter(s => s.running && t.kind === 'project'), log: [] };
@@ -571,7 +597,7 @@ async function startAgent(r, cwd, prompt) {
     r.shell = name; saveRun(r); addLog(r, `Agent ${s.agent} started in ${cwd} (shell ${name}).`);
     return name;
 }
-const FINDINGS_HELP = 'selfcheck_findings lists them (package or tool, installed version, the version that fixes it, advisories). Use selfcheck_log for a line on each step (the user reads it), and finish with selfcheck_report.';
+const FINDINGS_HELP = 'selfcheck_findings lists them (package or tool, installed version, the version that fixes it, advisories). Use selfcheck_log for a line on each step (the user reads it). Findings only an upstream release can fix (bundled in a tool already at its latest version, no fixed release yet): mark them with selfcheck_waiting rather than leaving the run partial; if everything else is fixed, your status is fixed. Finish with selfcheck_report.';
 
 async function runProject(r) {
     const root = gitRoot(r.path);
@@ -740,7 +766,7 @@ async function runBox(r) {
     saveRun(r);
     const prompt = `Fix the box-level findings PlatOpypus's self-check found (system packages, nginx, certbot and certificates, Node.js, agent CLIs, MCP servers). ${FINDINGS_HELP}\n` +
         `You are the agent user. Run anything that needs root with \`elevate -- <command>\`. ${r.grantRoot ? 'You hold an elevation grant for this run, so it runs without asking; every command is in the audit log.' : 'Each one asks the user on their phone first and waits up to 10 minutes: batch what you can into few commands (one apt-get install for all packages), give each a clear --reason, and if one is refused or times out, report it instead of retrying.'}\n` +
-        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; updating global npm packages (npm install -g <pkg>@<fixed version>; npm itself may move to a newer major version if that release supports the installed Node.js major, since that is how npm ships fixes to what it bundles; a finding marked "bundled; update X" is fixed by updating X, and if X is already at its latest release, report it as waiting on X upstream), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
+        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; restarting services named in a "restart needed" finding (systemctl restart <unit>), except PlatOpypus, docker, containerd, dbus, systemd-logind and other systemd-* units, ssh/sshd and the SSM agent: those stay for the user; updating global npm packages (npm install -g <pkg>@<fixed version>; npm itself may move to a newer major version if that release supports the installed Node.js major, since that is how npm ships fixes to what it bundles; a finding marked "bundled; update X" is fixed by updating X, and if X is already at its latest release, report it as waiting on X upstream), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
         `When a finding says there is no fixed package yet, apply the workaround its advisory documents if it is a configuration change (for example turning HTTP/2 off in nginx listen lines for an nginx HTTP/2 flaw): copy the file to <file>.selfcheck-${r.id} first, change only what the workaround needs, run the service's config test (nginx -t), reload, check the service still answers (curl -sI https://127.0.0.1 -k for nginx), and say in the report exactly what to undo once the fixed package arrives. A finding inside a Java jar or another app's bundle: report which app ships it; do not edit the app.\n` +
         `Never: start a service that is stopped, stop or break one PlatOpypus needs (nginx, its own service, docker, tmux, ssh/ssm), reboot, change the firewall, SSH, users, sudoers or PlatOpypus itself (/opt/platopypus), remove packages, or upgrade Node.js across a major version. Always run nginx -t before any nginx reload and stop if it fails. If a reboot is needed, say so in the report instead.\n` +
         `End with selfcheck_report (what you upgraded with before → after versions, what you left and why).`;
@@ -772,8 +798,10 @@ kit.registerApp('selfcheck', {
         { name: 'selfcheck_findings', description: 'The findings this run is to fix: package or tool, ecosystem, installed version, the version that fixes it, severity, advisories (ids, CVEs, summaries), and the lockfile it came from.', inputSchema: kit.obj({}),
             run: c => c.run.findings.map(x => `${x.id} [${x.severity}${x.malicious ? ', MALICIOUS' : ''}${x.dev ? ', dev only' : ''}] ${x.area}: ${x.ecosystem ? `${x.ecosystem} ` : ''}${x.name}${x.version ? ` ${x.version}` : ''}${x.fixed ? ` → fixed in ${x.fixed}` : ''}${x.apt ? ` (apt: ${x.apt})` : ''}${x.file ? ` · ${String(x.file).replace(c.run.path, '.')}` : ''}${x.note ? `\n    ${x.note}` : ''}${(x.advisories || []).map(a => `\n    ${a.id}${a.aliases?.length ? ` (${a.aliases.join(', ')})` : ''}: ${a.summary}`).join('')}`).join('\n') },
         { name: 'selfcheck_log', description: 'Add a line to the run\'s log, which the user reads (what you are doing, what you found).', inputSchema: kit.obj({ line: kit.str('One line') }, ['line']), run: (c, a) => { addLog(c.run, a.line, 'agent'); return 'ok'; } },
+        { name: 'selfcheck_waiting', description: 'Mark findings that only an upstream release can fix (e.g. a vulnerable package bundled inside a tool that is already at its latest version). They stop being offered for fixing until that tool publishes a newer version. Do not count them against your status.', inputSchema: kit.obj({ ids: kit.arr('Finding ids (from selfcheck_findings)'), on: kit.str('The package or tool whose next release is needed, e.g. "cline" or "npm"'), ecosystem: kit.str('Its ecosystem: npm, PyPI, RubyGems, Ubuntu … (npm is re-checked automatically)'), version: kit.str('Its latest version now, which does not fix it'), why: kit.str('One line') }, ['ids', 'on', 'version']),
+            run: (c, a) => { const ids = (a.ids || []).map(String).filter(id => c.run.findings.some(x => x.id === id)); if (!ids.length) throw httpError(400, 'None of those ids are in this run.'); const w = readJ(f('upstream.json'), {}); for (const id of ids) w[id] = { on: String(a.on).slice(0, 120), ecosystem: String(a.ecosystem || 'npm').slice(0, 40), version: String(a.version).slice(0, 60), why: String(a.why || '').slice(0, 300), at: Date.now(), run: c.run.id }; writeJ(f('upstream.json'), w); c.run.waiting = [...new Set([...(c.run.waiting || []), ...ids])]; addLog(c.run, `Waiting on ${a.on} ${a.version} upstream: ${ids.length} finding${ids.length === 1 ? '' : 's'}.`, 'agent'); return `Marked ${ids.length}; they are not offered again until ${a.on} releases a version after ${a.version}.`; } },
         { name: 'selfcheck_report', description: 'Finish: the outcome of this run.', inputSchema: kit.obj({ status: kit.str('fixed | partial | failed | nothing-to-do'), summary: kit.str('Two or three sentences'), fixed: kit.arr('What you fixed, e.g. "ws 8.17.0 → 8.17.1 (GHSA-…)"'), remaining: kit.arr('What is left, and why'), tests: kit.str('What you ran to check, and the result'), notes_for_developers: kit.str('PlatOpypus runs: every code change (file, what, why) for the developers') }, ['status', 'summary']),
-            run: (c, a) => { const r = c.run; r.report = { status: ['fixed', 'partial', 'failed', 'nothing-to-do'].includes(a.status) ? a.status : 'partial', summary: String(a.summary || '').slice(0, 4000), fixed: (a.fixed || []).map(x => String(x).slice(0, 800)).slice(0, 80), remaining: (a.remaining || []).map(x => String(x).slice(0, 800)).slice(0, 80), tests: String(a.tests || '').slice(0, 4000), notes_for_developers: String(a.notes_for_developers || '').slice(0, 6000), at: Date.now() }; addLog(r, `Report: ${r.report.status}. ${r.report.summary}`, 'agent'); return 'Recorded. You can stop now.'; } },
+            run: (c, a) => { const r = getRun(c.run.id); r.report = { status: ['fixed', 'partial', 'failed', 'nothing-to-do'].includes(a.status) ? a.status : 'partial', summary: String(a.summary || '').slice(0, 4000), fixed: (a.fixed || []).map(x => String(x).slice(0, 800)).slice(0, 80), remaining: (a.remaining || []).map(x => String(x).slice(0, 800)).slice(0, 80), tests: String(a.tests || '').slice(0, 4000), notes_for_developers: String(a.notes_for_developers || '').slice(0, 6000), at: Date.now() }; addLog(r, `Report: ${r.report.status}. ${r.report.summary}`, 'agent'); return 'Recorded. You can stop now.'; } },
     ],
 });
 export const TOOLS_FOR_AGENT = ['selfcheck_findings', 'selfcheck_log', 'selfcheck_report'];
@@ -787,7 +815,7 @@ export function tick() {
     scan('schedule').then(sc => {
         const fresh = sc.targets.flatMap(t => t.findings.filter(x => x.new && sevN(x.severity) >= sevN(s.alertSeverity)));
         if (s.alert && fresh.length) try { alerts.notify('selfcheck', `Self-check: ${fresh.length} new finding${fresh.length === 1 ? '' : 's'} (${[...new Set(fresh.map(x => x.severity))].join(', ')}): ${fresh.slice(0, 4).map(x => x.name).join(', ')}${fresh.length > 4 ? '…' : ''}`, { key: 'selfcheck-scan', quietMs: 0 }); } catch { /* alerts off */ }
-        const auto = s.autoTargets.filter(id => sc.targets.find(t => t.id === id)?.findings.some(x => sevN(x.severity) >= sevN(s.autoSeverity)));
+        const auto = s.autoTargets.filter(id => sc.targets.find(t => t.id === id)?.findings.some(x => !x.waiting && sevN(x.severity) >= sevN(s.autoSeverity)));
         if (auto.length) fix(auto, { trigger: 'schedule', minSeverity: s.autoSeverity, grantRoot: s.autoRoot, autoApply: s.autoApply });
     }).catch(e => log('selfcheck', `scheduled scan failed: ${e.message}`));
 }

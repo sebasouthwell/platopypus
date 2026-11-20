@@ -36,7 +36,7 @@ export async function load() {
 function targetCard(t, d) {
     const { esc, icon } = C; const n = t.findings.length; const top = SEV.find(k => t.counts?.[k]);
     const busy = d.runs.some(r => r.target === t.id && ACTIVE.includes(r.status));
-    const fixable = t.findings.some(x => x.area !== 'container' && !(x.area === 'os' && x.name === 'reboot'));
+    const fixable = t.findings.some(x => !x.waiting && x.area !== 'container' && !(x.area === 'os' && x.name === 'reboot'));
     const svc = (t.running || []).map(s => `<span class="sc-svc ${s.running ? 'on' : ''}">${s.running ? '●' : '○'} ${esc(s.title || s.slug)}</span>`).join('');
     const warn = t.kind === 'plato' ? '<p class="sc-warn">Fixed in place on this box: dependency upgrades and small patches only. Every code change is logged as a patch for the PlatOpypus developers; the next update replaces it.</p>' : t.kind === 'box' ? '<p class="sc-warn">The agent gets root through elevate for its run only (every command is in the audit log). It never starts a stopped service or reboots.</p>' : t.git === false ? '<p class="sc-warn">Not a git repository, so it is skipped: fixes need a branch to land on and a way back.</p>' : '';
     const open = S.open.has(t.id);
@@ -49,13 +49,13 @@ function targetCard(t, d) {
 }
 function findRow(x) {
     const { esc } = C;
-    return `<div class="sc-find"><span class="sc-pill ${x.severity} sm">${SEV_TXT[x.severity]}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''}${x.fixed ? ` → <span class="mono ok">${esc(x.fixed)}</span>` : ''}${x.malicious ? ' <b class="sc-mal">malicious</b>' : ''}${x.kev ? ' <b class="sc-mal">exploited now</b>' : ''}${x.core ? ' <span class="sc-core">PlatOpypus runs on it</span>' : ''}${x.dev ? ' <span class="muted">dev only</span>' : ''}${x.new ? ' <span class="sc-new">new</span>' : ''}</div>
+    return `<div class="sc-find ${x.waiting ? 'waiting' : ''}"><span class="sc-pill ${x.severity} sm">${SEV_TXT[x.severity]}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''}${x.fixed ? ` → <span class="mono ok">${esc(x.fixed)}</span>` : ''}${x.malicious ? ' <b class="sc-mal">malicious</b>' : ''}${x.kev ? ' <b class="sc-mal">exploited now</b>' : ''}${x.core ? ' <span class="sc-core">PlatOpypus runs on it</span>' : ''}${x.dev ? ' <span class="muted">dev only</span>' : ''}${x.new ? ' <span class="sc-new">new</span>' : ''}${x.waiting ? ` <span class="sc-wait">waiting on ${esc(x.waiting.on)} upstream</span>` : ''}</div>
         ${x.note ? `<div class="n">${esc(x.note)}</div>` : ''}${(x.advisories || []).length ? `<div class="a">${x.advisories.slice(0, 4).map(a => `<a href="https://osv.dev/vulnerability/${encodeURIComponent(a.id)}" target="_blank" rel="noopener noreferrer" title="${esc(a.summary)}">${esc(a.aliases?.[0] || a.id)}</a>`).join(' ')}${x.advisories.length > 4 ? ` +${x.advisories.length - 4}` : ''}</div>` : ''}</div></div>`;
 }
 function runCard(r, live) {
     const { esc, icon } = C; const ok = r.status === 'done';
     const tail = (r.log || []).slice(-4).map(l => `<div class="${l.by === 'agent' ? 'ag' : ''}">${esc(l.line)}</div>`).join('');
-    return `<div class="sc-run ${esc(r.status)}"><div class="h"><b>${esc(r.name)}</b><span class="st">${esc(r.status === 'done' && r.report?.status === 'partial' ? 'Partly fixed' : r.status === 'done' && r.report?.status === 'nothing-to-do' ? 'Nothing to do' : STATUS[r.status] || r.status)}</span></div>
+    return `<div class="sc-run ${esc(r.status)}"><div class="h"><b>${esc(r.name)}</b><span class="st">${esc(r.status === 'done' && r.report?.status === 'fixed' && r.waiting?.length ? `Fixed · ${r.waiting.length} waiting upstream` : r.status === 'done' && r.report?.status === 'partial' ? 'Partly fixed' : r.status === 'done' && r.report?.status === 'nothing-to-do' ? 'Nothing to do' : STATUS[r.status] || r.status)}</span></div>
         <div class="sub muted">${esc(when(r.finished || r.started || r.created))} · ${esc(r.trigger)}${r.branch ? ` · branch <span class="mono">${esc(r.branch)}</span>${r.merged ? ' (merged)' : ''}` : ''}${r.files?.length ? ` · ${r.files.length} file${r.files.length === 1 ? '' : 's'}` : ''}${r.upgraded?.length ? ` · ${r.upgraded.length} packages upgraded` : ''}</div>
         ${r.report?.summary ? `<p class="sum">${esc(r.report.summary)}</p>` : ''}${r.blocked ? `<p class="sc-warn">${esc(r.blocked)}</p>` : ''}
         ${live ? `<div class="sc-tail">${tail}</div>` : ''}

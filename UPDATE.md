@@ -1072,6 +1072,14 @@ phone's Update button. Mechanism:
   states the npm rule for box fixes (npm may move to a newer major that supports the installed Node; "bundled; update
   X" findings wait on X upstream if X is already latest), and keeps longer agent reports (they were cut off).
 
+- **2.26.4**: From the second live box fix. Findings only an upstream release can fix (bundled in a tool already at
+  its latest version) are marked by the agent with `selfcheck_waiting` and kept out of fixing and auto-fixing until
+  that tool publishes a newer version (npm is re-checked each scan; others come back after 30 days); shown as "waiting
+  on X upstream". A run that fixed everything else reads "Fixed · N waiting upstream". The box agent may restart
+  services in "restart needed" except PlatOpypus, docker, containerd, dbus, systemd-*, ssh and the SSM agent.
+  Projects' own copies of agent CLIs (Claude Agent SDK, Claude Code, Codex, Gemini CLI in their lockfiles) are
+  version-checked like the box's. State adds `<state>/selfcheck/upstream.json`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
