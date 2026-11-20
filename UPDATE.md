@@ -1045,6 +1045,19 @@ phone's Update button. Mechanism:
   (`autoRoot`) and PlatOpypus fixes may be applied without asking (`autoApply`). Both off by default; scheduled
   fixes use them, and the Fix dialog starts with its checkboxes set from them.
 
+- **2.26.0**: Self-check covers everything on the box. Every running systemd service and listening process is traced to
+  its executable and Ubuntu package, and with the base PlatOpypus runs on (nginx, OpenSSL, OpenSSH, sudo, systemd,
+  glibc, the running kernel, Node.js, Docker/containerd/runc, tmux, git, iptables, certbot, curl, zlib…) the
+  installed versions are checked against OSV's Ubuntu data whether or not a fix exists yet (fresh disclosures such as
+  nginx HTTP/2 flaws show at once; HTTP/2 being on in nginx is pointed out). Also inventoried and checked: global npm,
+  pip/pipx outside apt, gems, cargo installs, Go binaries' modules, Java jars (Maven coordinates), and standalone
+  binaries (Terraform, kubectl, helm, AWS CLI, gh, …) against their latest releases; unknown binaries are listed.
+  CISA's Known Exploited Vulnerabilities list marks findings "exploited now" (critical). The box agent may apply an
+  advisory's documented configuration workaround when no fixed package exists (backed up, tested, reported), update
+  global npm/pip/gem/cargo packages, and replace standalone binaries with checksum-verified vendor releases.
+  Fixes: nginx's version (`nginx/1.24.0`) was not read, so nginx was skipped; wildcard pins in requirements files.
+  State adds `<state>/selfcheck/kev.json`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

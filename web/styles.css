@@ -1625,3 +1625,5 @@ input[type=month] { color-scheme: dark; }
 .sc-hint { margin: -4px 0 10px 30px !important; font-size: 12.5px !important; } .sc-check { align-items: flex-start; } .sc-check input { flex: none; margin-top: 1px; }
 .sc-run.approval { border-color: var(--brass); } .sc-run.discarded .st { color: var(--dim); }
 .dialog-panel label.sc-check, #sc-body label.sc-check { text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 14.5px; color: var(--foam); line-height: 1.35; }
+.sc-inv { margin: 8px 0; } .sc-inv summary { cursor: pointer; font-size: 13.5px; color: var(--mist); padding: 4px 0; } .sc-svcs { display: grid; gap: 3px; font-size: 12.5px; margin: 6px 0; max-height: 260px; overflow: auto; } .sc-svcs i { display: block; font-style: normal; font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.sc-core { font-size: 11px; color: var(--dock, #6FB1F0); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; }

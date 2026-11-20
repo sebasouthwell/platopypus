@@ -99,7 +99,7 @@ function parseLock(file) {
         } else if (base === 'yarn.lock') {
             let cur = null; for (const line of t.split('\n')) { const h = line.match(/^"?(@?[^@\s"]+)@/); if (h && !line.startsWith(' ')) cur = h[1]; const v = line.match(/^\s+version:?\s+"?([^"\s]+)"?/); if (v && cur) { out.push(pk('npm', cur, v[1], file)); cur = null; } }
         } else if (/^requirements.*\.txt$/.test(base)) {
-            for (const line of t.split('\n')) { const m = line.replace(/#.*/, '').trim().match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9_.+!-]+)/); if (m) out.push(pk('PyPI', m[1], m[2], file)); }
+            for (const line of t.split('\n')) { const m = line.replace(/#.*/, '').trim().match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9_.+!*-]+)/); if (m && /^\d+(\.\d+)*[A-Za-z0-9.+!-]*$/.test(m[2]) && !m[2].endsWith('.')) out.push(pk('PyPI', m[1], m[2], file)); }
         } else if (base === 'Pipfile.lock') {
             const j = JSON.parse(t); for (const [sec, dev] of [['default', false], ['develop', true]]) for (const [n, v] of Object.entries(j[sec] || {})) if (v.version) out.push(pk('PyPI', n, v.version.replace(/^==/, ''), file, dev));
         } else if (base === 'poetry.lock' || base === 'Cargo.lock' || base === 'uv.lock') {
@@ -122,7 +122,7 @@ function inventory(root) {
 // PlatOpypus: what is really installed (node_modules), not only what the lockfile says.
 function installedNodeModules(dir) {
     const out = []; const seen = new Set();
-    const visit = (nm, n) => { let es = []; try { es = fs.readdirSync(nm, { withFileTypes: true }); } catch { return; } for (const e of es) { if (!e.isDirectory() || e.name.startsWith('.')) continue; if (e.name.startsWith('@')) { visit(path.join(nm, e.name), n); continue; } const pd = path.join(nm, e.name); const j = readJ(path.join(pd, 'package.json'), null); if (j?.name && j.version) { const k = `${j.name}@${j.version}`; if (!seen.has(k)) { seen.add(k); out.push(pk('npm', j.name, j.version, path.join(dir, 'package-lock.json'))); } } if (n < 6) visit(path.join(pd, 'node_modules'), n + 1); } };
+    const visit = (nm, n, top = null) => { let es = []; try { es = fs.readdirSync(nm, { withFileTypes: true }); } catch { return; } for (const e of es) { if (!e.isDirectory() || e.name.startsWith('.')) continue; if (e.name.startsWith('@')) { visit(path.join(nm, e.name), n, top); continue; } const pd = path.join(nm, e.name); const j = readJ(path.join(pd, 'package.json'), null); if (j?.name && j.version) { const k = `${j.name}@${j.version}@${top || ''}`; if (!seen.has(k)) { seen.add(k); out.push({ ...pk('npm', j.name, j.version, path.join(dir, 'package-lock.json')), top: top || null }); } } if (n < 6) visit(path.join(pd, 'node_modules'), n + 1, top || j?.name || null); } };
     visit(path.join(dir, 'node_modules'), 0); return out;
 }
 
@@ -157,10 +157,13 @@ async function packageFindings(target, pkgs) {
     const details = await osvDetails(hits.flatMap(h => h.ids));
     return hits.map(h => {
         const adv = h.ids.map(v => ({ id: v.id, ...(details[v.id] || { summary: '', aliases: [], severity: 'moderate', affected: [] }) }));
-        const fixes = adv.flatMap(a => (a.affected || []).filter(x => !x.name || x.name === h.p.name).flatMap(x => x.fixed)).filter(v => cmpVer(v, h.p.version) > 0).sort(cmpVer);
-        const sev = adv.reduce((m, a) => (sevN(a.severity) > sevN(m) ? a.severity : m), 'info');
+        // Per advisory, the smallest fixed version above what is installed (advisories list a fix per release line);
+        // the version that fixes them all is the highest of those.
+        const fixes = adv.map(a => (a.affected || []).filter(x => !x.name || x.name === h.p.name).flatMap(x => x.fixed).filter(v => cmpVer(v, h.p.version) > 0).sort(cmpVer)[0]).filter(Boolean).sort(cmpVer);
+        const kevHit = adv.some(isKev);
+        const sev = kevHit ? 'critical' : adv.reduce((m, a) => (sevN(a.severity) > sevN(m) ? a.severity : m), 'info');
         const malicious = adv.some(a => /^MAL-/.test(a.id));
-        return finding(target, { area: 'package', ecosystem: h.p.ecosystem, name: h.p.name, version: h.p.version, fixed: fixes.length ? fixes[fixes.length - 1] : null, severity: h.p.dev && !malicious && sev !== 'critical' ? SEV[Math.max(1, sevN(sev) - 1)] : sev, dev: h.p.dev, malicious, file: h.p.file, advisories: adv.map(a => ({ id: a.id, aliases: (a.aliases || []).filter(x => /^CVE-/.test(x)).slice(0, 3), summary: String(a.summary || '').slice(0, 240), severity: a.severity })), note: malicious ? 'Known malicious package: remove it and check what it may have done.' : null });
+        return finding(target, { area: 'package', ecosystem: h.p.ecosystem, name: h.p.name, version: h.p.version, fixed: fixes.length ? fixes[fixes.length - 1] : null, severity: h.p.dev && !malicious && sev !== 'critical' ? SEV[Math.max(1, sevN(sev) - 1)] : sev, dev: h.p.dev, malicious, file: h.p.file, kev: kevHit, advisories: adv.map(a => ({ id: a.id, aliases: (a.aliases || []).filter(x => /^CVE-/.test(x)).slice(0, 3), summary: String(a.summary || '').slice(0, 240), severity: a.severity, kev: isKev(a) })).sort((x, y) => (y.kev - x.kev) || sevN(y.severity) - sevN(x.severity)), note: malicious ? 'Known malicious package: remove it and check what it may have done.' : kevHit ? 'Actively exploited (CISA KEV).' : null });
     });
 }
 function finding(target, o) { const id = crypto.createHash('sha1').update(`${target}|${o.area}|${o.ecosystem || ''}|${o.name}|${o.version || ''}`).digest('hex').slice(0, 12); return { id, target, ...o }; }
@@ -181,7 +184,7 @@ async function outdatedDirect(target, dir, installed) {
 }
 
 // ---------- the box's tooling ----------
-const firstVer = s => { const t = String(s); return (t.match(/(?:^|[\s(v])(\d+\.\d+\.\d+)(?![.\d])/) || t.match(/(?:^|[\s(v])(\d+\.\d+)(?![.\d])/) || [])[1] || null; };
+const firstVer = s => { const t = String(s); return (t.match(/(?:^|[\s(v/])(\d+\.\d+\.\d+)(?![.\d])/) || t.match(/(?:^|[\s(v/])(\d+\.\d+)(?![.\d])/) || [])[1] || null; };
 // The part of a version that signals breaking changes: the major, or for 0.x the minor too (semver).
 const major = v => { const p = String(v || '').replace(/^v/, '').split('.'); return p[0] === '0' ? `0.${p[1]}` : p[0]; };
 async function latestNpm(name) { try { const r = await fetch(`https://registry.npmjs.org/${name.replace('/', '%2f')}/latest`, { signal: AbortSignal.timeout(15_000) }); return r.ok ? (await r.json()).version : null; } catch { return null; } }
@@ -239,8 +242,31 @@ async function boxFindings() {
         }
         if (t.osv && t.npm) out.push(...(await packageFindings(T, [pk('npm', t.npm, version, t.name)]).catch(() => [])).map(x => ({ ...x, area: t.agent ? 'agent' : 'tool' })));
     }
-    // Ubuntu security updates (all of them, not only the tools above), with their CVEs from OSV by source package.
-    const secUp = apt.list.filter(u => u.security && !TOOLS.some(t => t.apt === u.pkg));
+    // Everything running on the box, and the base PlatOpypus runs on: the installed version of each one's Ubuntu
+    // package against OSV, whether or not a fixed package exists yet (a fresh disclosure has none for days).
+    const live = await liveSystem(apt).catch(e => { log('selfcheck', `live services: ${e.message}`); return { packages: [], services: [] }; });
+    const covered = new Set();
+    if (live.packages.length) {
+        let osv = []; try { osv = await packageFindings(T, live.packages.map(p => pk('Ubuntu:24.04:LTS', p.source, p.version, 'dpkg'))); } catch (e) { log('selfcheck', `OSV (Ubuntu): ${e.message}`); }
+        const http2 = await nginxHttp2();
+        for (const o of osv) {
+            const p = live.packages.find(x => x.source === o.name); if (!p) continue;
+            const kevHit = (o.advisories || []).some(a => a.kev);
+            const worst = o.severity; const fixable = !!o.fixed;
+            // Unfixed low/negligible CVEs are background noise on any distro: kept only when they matter.
+            if (!kevHit && !fixable && sevN(worst) < sevN('high')) continue;
+            if (!kevHit && fixable && sevN(worst) < sevN('moderate') && !p.core) continue;
+            covered.add(p.source);
+            const up = apt.list.find(u => apt.map.get(u.pkg)?.source === p.source && u.security);
+            const why = [p.core ? 'PlatOpypus runs on it' : null, p.listening?.length ? `listening on ${p.listening.slice(0, 3).join(', ')}` : null, p.units?.length ? `used by ${p.units.slice(0, 3).join(', ')}` : null].filter(Boolean).join('; ');
+            const h2 = p.source === 'nginx' && http2.length && (o.advisories || []).some(a => /HTTP\/?2/i.test(a.summary)) ? ` HTTP/2 is on in ${http2.slice(0, 3).join(', ')}.` : '';
+            out.push({ ...finding(T, { area: 'service', ecosystem: 'Ubuntu', name: p.label || p.source, version: p.version, fixed: o.fixed, apt: p.binaries.join(' '), severity: kevHit ? 'critical' : worst, kev: kevHit, core: !!p.core, advisories: o.advisories,
+                note: `${kevHit ? 'Actively exploited (CISA KEV). ' : ''}${fixable ? (up ? 'Ubuntu has a fixed package.' : 'Ubuntu has a fixed package (refresh apt to see it).') : 'No Ubuntu fix yet: apply the advisory\'s workaround until there is one.'}${h2}${why ? ` (${why}.)` : ''}` }) });
+        }
+    }
+    for (let i = out.length - 1; i >= 0; i--) { const x = out[i]; if (x.area === 'tool' && x.apt && covered.has(apt.map.get(x.apt)?.source || x.apt)) out.splice(i, 1); }
+    // Ubuntu security updates for anything else installed, with their CVEs from OSV by source package.
+    const secUp = apt.list.filter(u => u.security && !TOOLS.some(t => t.apt === u.pkg) && !covered.has(apt.map.get(u.pkg)?.source || u.pkg));
     if (secUp.length) {
         const bySrc = new Map(); for (const u of secUp) { const s = apt.map.get(u.pkg)?.source || u.pkg; if (!bySrc.has(s)) bySrc.set(s, { source: s, pkgs: [], from: apt.map.get(u.pkg)?.version || u.from, to: u.to }); bySrc.get(s).pkgs.push(u.pkg); }
         let osv = []; try { osv = await packageFindings(T, [...bySrc.values()].map(b => pk('Ubuntu:24.04:LTS', b.source, b.from, 'apt'))); } catch { /* severity unknown */ }
@@ -253,9 +279,126 @@ async function boxFindings() {
     for (const d of certs) { const r = await sh('openssl', ['x509', '-enddate', '-noout', '-in', `/etc/letsencrypt/live/${d}/cert.pem`]); const m = r.out.match(/notAfter=(.+)/); if (!m) continue; const days = Math.floor((new Date(m[1]).getTime() - Date.now()) / 86400_000); tools.push({ name: `Certificate ${d}`, version: `${days} days left`, latest: null }); if (days < 21) out.push(finding(T, { area: 'cert', name: d, version: `${days} days left`, severity: days < 7 ? 'critical' : 'high', note: 'Certificate expires soon; certbot renew has not renewed it.' })); }
     if (certs.length) { const t1 = await sh('systemctl', ['is-active', 'certbot.timer']); const t2 = await sh('systemctl', ['is-active', 'snap.certbot.renew.timer']); if (!/^active/.test(t1.out) && !/^active/.test(t2.out)) out.push(finding(T, { area: 'cert', name: 'certbot timer', severity: 'moderate', note: 'No certbot renewal timer is active, so certificates will not renew on their own.' })); }
     if (tools.some(t => t.name === 'nginx')) { const r = await sh('nginx', ['-t']); if (!r.ok) out.push(finding(T, { area: 'tool', name: 'nginx config', severity: 'high', note: `nginx -t fails: ${r.out.trim().split('\n').slice(-1)[0]}` })); }
+    // Everything installed outside apt: global npm, pip/pipx, gems, cargo, Go binaries, Java jars, standalone binaries.
+    const other = await installedElsewhere().catch(e => { log('selfcheck', `installed software: ${e.message}`); return { packages: [], bins: [], jars: 0 }; });
+    if (other.packages.length) {
+        let f2 = []; try { f2 = await packageFindings(T, other.packages); } catch (e) { log('selfcheck', `OSV (installed): ${e.message}`); }
+        for (const x of f2) { const origins = other.packages.filter(y => y.ecosystem === x.ecosystem && y.name === x.name && y.version === x.version).map(y => y.origin); out.push({ ...x, area: 'installed', origin: origins[0] || null, note: [x.note, origins.length ? `Installed by ${origins.slice(0, 2).join('; ')}${origins.length > 2 ? '…' : ''}` : null].filter(Boolean).join(' ') }); }
+    }
+    const bf = await binaryFindings(other.bins).catch(() => ({ findings: [], rows: [] })); out.push(...bf.findings);
+    const byKind = {}; for (const p2 of other.packages) { const k = p2.origin.split(' ')[0] === 'npm' ? 'npm global' : p2.origin.startsWith('pip') ? 'pip' : p2.origin.startsWith('jar') ? 'Java (jars)' : p2.origin.startsWith('Go') ? 'Go modules in binaries' : p2.origin; byKind[k] = (byKind[k] || 0) + 1; }
     out.push(...await mcpFindings());
-    return { findings: out, tools };
+    return { findings: out, tools, services: live.services, installed: { counts: { 'Ubuntu packages': apt.map.size, ...byKind }, binaries: bf.rows, jars: other.jars } };
 }
+// The base PlatOpypus runs on (Ubuntu source packages). Always checked, running or not.
+const CORE = { nginx: 'nginx', openssl: 'OpenSSL', openssh: 'OpenSSH', sudo: 'sudo', systemd: 'systemd', glibc: 'glibc', nodejs: 'Node.js', 'docker.io': 'Docker', containerd: 'containerd', runc: 'runc', tmux: 'tmux', git: 'git', iptables: 'iptables', 'python-certbot': 'certbot', certbot: 'certbot', curl: 'curl', zlib: 'zlib', 'ca-certificates': 'CA certificates', 'unattended-upgrades': 'unattended-upgrades', polkit: 'polkit', 'dbus': 'D-Bus', 'util-linux': 'util-linux', bash: 'bash', libxml2: 'libxml2', expat: 'expat', 'python3.12': 'Python 3.12' };
+// What is live: every running systemd service and every process listening on a port, traced to its executable and
+// from there to the Ubuntu package it came from. Plus the core above and the running kernel.
+async function liveSystem(apt) {
+    const srcOf = new Map(); for (const [bin, v] of apt.map) { const s = v.source; if (!srcOf.has(s)) srcOf.set(s, { source: s, version: v.version, binaries: [] }); srcOf.get(s).binaries.push(bin); }
+    const exes = new Map();   // exe path -> { units: Set, listening: Set, names: Set }
+    const add = (pid, k, v) => { let exe; try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { return; } if (!exes.has(exe)) exes.set(exe, { units: new Set(), listening: new Set(), names: new Set() }); exes.get(exe)[k].add(v); };
+    const units = (await sh('systemctl', ['list-units', '--type=service', '--state=running', '--no-legend', '--plain'])).out.split('\n').map(l => l.split(/\s+/)[0]).filter(u => u.endsWith('.service'));
+    if (units.length) { const sp = await sh('systemctl', ['show', '-p', 'Id', '-p', 'MainPID', ...units], { timeout: 30_000 }); let id = null; for (const l of sp.out.split('\n')) { if (l.startsWith('Id=')) id = l.slice(3); else if (l.startsWith('MainPID=') && Number(l.slice(8)) > 0 && id) add(l.slice(8), 'units', id.replace(/\.service$/, '')); } }
+    const ssr = await sh('ss', ['-tulnpH'], { timeout: 15_000 });
+    for (const l of ssr.out.split('\n')) { const cols = l.trim().split(/\s+/); if (cols.length < 5) continue; const addr = cols[4]; for (const m of l.matchAll(/\("([^"]+)",pid=(\d+)/g)) { add(m[2], 'listening', `${cols[0]} ${addr}`); add(m[2], 'names', m[1]); } }
+    const paths = [...exes.keys()]; const owner = new Map();
+    if (paths.length) { const d = await sh('dpkg', ['-S', ...paths], { timeout: 30_000 }); for (const l of d.out.split('\n')) { const m = l.match(/^([^:\s,]+)(?::[a-z0-9]+)?(?:, [^:]+)*: (\/.+)$/); if (m) owner.set(m[2], m[1]); } }
+    const pkgs = new Map(); const services = [];
+    const want = (src, extra = {}) => { const s = srcOf.get(src); if (!s) return null; if (!pkgs.has(src)) pkgs.set(src, { ...s, label: CORE[src] || null, core: !!CORE[src], units: [], listening: [] }); const p = pkgs.get(src); for (const k of ['units', 'listening']) for (const v of extra[k] || []) if (!p[k].includes(v)) p[k].push(v); if (extra.label && !p.label) p.label = extra.label; return p; };
+    for (const src of Object.keys(CORE)) want(src);
+    const kr = (await sh('uname', ['-r'])).out.trim(); const kbin = [...apt.map.keys()].find(b => b === `linux-image-${kr}` || b === `linux-image-unsigned-${kr}`);
+    if (kbin) { const p = want(apt.map.get(kbin).source, { label: `Linux kernel ${kr}` }); if (p) { p.core = true; p.version = apt.map.get(kbin).version; } }
+    for (const [exe, v] of exes) {
+        const bin = owner.get(exe) || owner.get(exe.replace(/^\/usr/, '')); const src = bin ? apt.map.get(bin.replace(/:.*/, ''))?.source : null;
+        const row = { exe, name: [...v.names][0] || path.basename(exe), units: [...v.units], listening: [...v.listening], package: bin || null, source: src || null, version: src ? srcOf.get(src)?.version : null };
+        services.push(row); if (src) want(src, { units: row.units, listening: row.listening });
+    }
+    services.sort((a, b) => b.listening.length - a.listening.length || a.name.localeCompare(b.name));
+    return { packages: [...pkgs.values()], services: services.slice(0, 80) };
+}
+// ---------- everything else installed outside apt ----------
+// Global npm, pip/pipx, gems, Go binaries, cargo installs and Java jars (the box and the agent user's home), as
+// packages for OSV; and standalone binaries, with their versions and latest releases where the tool is known.
+function homes() { const h = [config.home]; const a = agentUser.info(); if (a && a.home !== config.home) h.push(a.home); return h; }
+function globDirs(base, rel) { try { return fs.readdirSync(base).filter(d => !rel || new RegExp(rel).test(d)).map(d => path.join(base, d)).filter(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } }); } catch { return []; } }
+function sitePackages() {
+    const out = [];
+    for (const b of ['/usr/local/lib', ...homes().map(h => path.join(h, '.local', 'lib'))]) for (const py of globDirs(b, '^python3')) for (const sp of ['dist-packages', 'site-packages']) if (fs.existsSync(path.join(py, sp))) out.push(path.join(py, sp));
+    for (const h of homes()) for (const v of globDirs(path.join(h, '.local', 'share', 'pipx', 'venvs'))) for (const py of globDirs(path.join(v, 'lib'), '^python3')) out.push(path.join(py, 'site-packages'));
+    return out;
+}
+function pyDistInfo(dir, label) { const out = []; let es = []; try { es = fs.readdirSync(dir); } catch { return out; } for (const e of es) { const m = e.match(/^(.+?)-(\d[^-]*)\.(dist|egg)-info$/); if (m) out.push({ ...pk('PyPI', m[1].replace(/_/g, '-'), m[2], label), origin: label }); } return out; }
+const SAFE_BIN = /^[\w./+-]+$/;
+async function installedElsewhere() {
+    const pkgs = []; const addAll = (list, origin) => { for (const p of list) pkgs.push({ ...p, origin }); };
+    // npm global (system and per-user prefixes)
+    const npmDirs = ['/usr/lib/node_modules', '/usr/local/lib/node_modules', ...homes().flatMap(h => [path.join(h, '.npm-global', 'lib', 'node_modules'), path.join(h, '.local', 'lib', 'node_modules')])];
+    for (const d of npmDirs.filter(x => fs.existsSync(x))) for (const p of installedNodeModules(path.dirname(d))) pkgs.push({ ...p, file: d, origin: p.top && p.top !== p.name ? `npm global ${p.top} (bundled; update ${p.top})` : `npm global ${p.name}` });
+    // Python outside apt
+    for (const sp of sitePackages()) addAll(pyDistInfo(sp, sp), `pip (${sp})`);
+    // Ruby gems
+    const gem = await sh('gem', ['list', '--local', '--no-details'], { timeout: 30_000 });
+    if (gem.ok) for (const l of gem.out.split('\n')) { const m = l.match(/^([A-Za-z0-9_.-]+) \(([^)]+)\)/); if (m) for (const v of m[2].replace(/default: /g, '').split(/,\s*/)) if (/^\d/.test(v)) pkgs.push({ ...pk('RubyGems', m[1], v, 'gem'), origin: 'gem' }); }
+    // cargo install
+    for (const h of homes()) { try { const t = fs.readFileSync(path.join(h, '.cargo', '.crates.toml'), 'utf8'); for (const m of t.matchAll(/^"([A-Za-z0-9_-]+) ([0-9][^ ]*) /gm)) pkgs.push({ ...pk('crates.io', m[1], m[2], path.join(h, '.cargo')), origin: 'cargo install' }); } catch { /* none */ } }
+    // Java: Maven coordinates inside jars (pom.properties), in the usual places
+    const jars = []; const walkJ = (d, n) => { if (jars.length >= 400) return; let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory() && n < 6 && !SKIP.has(e.name) && !e.name.startsWith('.')) walkJ(p, n + 1); else if (e.isFile() && e.name.endsWith('.jar')) jars.push(p); } };
+    for (const d of ['/opt', '/usr/local', '/usr/share/java', '/srv', ...homes()]) walkJ(d, 0);
+    if (jars.length && (await sh('unzip', ['-v'])).ok) for (const j of jars) { const r = await sh('unzip', ['-p', j, 'META-INF/maven/*/*/pom.properties'], { timeout: 10_000 }); const blocks = r.out.split(/(?=#Generated|#Created)/); for (const b of blocks.length ? blocks : [r.out]) { const g = b.match(/^groupId=(.+)$/m), a = b.match(/^artifactId=(.+)$/m), v = b.match(/^version=(.+)$/m); if (g && a && v) pkgs.push({ ...pk('Maven', `${g[1].trim()}:${a[1].trim()}`, v[1].trim(), j), origin: `jar ${j}` }); } }
+    // Go binaries: their module list (go version -m), when Go is on the box
+    const bins = standaloneBinaries();
+    if ((await sh('go', ['version'])).ok) for (const b of bins) { const r = await sh('go', ['version', '-m', b.path], { timeout: 10_000 }); if (!r.ok) continue; b.go = true; for (const m of r.out.matchAll(/^\s+(?:dep|mod)\s+(\S+)\s+v(\S+)/gm)) pkgs.push({ ...pk('Go', m[1], m[2], b.path), origin: `Go binary ${b.path}` }); }
+    const seen = new Set(); return { packages: pkgs.filter(p => { const k = `${p.ecosystem}|${p.name}|${p.version}|${p.origin}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8000), bins, jars: jars.length };
+}
+// Executables not owned by a package: what someone downloaded or built and put on the PATH.
+function standaloneBinaries() {
+    const dirs = ['/usr/local/bin', '/usr/local/sbin', ...globDirs('/opt').map(d => path.join(d, 'bin')), ...homes().flatMap(h => [path.join(h, '.local', 'bin'), path.join(h, 'go', 'bin'), path.join(h, '.cargo', 'bin'), path.join(h, 'bin')])];
+    const out = []; const seen = new Set();
+    for (const d of dirs) { let es = []; try { es = fs.readdirSync(d); } catch { continue; } for (const e of es) { const p = path.join(d, e); let real; try { real = fs.realpathSync(p); const st = fs.statSync(real); if (!st.isFile() || !(st.mode & 0o111) || st.size < 200_000) continue; } catch { continue; } if (seen.has(real)) continue; seen.add(real); if (real.startsWith(APP)) continue; out.push({ name: e, path: p, real }); } }
+    return out.slice(0, 200);
+}
+// Tools that commonly arrive as standalone binaries: how to read their version and where the latest comes from.
+const KNOWN_BINS = {
+    terraform: { args: ['version'], latest: async () => { try { const r = await fetch('https://checkpoint-api.hashicorp.com/v1/check/terraform', { signal: AbortSignal.timeout(15_000) }); return r.ok ? (await r.json()).current_version : null; } catch { return null; } } },
+    tofu: { args: ['version'], gh: 'opentofu/opentofu' }, packer: { args: ['version'], hc: 'packer' }, vault: { args: ['version'], hc: 'vault' }, consul: { args: ['version'], hc: 'consul' }, nomad: { args: ['version'], hc: 'nomad' },
+    kubectl: { args: ['version', '--client'], gh: 'kubernetes/kubernetes' }, helm: { args: ['version', '--short'], gh: 'helm/helm' }, k9s: { args: ['version', '--short'], gh: 'derailed/k9s' },
+    aws: { args: ['--version'], gh: 'aws/aws-cli', tags: true }, gh: { args: ['--version'], gh: 'cli/cli' }, go: { args: ['version'], go: true }, java: { args: ['-version'] }, mvn: { args: ['-v'] }, gradle: { args: ['--version'] },
+    'docker-compose': { args: ['version', '--short'], gh: 'docker/compose' }, trivy: { args: ['--version'], gh: 'aquasecurity/trivy' }, caddy: { args: ['version'], gh: 'caddyserver/caddy' }, deno: { args: ['--version'], gh: 'denoland/deno' }, bun: { args: ['--version'], gh: 'oven-sh/bun' },
+    rclone: { args: ['version'], gh: 'rclone/rclone' }, restic: { args: ['version'], gh: 'restic/restic' }, ngrok: { args: ['version'] }, jq: { args: ['--version'], gh: 'jqlang/jq' }, yq: { args: ['--version'], gh: 'mikefarah/yq' }, uv: { args: ['--version'], gh: 'astral-sh/uv' }, ollama: { args: ['--version'], gh: 'ollama/ollama' },
+};
+async function latestHashicorp(p) { try { const r = await fetch(`https://checkpoint-api.hashicorp.com/v1/check/${p}`, { signal: AbortSignal.timeout(15_000) }); return r.ok ? (await r.json()).current_version : null; } catch { return null; } }
+async function binaryFindings(bins) {
+    const out = []; const rows = [];
+    for (const b of bins) {
+        const k = KNOWN_BINS[b.name] ? b.name : Object.keys(KNOWN_BINS).find(n => b.real.endsWith(`/${n}`));
+        if (TOOLS.some(t => t.cmd[0] === b.name) || /\.old$|\.bak$|selfcheck-old$/.test(b.name)) continue;   // checked with the tools above, or a kept old copy
+        if (!k) { rows.push({ name: b.name, version: b.go ? 'Go binary' : 'unrecognised', path: b.path, unknown: true }); continue; }
+        if (TOOLS.some(t => t.cmd[0] === k)) continue;   // already checked above
+        const def = KNOWN_BINS[k]; if (!SAFE_BIN.test(b.path)) continue;
+        const r = await sh(b.path, def.args, { timeout: 10_000 }); const version = firstVer(r.out); if (!version) { rows.push({ name: k, version: '?', path: b.path }); continue; }
+        let latest = null; try { latest = def.latest ? await def.latest() : def.hc ? await latestHashicorp(def.hc) : def.gh ? await latestGithub(def.gh) : null; } catch { /* unknown */ }
+        latest = latest ? firstVer(latest) || latest : null; rows.push({ name: k, version, latest, path: b.path });
+        if (latest && cmpVer(latest, version) > 0) { const jump = major(latest) !== major(version); out.push(finding('box', { area: 'binary', name: k, version, latest, fixed: jump ? null : latest, file: b.path, severity: jump ? 'info' : 'low', note: `${b.path}: ${latest} is out${jump ? ' (a new major version: upgrade deliberately)' : ''}. Not from apt, so nothing updates it unless someone does.` })); }
+    }
+    return { findings: out, rows };
+}
+
+// nginx server blocks that speak HTTP/2 (several nginx advisories only apply with it on).
+async function nginxHttp2() {
+    const files = []; const read = d => { let es = []; try { es = fs.readdirSync(d); } catch { return; } for (const e of es) { const p = path.join(d, e); try { const t = fs.readFileSync(p, 'utf8'); if (/^\s*listen\s[^;]*\bhttp2\b|^\s*http2\s+on\s*;/m.test(t)) files.push(p); } catch { /* unreadable */ } } };
+    read('/etc/nginx/sites-enabled'); read('/etc/nginx/conf.d'); try { if (/^\s*http2\s+on\s*;/m.test(fs.readFileSync('/etc/nginx/nginx.conf', 'utf8'))) files.push('/etc/nginx/nginx.conf'); } catch { /* none */ }
+    return files;
+}
+// CISA's Known Exploited Vulnerabilities: a CVE in it is being used in attacks now. Refreshed twice a day.
+let kevSet = new Set();
+async function loadKev() {
+    const c = readJ(f('kev.json'), null); if (c && Date.now() - c.at < 12 * 3600_000) { kevSet = new Set(c.ids); return; }
+    try { const r = await fetch('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json', { headers: { 'User-Agent': 'platopypus-selfcheck' }, signal: AbortSignal.timeout(30_000) }); if (r.ok) { const ids = ((await r.json()).vulnerabilities || []).map(v => v.cveID); writeJ(f('kev.json'), { at: Date.now(), ids }); kevSet = new Set(ids); return; } } catch { /* keep the last copy */ }
+    kevSet = new Set(c?.ids || []);
+}
+const isKev = a => kevSet.has(String(a.id).replace(/^UBUNTU-/, '')) || (a.aliases || []).some(x => kevSet.has(x));
+
 // MCP servers agents start: an unpinned `npx pkg` runs whatever was published last (the supply-chain route new AI
 // attacks use); pinned ones are checked against OSV like any package. PlatOpypus's own servers are left out.
 async function mcpFindings() {
@@ -311,12 +454,12 @@ export async function scan(trigger = 'manual') {
     scanning = { started: Date.now(), step: 'Listing what is live' };
     const prev = readJ(f('scan.json'), null); const errors = [];
     try {
-        const ts = await targets(); const containers = await containerAges().catch(() => []);
+        await loadKev(); const ts = await targets(); const containers = await containerAges().catch(() => []);
         for (const t of ts) {
             scanning.step = `Checking ${t.name}`;
             try {
                 if (t.kind === 'plato') { const pkgs = installedNodeModules(path.join(APP, 'server')); t.packages = pkgs.length; t.lockfiles = ['server/node_modules']; t.findings = [...await packageFindings(t.id, pkgs), ...await outdatedDirect(t.id, path.join(APP, 'server'), pkgs)]; t.version = readJ(path.join(APP, 'server', 'package.json'), {}).version; }
-                else if (t.kind === 'box') { const b = await boxFindings(); t.findings = b.findings; t.tools = b.tools; }
+                else if (t.kind === 'box') { const b = await boxFindings(); t.findings = b.findings; t.tools = b.tools; t.services = b.services; t.installed = b.installed; }
                 else {
                     const inv = inventory(t.path); t.packages = inv.packages.length; t.lockfiles = inv.files; t.git = !!gitRoot(t.path);
                     t.findings = await packageFindings(t.id, inv.packages);
@@ -559,8 +702,9 @@ async function runBox(r) {
     saveRun(r);
     const prompt = `Fix the box-level findings PlatOpypus's self-check found (system packages, nginx, certbot and certificates, Node.js, agent CLIs, MCP servers). ${FINDINGS_HELP}\n` +
         `You are the agent user. Run anything that needs root with \`elevate -- <command>\`. ${r.grantRoot ? 'You hold an elevation grant for this run, so it runs without asking; every command is in the audit log.' : 'Each one asks the user on their phone first and waits up to 10 minutes: batch what you can into few commands (one apt-get install for all packages), give each a clear --reason, and if one is refused or times out, report it instead of retrying.'}\n` +
-        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew (then elevate -- nginx -t before reloading); elevate -- nginx -t && elevate -- systemctl reload nginx; restarting a service that is running now and was just upgraded (systemctl restart <it>); updating the agent CLIs named (npm install -g <pkg>@latest, claude update); pinning an MCP server's package to its current version in the config file that lists it.\n` +
-        `Never: start a service that is stopped, reboot, change the firewall, SSH, users, sudoers or PlatOpypus itself (/opt/platopypus), remove packages, or upgrade Node.js across a major version. Always run nginx -t before any nginx reload and stop if it fails. If a reboot is needed, say so in the report instead.\n` +
+        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; updating global npm packages (npm install -g <pkg>@<fixed version>), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
+        `When a finding says there is no fixed package yet, apply the workaround its advisory documents if it is a configuration change (for example turning HTTP/2 off in nginx listen lines for an nginx HTTP/2 flaw): copy the file to <file>.selfcheck-${r.id} first, change only what the workaround needs, run the service's config test (nginx -t), reload, check the service still answers (curl -sI https://127.0.0.1 -k for nginx), and say in the report exactly what to undo once the fixed package arrives. A finding inside a Java jar or another app's bundle: report which app ships it; do not edit the app.\n` +
+        `Never: start a service that is stopped, stop or break one PlatOpypus needs (nginx, its own service, docker, tmux, ssh/ssm), reboot, change the firewall, SSH, users, sudoers or PlatOpypus itself (/opt/platopypus), remove packages, or upgrade Node.js across a major version. Always run nginx -t before any nginx reload and stop if it fails. If a reboot is needed, say so in the report instead.\n` +
         `End with selfcheck_report (what you upgraded with before → after versions, what you left and why).`;
     const name = await startAgent(r, agentUser.info()?.home || config.home, prompt);
     if (r.grantRoot) { elevate.grant(name, 90); addLog(r, `You allowed root without asking: elevation granted to ${name} for 90 minutes (this run only).`); }

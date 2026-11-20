@@ -45,11 +45,11 @@ function targetCard(t, d) {
         <button class="sc-tmain" data-open="${esc(t.id)}" aria-expanded="${open}"><div class="title">${esc(t.name)}${t.version ? ` <span class="muted">${esc(t.version)}</span>` : ''}${busy ? ' <span class="sc-busy">fixing</span>' : ''}</div>
         <div class="sub">${svc}${t.kind === 'project' ? `<span class="muted">${t.packages || 0} packages${t.lockfiles?.length ? ` · ${esc(t.lockfiles.slice(0, 3).join(', '))}` : ''}</span>` : t.kind === 'plato' ? `<span class="muted">${t.packages || 0} installed packages</span>` : ''}</div></button>
         <div class="sc-counts">${n ? SEV.filter(k => t.counts[k]).map(k => `<span class="sc-pill ${k} sm"><b>${t.counts[k]}</b></span>`).join('') : `<span class="sc-ok">${icon('check')}</span>`}</div></div>
-        ${open ? `${warn}${t.kind === 'box' && t.tools?.length ? `<div class="sc-tools">${t.tools.map(x => `<span><b>${esc(x.name)}</b> ${esc(x.version)}${x.latest && x.latest !== x.version ? ` <i>→ ${esc(x.latest)}</i>` : ''}</span>`).join('')}</div>` : ''}${n ? `<div class="sc-finds">${t.findings.map(findRow).join('')}</div>` : '<p class="note">Nothing known to be wrong.</p>'}` : ''}</div>`;
+        ${open ? `${warn}${t.kind === 'box' ? boxInventory(t) : ''}${t.kind === 'box' && t.tools?.length ? `<div class="sc-tools">${t.tools.map(x => `<span><b>${esc(x.name)}</b> ${esc(x.version)}${x.latest && x.latest !== x.version ? ` <i>→ ${esc(x.latest)}</i>` : ''}</span>`).join('')}</div>` : ''}${n ? `<div class="sc-finds">${t.findings.map(findRow).join('')}</div>` : '<p class="note">Nothing known to be wrong.</p>'}` : ''}</div>`;
 }
 function findRow(x) {
     const { esc } = C;
-    return `<div class="sc-find"><span class="sc-pill ${x.severity} sm">${SEV_TXT[x.severity]}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''}${x.fixed ? ` → <span class="mono ok">${esc(x.fixed)}</span>` : ''}${x.malicious ? ' <b class="sc-mal">malicious</b>' : ''}${x.dev ? ' <span class="muted">dev only</span>' : ''}${x.new ? ' <span class="sc-new">new</span>' : ''}</div>
+    return `<div class="sc-find"><span class="sc-pill ${x.severity} sm">${SEV_TXT[x.severity]}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''}${x.fixed ? ` → <span class="mono ok">${esc(x.fixed)}</span>` : ''}${x.malicious ? ' <b class="sc-mal">malicious</b>' : ''}${x.kev ? ' <b class="sc-mal">exploited now</b>' : ''}${x.core ? ' <span class="sc-core">PlatOpypus runs on it</span>' : ''}${x.dev ? ' <span class="muted">dev only</span>' : ''}${x.new ? ' <span class="sc-new">new</span>' : ''}</div>
         ${x.note ? `<div class="n">${esc(x.note)}</div>` : ''}${(x.advisories || []).length ? `<div class="a">${x.advisories.slice(0, 4).map(a => `<a href="https://osv.dev/vulnerability/${encodeURIComponent(a.id)}" target="_blank" rel="noopener noreferrer" title="${esc(a.summary)}">${esc(a.aliases?.[0] || a.id)}</a>`).join(' ')}${x.advisories.length > 4 ? ` +${x.advisories.length - 4}` : ''}</div>` : ''}</div></div>`;
 }
 function runCard(r, live) {
@@ -119,4 +119,13 @@ function settingsDialog(d) {
         try { await C.api('/api/selfcheck/settings', { method: 'POST', body: { enabled: $('#sc-en', panel).checked, cron: $('#sc-cron', panel).value, alert: $('#sc-al', panel).checked, alertSeverity: $('#sc-als', panel).value, autoTargets: $$('[data-auto]', panel).filter(x => x.checked).map(x => x.dataset.auto), autoSeverity: $('#sc-aus', panel).value, autoRoot: $('#sc-ar', panel).checked, autoApply: $('#sc-aa2', panel).checked, agent: $('#sc-ag', panel).value } }); close(); C.toast('Saved'); load(); }
         catch (e) { C.toast(e.message, true); }
     };
+}
+
+// The box: what is running (services and listening ports, with their packages) and what is installed outside apt.
+function boxInventory(t) {
+    const { esc } = C; const svc = t.services || []; const inst = t.installed || {};
+    const counts = Object.entries(inst.counts || {}).map(([k, n]) => `<span><b>${n}</b> ${esc(k)}</span>`).join('');
+    const bins = (inst.binaries || []);
+    return `<details class="sc-inv"><summary>Running now: ${svc.length} service${svc.length === 1 ? '' : 's'} and processes, ${svc.filter(x => x.listening.length).length} listening</summary><div class="sc-svcs">${svc.map(x => `<div><b>${esc(x.units[0] || x.name)}</b> <span class="muted">${esc(x.source ? `${x.source} ${x.version || ''}` : x.exe)}</span>${x.listening.length ? `<i>${esc(x.listening.slice(0, 3).join(', '))}</i>` : ''}</div>`).join('')}</div></details>
+        <details class="sc-inv"><summary>Installed: ${counts ? '' : 'nothing counted'}</summary><div class="sc-tools">${counts}</div>${bins.length ? `<div class="sc-svcs">${bins.map(x => `<div><b>${esc(x.name)}</b> <span class="muted">${esc(x.version)}${x.latest && x.latest !== x.version ? ` → ${esc(x.latest)}` : ''}</span> <i>${esc(x.path)}</i></div>`).join('')}</div>` : ''}</details>`;
 }
