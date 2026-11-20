@@ -165,6 +165,18 @@ them, and its answer is printed for you. Use it when another agent is better pla
 reasoning or a design, reviewing a change), give it the context it needs in the question, and weigh its answer
 yourself. Each question is logged for the user.
 
+## Handing work to another app
+
+When a part of the work suits one of PlatOpypus's apps better than this shell (a researched literature review, an
+investigation with sourced evidence, a job search, a security test of something the user owns), propose it:
+
+    handoff propose --app research --title "<short title>" --brief "<what to find out, and what to come back with>" [--files path …] [--why "<how it helps here>"]
+
+`--app` is research (add `--topic <slug>` to put a question into an existing topic), case (Conspiracy), jobs (Job Hunt)
+or lab (Security Lab; give `--targets` the user is authorised to test). The user approves it in that app; its agent does
+the work and the result comes back here as `.platopypus/handoffs/<id>.md`. `handoff status [--id <id>]` shows where each
+one is. You cannot approve or start one yourself; do not wait on it, carry on with what you can do here.
+
 ## Scheduled routines
 
 For something that should happen on a timetable (a nightly check, a weekly clean-up, polling a feed), propose a

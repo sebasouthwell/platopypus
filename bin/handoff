@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# handoff: propose work for another PlatOpypus app (Research, Conspiracy, Job Hunt, Security Lab) from an agent shell.
+#   handoff propose --app research --title "..." --brief "..." [--files a.csv --files b.md]
+#   handoff status [--id h1a2b3c4d]
+PLATO_TOOL_AS=handoff exec plato-tool handoff "$@"

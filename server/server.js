@@ -49,6 +49,7 @@ import * as cases from './lib/cases.js';
 import * as jobs from './lib/jobs.js';
 import * as kitTools from './lib/kit/tools.js';
 import * as selfcheck from './lib/selfcheck.js';
+import * as handoff from './lib/handoff.js';
 import * as workspaces from './lib/kit/workspaces.js';
 import * as zipstream from './lib/zipstream.js';
 import * as prefs from './lib/prefs.js';
@@ -1128,6 +1129,10 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, { ok: true, message: 'Powering off in a few seconds.' });
         }
         // Scheduled routines (More → Schedules).
+        // Hand-offs: work agents propose for an app, approved and started by the user (server/lib/handoff.js).
+        if (p === '/api/handoffs' && method === 'GET') return send(res, 200, { items: handoff.list({ app: url.searchParams.get('app') || null }) });
+        { const hm = p.match(/^\/api\/handoffs\/(h[0-9a-f]{8})\/(approve|decline|start)$/);
+          if (hm && method === 'POST') { const b = await readJson(req, 64 * 1024); return send(res, 200, hm[2] === 'approve' ? await handoff.approve(hm[1], b) : hm[2] === 'decline' ? handoff.decline(hm[1], b.why) : await handoff.startLab(hm[1], { ack: b.ack === true })); } }
         // Self-check: scan what is live, fix with agents, log what changed (server/lib/selfcheck.js).
         if (p === '/api/selfcheck' && method === 'GET') return send(res, 200, selfcheck.overview());
         if (p === '/api/selfcheck/scan' && method === 'POST') { if (selfcheck.scanStatus().running) return send(res, 409, { error: 'A scan is already running.' }); selfcheck.scan('manual').catch(e => log('selfcheck', `scan failed: ${e.message}`)); return send(res, 202, { running: true }); }
@@ -1305,6 +1310,57 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { try { egress.
 
 // Daily update check against the public repo (first one a minute after boot).
 update.schedule();
+// Hand-offs: approving one creates the topic, case, search or engagement and starts that app's own unattended agent.
+handoff.setStarter((() => {
+    const copyIn = (src, dest) => { let n = []; try { n = fs.readdirSync(src); } catch { return []; } fs.mkdirSync(dest, { recursive: true }); for (const f of n) fs.copyFileSync(path.join(src, f), path.join(dest, f)); return n; };
+    const resultName = h => `handoff-result-${h.id}.md`;
+    const tail = (h, where, files) => `\n\nThis was handed over from ${h.from.project ? `the project "${h.from.project}"` : h.from.cwd} (hand-off ${h.id}).${files.length ? ` Its files are in ${where}: ${files.join(', ')}; add the ones that are sources the usual way.` : ''}\nWhen you have finished, write ${resultName(h)} in this folder: what you found or did, the strongest evidence with its sources or links, what is still open, and what you would do next. It is sent back to that project, so make it stand on its own.`;
+    const oneshot = async (h, session, cwd, prompt, extra = {}) => { const name = `ho-${h.id.slice(1, 7)}`; await shells.create({ name, kind: 'agent', agent: extra.agent || 'claude', model: extra.model || '', runAs: 'agent', session, cwd: path.relative(config.root, cwd), firstPrompt: prompt, oneshot: true, ...(extra.ackClaude ? { ackClaude: true } : {}) }); return name; };
+    return {
+        async start(h, filesDir) {
+            if (h.app === 'research') {
+                const into = h.into && fs.existsSync(path.join(research.ROOT, h.into, '.platopypus', 'research.json')) ? h.into : null;
+                const slug = into || (await research.create({ title: h.title, brief: h.brief })).slug; const dir = path.join(research.ROOT, slug);
+                const files = copyIn(filesDir, path.join(dir, 'notes', 'handoff')); await agentUser.prepareFolder(dir).catch(() => {});
+                const rs = research.settings(); const shell = await oneshot(h, 'research', dir, `Research this ${into ? 'question in this topic' : 'topic'}: ${h.title}\n\n${h.brief}\n\nGather and read real sources with the research tools, cite every claim, and write what you find into notes/ and the paper as usual.${tail(h, 'notes/handoff/', files)}`, { agent: rs.agent, model: rs.models?.[rs.agent] || '' });
+                return { ref: { app: 'research', slug, url: `/#research/${slug}` }, shell, status: 'running' };
+            }
+            if (h.app === 'case') {
+                const c = cases.create({ title: h.title, question: h.brief.slice(0, 600) }); const dir = path.join(cases.ROOT, c.slug);
+                const files = copyIn(filesDir, path.join(dir, 'files', 'handoff'));
+                const shell = await oneshot(h, 'case', dir, `Work this case: ${h.title}\n\n${h.brief}\n\nUse the sleuth tools: send probes, pin what you find to the board with its sources, and keep notes.md current.${tail(h, 'files/handoff/', files)}`);
+                return { ref: { app: 'case', slug: c.slug, url: `/#cases/${c.slug}` }, shell, status: 'running' };
+            }
+            if (h.app === 'jobs') {
+                if (!jobs.ready()) throw shells.httpError(412, 'Set up Job Hunt first (Apps, Job Hunt).');
+                jobs.writeBrief(); const w = jobs.addWish(`${h.title}. ${h.brief}`.slice(0, 1000), 'handoff'); const s = jobs.settings();
+                const files = copyIn(filesDir, path.join(jobs.ROOT, 'handoff', h.id));
+                const name = `ho-${h.id.slice(1, 7)}`; await shells.create({ name, kind: 'agent', agent: s.agent || 'claude', model: s.model || '', runAs: 'agent', session: 'jobs', cwd: path.relative(config.root, jobs.ROOT) || 'Jobs', firstPrompt: `${jobs.wishPrompt(w)}${tail(h, `handoff/${h.id}/`, files)}`, oneshot: true });
+                return { ref: { app: 'jobs', id: w.id, wish: w.id, url: '/#jobs' }, shell: name, status: 'running' };
+            }
+            if (h.app === 'lab') {
+                const l = lab.create({ title: h.title }); const dir = path.join(lab.ROOT, l.slug);
+                for (const t of h.targets) { try { lab.addTarget(l.slug, { value: t, authorised: false, note: `proposed by hand-off ${h.id}` }); } catch (e) { log('handoff', `${h.id}: target ${t} not added: ${e.message}`); } }
+                copyIn(filesDir, path.join(dir, 'evidence', 'handoff'));
+                return { ref: { app: 'lab', slug: l.slug, url: `/#lab/${l.slug}` }, status: 'scope' };
+            }
+            throw shells.httpError(400, 'Unknown app.');
+        },
+        async startLab(h, { ack }) {
+            const slug = h.ref?.slug; const ok = lab.scope(slug).filter(t => t.status && t.status !== 'unverified');
+            if (!ok.length) throw shells.httpError(409, 'Verify or declare at least one target in this engagement first (Security Lab, the engagement, Scope).');
+            const dir = path.join(lab.ROOT, slug); const files = (() => { try { return fs.readdirSync(path.join(dir, 'evidence', 'handoff')); } catch { return []; } })();
+            const shell = await oneshot(h, 'lab', dir, `Security assessment: ${h.title}\n\n${h.brief}\n\nOnly the targets in this engagement's scope (lab_status shows them); run tools with lab, keep evidence, and write findings to findings.md with severity and how to fix.${tail(h, 'evidence/handoff/', files)}`, { ackClaude: ack });
+            return { shell };
+        },
+        async result(h) {
+            const dirOf = { research: research.ROOT, case: cases.ROOT, lab: lab.ROOT }[h.app];
+            if (dirOf && h.ref?.slug) { try { return fs.readFileSync(path.join(dirOf, h.ref.slug, `handoff-result-${h.id}.md`), 'utf8').slice(0, 20000); } catch { /* none */ } try { return fs.readFileSync(path.join(dirOf, h.ref.slug, 'notes', `handoff-result-${h.id}.md`), 'utf8').slice(0, 20000); } catch { /* none */ } }
+            if (h.app === 'jobs') { try { return fs.readFileSync(path.join(jobs.ROOT, `handoff-result-${h.id}.md`), 'utf8').slice(0, 20000); } catch { /* none */ } const w = jobs.wishes().find(x => x.id === h.ref?.wish); return w?.summary || ''; }
+            return '';
+        },
+    };
+})());
 // Self-check fix runs: one-shot agents as the agent user (auto-approved, so never root), with the self-check tools.
 selfcheck.start(async ({ prompt, cwd, base, agent, model }) => { const name = `${base}-${Math.random().toString(36).slice(2, 5)}`; await shells.create({ name, kind: 'agent', agent: agent || 'claude', model: model || '', runAs: 'agent', session: 'selfcheck', cwd: path.relative(config.root, cwd) || '.', firstPrompt: prompt, oneshot: true }); return name; });
 

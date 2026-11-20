@@ -245,6 +245,7 @@ ln -sf "$APP_DIR/bin/lab-mcp" /usr/local/bin/lab-mcp
 ln -sf "$APP_DIR/bin/plato-mcp" /usr/local/bin/plato-mcp
 ln -sf "$APP_DIR/bin/plato-tool" /usr/local/bin/plato-tool
 ln -sf "$APP_DIR/bin/jobhunt" /usr/local/bin/jobhunt
+ln -sf "$APP_DIR/bin/handoff" /usr/local/bin/handoff
 ln -sf "$APP_DIR/bin/paper-build" /usr/local/bin/paper-build
 ln -sf "$APP_DIR/bin/elevate" /usr/local/bin/elevate
 # Publishing gate: a global pre-push hook asks PlatOpypus whether the folder is flagged as a repo; .pasted/ never enters git.

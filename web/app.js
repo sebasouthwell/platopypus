@@ -261,6 +261,7 @@ function push(page) {
     if (page === 'schedules') loadSchedules().catch(e => toast(e.message, true));
     if (page === 'selfcheck') selfcheckUI().then(m => m.load()).catch(e => toast(e.message, true));
     if (page === 'prompts') promptsUI().then(m => m.loadPrompts()).catch(e => toast(e.message, true));
+    if (['research', 'cases', 'jobs', 'lab'].includes(page)) handoffUI().then(m => m.render(page)).catch(() => {});
     if (page === 'research') loadResearch().catch(e => toast(e.message, true));
     if (page === 'lab') loadLab().catch(e => toast(e.message, true));
     if (page === 'cases') casesUI().then(m => m.loadCases()).catch(e => toast(e.message, true));
@@ -3530,6 +3531,11 @@ async function casesUI() {
 }
 function openCases() { go('apps'); push('cases'); }
 // ---------- Job Hunt (web/jobs.js, loaded when first opened) ----------
+let handoffMod = null;
+async function handoffUI() {
+    if (!handoffMod) { handoffMod = await import(`/handoff.js?v=${ASSET_V}`); handoffMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, openTerminal }); }
+    return handoffMod;
+}
 let selfcheckMod = null;
 async function selfcheckUI() {
     if (!selfcheckMod) { selfcheckMod = await import(`/selfcheck.js?v=${ASSET_V}`); selfcheckMod.setup({ api, esc, icon, openDialog, confirmDialog, toast, openTerminal, $, $$ }); }

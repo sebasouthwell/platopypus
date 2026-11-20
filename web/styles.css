@@ -1653,3 +1653,14 @@ input[type=month] { color-scheme: dark; }
 @media (min-width: 720px) { .sc-autoproj { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sc-arow.big .main b { white-space: normal; } .sc-settings { padding-bottom: 8px; }
 @media (min-width: 1200px) { .sc-projs { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+
+/* Hand-offs at the top of an app */
+.ho-box { display: grid; gap: 8px; margin: 0 0 14px; }
+.ho-card { display: grid; gap: 6px; padding: 12px 14px; background: linear-gradient(180deg, var(--hull-2), var(--hull)); border: 1px solid var(--rail); border-left: 4px solid var(--brass); border-radius: 14px; }
+.ho-card.running { border-left-color: var(--dock, #6FB1F0); } .ho-card.done { border-left-color: var(--kelp); } .ho-card.scope { border-left-color: var(--flare); }
+.ho-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12.5px; } .ho-h .muted { font-size: 12px !important; margin: 0 !important; }
+.ho-tag { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--brass); } .ho-tag svg.i { width: 14px; height: 14px; }
+.ho-card.running .ho-tag { color: var(--dock, #6FB1F0); } .ho-card.done .ho-tag { color: var(--kelp); } .ho-card.scope .ho-tag { color: var(--flare); }
+.ho-t { font-size: 15.5px; } .ho-brief summary { cursor: pointer; font-size: 13px; color: var(--mist); } .ho-brief p { margin: 6px 0 0; font-size: 14px; white-space: pre-wrap; line-height: 1.45; }
+.ho-files { display: flex; flex-wrap: wrap; gap: 6px; } .ho-files span { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--hull); border: 1px solid var(--rail); font-size: 12.5px; } .ho-files svg.i { width: 13px; height: 13px; } .ho-files i { font-style: normal; color: var(--dim); font-size: 11px; }
+.ho-note { margin: 0; font-size: 12.5px; color: var(--mist); } .ho-res { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; max-height: 320px; overflow: auto; background: var(--sea); border-radius: 10px; padding: 8px 10px; margin: 6px 0 0; }

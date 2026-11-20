@@ -1089,6 +1089,19 @@ phone's Update button. Mechanism:
   and the agent user's native installs are separate, and the scan only saw the one on root's PATH. Each copy found is
   its own finding, named "(root)", "(agent user)" or "(system)", and the box agent updates the copy named.
 
+- **2.27.0**: Hand-offs between apps (`server/lib/handoff.js`, `web/handoff.js`, `bin/handoff`). An agent in any shell
+  proposes work for Research (a new topic, or a question into an existing one), Conspiracy (a case), Job Hunt (a
+  search) or Security Lab (an engagement with targets): `handoff propose --app … --title … --brief … [--files …]`
+  (kit tools `handoff.propose` and `handoff.status`). Attached files must be inside the asking project and are
+  copied at proposal time (8 files, 20 MB). The proposal shows as a card at the top of that app; Approve & start (or
+  Edit, Decline) creates it, copies the files in and starts the app's own unattended agent as the agent user, with
+  the app's chosen agent. A Security Lab hand-off makes the engagement with its domains to verify; the agent starts
+  only from the card after at least one target is verified or declared (IP targets are added by the user). When the
+  run ends, its handoff-result file (or the end of its output) is written back to
+  `<project>/.platopypus/handoffs/<id>.md`, and a new `handoff` alert kind reports proposals and results. Approving
+  and starting are user routes; agents can only propose and read their own project's hand-offs. Running hand-offs
+  are picked up again after a restart. State: `<state>/handoffs.json`, files in `<state>/handoffs/<id>/`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
