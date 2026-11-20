@@ -1058,6 +1058,10 @@ phone's Update button. Mechanism:
   Fixes: nginx's version (`nginx/1.24.0`) was not read, so nginx was skipped; wildcard pins in requirements files.
   State adds `<state>/selfcheck/kev.json`.
 
+- **2.26.1**: Self-check lists recent serious CVEs (last 45 days, high or exploited) in the base packages that the
+  installed version already fixes, so a headline CVE can be seen to have been checked. Fix: running services were
+  matched to the wrong executables (systemctl show prints MainPID before Id).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.
