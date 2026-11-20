@@ -1314,7 +1314,7 @@ update.schedule();
 handoff.setStarter((() => {
     const copyIn = (src, dest) => { let n = []; try { n = fs.readdirSync(src); } catch { return []; } fs.mkdirSync(dest, { recursive: true }); for (const f of n) fs.copyFileSync(path.join(src, f), path.join(dest, f)); return n; };
     const resultName = h => `handoff-result-${h.id}.md`;
-    const tail = (h, where, files) => `\n\nThis was handed over from ${h.from.project ? `the project "${h.from.project}"` : h.from.cwd} (hand-off ${h.id}).${files.length ? ` Its files are in ${where}: ${files.join(', ')}; add the ones that are sources the usual way.` : ''}\nWhen you have finished, write ${resultName(h)} in this folder: what you found or did, the strongest evidence with its sources or links, what is still open, and what you would do next. It is sent back to that project, so make it stand on its own.`;
+    const tail = (h, where, files) => `\n\nThis was handed over from ${h.from.project ? `the project "${h.from.project}"` : h.from.cwd} (hand-off ${h.id}).${files.length ? ` Its files are in ${where}: ${files.join(', ')}; add the ones that are sources the usual way.` : ''}\nWhen you have finished, write ${resultName(h)} in this folder: what you found or did, the strongest evidence with its sources or links, what is still open, and what you would do next. It is sent back to that project, so make it stand on its own. Files worth sending back too (a table you compiled, figures, an export): put them in handoff-out/ in this folder (8 files, 20 MB at most); they go back with the summary.`;
     const oneshot = async (h, session, cwd, prompt, extra = {}) => { const name = `ho-${h.id.slice(1, 7)}`; await shells.create({ name, kind: 'agent', agent: extra.agent || 'claude', model: extra.model || '', runAs: 'agent', session, cwd: path.relative(config.root, cwd), firstPrompt: prompt, oneshot: true, ...(extra.ackClaude ? { ackClaude: true } : {}) }); return name; };
     return {
         async start(h, filesDir) {
@@ -1352,6 +1352,16 @@ handoff.setStarter((() => {
             const dir = path.join(lab.ROOT, slug); const files = (() => { try { return fs.readdirSync(path.join(dir, 'evidence', 'handoff')); } catch { return []; } })();
             const shell = await oneshot(h, 'lab', dir, `Security assessment: ${h.title}\n\n${h.brief}\n\nOnly the targets in this engagement's scope (lab_status shows them); run tools with lab, keep evidence, and write findings to findings.md with severity and how to fix.${tail(h, 'evidence/handoff/', files)}`, { ackClaude: ack });
             return { shell };
+        },
+        // Files that go back with the summary: what the agent put in handoff-out/, plus each app's own output
+        // (Research: the built paper; Conspiracy: its notes; Security Lab: its findings).
+        files(h) {
+            const dirOf = { research: research.ROOT, case: cases.ROOT, lab: lab.ROOT }[h.app];
+            const base = dirOf && h.ref?.slug ? path.join(dirOf, h.ref.slug) : h.app === 'jobs' ? path.join(jobs.ROOT, 'handoff', h.id) : null; if (!base) return [];
+            const out = []; const od = path.join(base, 'handoff-out'); try { for (const f of fs.readdirSync(od)) { const p2 = path.join(od, f); if (fs.statSync(p2).isFile()) out.push({ path: p2, name: f }); } } catch { /* none */ }
+            const own = h.app === 'research' ? [['paper', 'build', 'main.pdf', 'paper.pdf']] : h.app === 'case' ? [['notes.md', 'case-notes.md']] : h.app === 'lab' ? [['findings.md', 'findings.md']] : [];
+            for (const parts of own) { const as = parts.pop(); const p2 = path.join(base, ...parts); if (fs.existsSync(p2) && !out.some(x => x.name === as)) out.unshift({ path: p2, name: as }); }
+            return out;
         },
         async result(h) {
             const dirOf = { research: research.ROOT, case: cases.ROOT, lab: lab.ROOT }[h.app];

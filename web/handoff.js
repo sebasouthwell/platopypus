@@ -23,6 +23,7 @@ function card(h) {
         ${h.files.length ? `<div class="ho-files">${h.files.map(f => `<span>${icon('file')}${esc(f.name)} <i>${size(f.size)}</i></span>`).join('')}</div>` : ''}
         ${h.targets?.length ? `<div class="ho-files">${h.targets.map(t => `<span>${icon('shield')}${esc(t)}</span>`).join('')}</div>` : ''}
         ${h.status === 'scope' ? '<p class="ho-note">Nothing runs until each target is verified (DNS record) or you declare you are authorised, in the engagement\'s Scope. IP addresses and ranges are not added for you: add them there yourself.</p>' : ''}
+        ${h.status === 'done' && (h.returned || []).length ? `<div class="ho-files">${h.returned.map(f => `<span>${icon('file')}${esc(f.name)} <i>${size(f.size)}</i></span>`).join('')}<span class="muted">sent back to ${esc(h.from.project || 'the asking folder')}</span></div>` : ''}
         ${h.status === 'done' && h.result ? `<details class="ho-brief"><summary>Result</summary><pre class="ho-res">${esc(h.result)}</pre></details>` : ''}
         <div class="r-actions">${h.status === 'proposed' ? `<button class="btn pri" data-ho-ok="${h.id}">${icon('check')}Approve &amp; start</button><button class="btn" data-ho-edit="${h.id}">${icon('pencil')}Edit</button><button class="btn" data-ho-no="${h.id}">${icon('x')}Decline</button>` : ''}
         ${h.status === 'scope' ? `<button class="btn pri" data-ho-start="${h.id}">${icon('claude')}Start the agent</button>${h.ref?.url ? `<a class="btn" href="${esc(h.ref.url)}">${icon('shield')}Open the engagement</a>` : ''}` : ''}

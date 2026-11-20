@@ -174,7 +174,8 @@ investigation with sourced evidence, a job search, a security test of something 
 
 `--app` is research (add `--topic <slug>` to put a question into an existing topic), case (Conspiracy), jobs (Job Hunt)
 or lab (Security Lab; give `--targets` the user is authorised to test). The user approves it in that app; its agent does
-the work and the result comes back here as `.platopypus/handoffs/<id>.md`. `handoff status [--id <id>]` shows where each
+the work and the result comes back here as `.platopypus/handoffs/<id>.md`, with any files it sends (a Research paper PDF,
+a Security Lab findings report, tables it compiled) in `.platopypus/handoffs/<id>/`. `handoff status [--id <id>]` shows where each
 one is. You cannot approve or start one yourself; do not wait on it, carry on with what you can do here.
 
 ## Scheduled routines

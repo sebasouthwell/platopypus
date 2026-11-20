@@ -1102,6 +1102,10 @@ phone's Update button. Mechanism:
   and starting are user routes; agents can only propose and read their own project's hand-offs. Running hand-offs
   are picked up again after a restart. State: `<state>/handoffs.json`, files in `<state>/handoffs/<id>/`.
 
+- **2.27.1**: Hand-offs send files back as well as the summary: whatever the app's agent puts in `handoff-out/`, plus
+  each app's own output (Research's built paper as paper.pdf, Conspiracy's notes, Security Lab's findings), copied
+  into `<project>/.platopypus/handoffs/<id>/` (8 files, 20 MB), listed in the summary, in `handoff status` and on the card.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

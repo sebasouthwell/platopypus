@@ -111,11 +111,28 @@ async function finish(id, output) {
     const h = get(id); if (h.status !== 'running') return;
     let result = ''; try { result = starter.result ? await starter.result(h) : ''; } catch { /* none */ }
     if (!result) result = String(output || '').replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n').slice(-60).join('\n');
-    const link = h.ref?.url || '';
-    writeBack(h, `# Hand-off ${h.id}: ${h.title}\n\nDone by ${APPS[h.app]}${h.ref?.slug ? ` (${h.ref.slug})` : ''} on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC.${link ? ` Open it in PlatOpypus: ${link}` : ''}\n\n## Brief\n\n${h.brief}\n\n## Result\n\n${result || '(the agent left no summary; open the app to see what it did)'}\n`);
-    update(id, x => { x.status = 'done'; x.finished = Date.now(); x.result = result.slice(0, 4000); });
+    const link = h.ref?.url || ''; const back = copyBack(h);
+    writeBack(h, `# Hand-off ${h.id}: ${h.title}\n\nDone by ${APPS[h.app]}${h.ref?.slug ? ` (${h.ref.slug})` : ''} on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC.${link ? ` Open it in PlatOpypus: ${link}` : ''}\n\n## Brief\n\n${h.brief}\n\n## Result\n\n${result || '(the agent left no summary; open the app to see what it did)'}\n${back.length ? `\n## Files sent back\n\nIn .platopypus/handoffs/${h.id}/:\n${back.map(f => `- ${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB)`).join('\n')}\n` : ''}`);
+    update(id, x => { x.status = 'done'; x.finished = Date.now(); x.result = result.slice(0, 4000); x.returned = back; });
     try { alerts.notify('handoff', `${APPS[h.app]} finished "${h.title}"${h.from.project ? `; the result is back in ${h.from.project}` : ''}.`, { key: `${id}-done`, quietMs: 0 }); } catch { /* alerts off */ }
     log('handoff', `${id} done`);
+}
+// Copy the files the app's run produced (starter.files) into <project>/.platopypus/handoffs/<id>/, same limits as
+// files going the other way; same group as the project so its agents can read them.
+function copyBack(h) {
+    let list = []; try { list = starter.files ? starter.files(h) : []; } catch { return []; }
+    const dest = path.join(h.from.root, '.platopypus', 'handoffs', h.id); const out = []; let bytes = 0; const seen = new Set();   // same content sent once
+    let st = null; try { st = fs.statSync(h.from.root); } catch { return []; }
+    for (const f of list.slice(0, MAX_FILES)) {
+        try {
+            const real = fs.realpathSync(f.path); const s = fs.statSync(real); if (!s.isFile() || bytes + s.size > MAX_BYTES) continue;
+            const sum = crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex'); if (seen.has(sum)) continue; seen.add(sum); bytes += s.size;
+            fs.mkdirSync(dest, { recursive: true }); const name = String(f.name).replace(/[^\w.-]/g, '_') || path.basename(real);
+            const to = path.join(dest, name); fs.copyFileSync(real, to); fs.chmodSync(to, 0o660); try { fs.chownSync(to, st.uid, st.gid); fs.chownSync(dest, st.uid, st.gid); fs.chmodSync(dest, 0o2770); } catch { /* best effort */ }
+            out.push({ name, size: s.size });
+        } catch (e) { log('handoff', `${h.id}: not sent back ${f.name}: ${e.message}`); }
+    }
+    return out;
 }
 function writeBack(h, text) {
     try {
@@ -135,7 +152,7 @@ kit.registerApp('handoff', {
         { name: 'status', description: 'Hand-offs from this project: waiting, running, done (with the result) or declined. Give an id for one in full.', inputSchema: kit.obj({ id: kit.str('Hand-off id (optional)') }),
             run: (c, a) => {
                 const root = originOf(c.shell).root; const mine = load().items.filter(h => h.from.root === root);
-                if (a.id) { const h = mine.find(x => x.id === a.id); if (!h) throw httpError(404, 'No such hand-off from this project.'); return `${h.id} [${h.status}] ${APPS[h.app]}: ${h.title}${h.ref?.slug ? ` (${h.ref.slug})` : ''}\n\n${h.result || (h.status === 'proposed' ? 'Waiting for the user to approve it.' : h.status === 'scope' ? 'Approved; waiting for the user to verify the targets in Security Lab.' : h.status === 'running' ? 'The app\'s agent is working on it.' : h.declined ? `Declined: ${h.declined}` : '')}${h.status === 'done' ? `\n\nFull text: .platopypus/handoffs/${h.id}.md` : ''}`; }
+                if (a.id) { const h = mine.find(x => x.id === a.id); if (!h) throw httpError(404, 'No such hand-off from this project.'); return `${h.id} [${h.status}] ${APPS[h.app]}: ${h.title}${h.ref?.slug ? ` (${h.ref.slug})` : ''}\n\n${h.result || (h.status === 'proposed' ? 'Waiting for the user to approve it.' : h.status === 'scope' ? 'Approved; waiting for the user to verify the targets in Security Lab.' : h.status === 'running' ? 'The app\'s agent is working on it.' : h.declined ? `Declined: ${h.declined}` : '')}${h.status === 'done' ? `\n\nFull text: .platopypus/handoffs/${h.id}.md${(h.returned || []).length ? `\nFiles sent back, in .platopypus/handoffs/${h.id}/: ${h.returned.map(f => f.name).join(', ')}` : ''}` : ''}`; }
                 return mine.slice(-20).reverse().map(h => `${h.id} [${h.status}] ${APPS[h.app]}: ${h.title}`).join('\n') || 'No hand-offs from this project yet.';
             } },
     ],
