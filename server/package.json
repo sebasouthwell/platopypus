@@ -1,6 +1,6 @@
 {
   "name": "porthole",
-  "version": "2.26.2",
+  "version": "2.26.3",
   "description": "Phone-first web console for a personal dev box: tmux-backed Claude Code shells, file browser with uploads, one-tap Cloudflare tunnels.",
   "type": "module",
   "private": true,
@@ -11,7 +11,7 @@
     "lint": "cd .. && node server/node_modules/eslint/bin/eslint.js --no-config-lookup --rule \"no-use-before-define: [error, { functions: false, classes: true, variables: false }]\" --rule \"no-undef: off\" web/app.js server/server.js server/lib/*.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^14.0.0",

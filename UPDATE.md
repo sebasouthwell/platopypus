@@ -1066,6 +1066,12 @@ phone's Update button. Mechanism:
   every release, so 24.04 was shown 26.04's version); processes are tracked one by one, not per executable (two
   python processes were merged).
 
+- **2.26.3**: From the first self-check box fix on the live box. `engines.node` is now `>=22` (@simplewebauthn/server
+  14.1, from the first PlatOpypus self-fix, needs it; install.sh already installs Node 22). Self-check reports
+  processes still running code an upgrade replaced ("restart needed", with PlatOpypus and Docker left to the user),
+  states the npm rule for box fixes (npm may move to a newer major that supports the installed Node; "bundled; update
+  X" findings wait on X upstream if X is already latest), and keeps longer agent reports (they were cut off).
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

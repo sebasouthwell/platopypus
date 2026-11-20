@@ -274,6 +274,11 @@ async function boxFindings() {
         for (const b of bySrc.values()) { const o = osv.find(x => x.name === b.source); out.push(finding(T, { area: 'os', ecosystem: 'Ubuntu', name: b.source, version: b.from, fixed: b.to, apt: b.pkgs.join(' '), severity: o?.severity && o.severity !== 'info' ? o.severity : 'moderate', advisories: o?.advisories || [], note: `Ubuntu security update for ${b.pkgs.slice(0, 6).join(', ')}${b.pkgs.length > 6 ? '…' : ''}.` })); }
     }
     if (!apt.updateOk) out.push(finding(T, { area: 'os', name: 'apt', severity: 'low', note: 'Could not refresh the package lists (apt-get update failed), so Ubuntu updates may be missing here.' }));
+    // Processes still running code an upgrade replaced (their executable or a library is "(deleted)" on disk): the fix
+    // is installed but not in use until they restart. PlatOpypus and Docker are left to the user (restarting them
+    // interrupts PlatOpypus and its containers).
+    const stale = staleProcesses(live.services);
+    if (stale.length) out.push(finding(T, { area: 'os', name: 'restart needed', version: stale.map(x => x.name).join(', ').slice(0, 120), severity: stale.some(x => x.core) ? 'moderate' : 'low', services: stale, note: `Running the code from before an upgrade (installed fixes are not in use yet): ${stale.map(x => `${x.name}${x.core ? ' (restart from the phone when it suits you)' : ''}`).join(', ')}. A reboot also does it.` }));
     if (apt.reboot) out.push(finding(T, { area: 'os', name: 'reboot', severity: 'moderate', note: 'A reboot is needed to finish installed updates (kernel or core libraries). Not done automatically: reboot from the AWS console or `sudo reboot` when it suits you.' }));
     // Let's Encrypt certificates and their renewal timer.
     let certs = []; try { certs = fs.readdirSync('/etc/letsencrypt/live').filter(d => !d.startsWith('README')); } catch { /* none */ }
@@ -400,6 +405,21 @@ async function recentlyPatched(pkgs) {
         }
     }
     return out.sort((a, b) => sevN(b.severity) - sevN(a.severity)).slice(0, 40);
+}
+
+// Live processes whose executable or a mapped library was replaced on disk since they started.
+const LEAVE_TO_USER = /^(platopypus|porthole|docker|containerd|ssh|sshd|amazon-ssm-agent|snap\.amazon-ssm-agent.*)$/;
+function staleProcesses(services) {
+    const out = []; const seen = new Set();
+    for (const s of services) {
+        if (!s.pid) continue; let maps = ''; try { maps = fs.readFileSync(`/proc/${s.pid}/maps`, 'utf8'); } catch { continue; }
+        let exeGone = false; try { exeGone = / \(deleted\)$/.test(fs.readlinkSync(`/proc/${s.pid}/exe`)); } catch { /* gone */ }
+        const libs = [...new Set(maps.split('\n').filter(l => / \(deleted\)$/.test(l) && /\/(usr|lib)/.test(l)).map(l => l.replace(/^.* (\/\S+) \(deleted\)$/, '$1')))];
+        if (!exeGone && !libs.length) continue;
+        const name = s.units[0] || s.name; if (seen.has(name)) continue; seen.add(name);
+        out.push({ name, pid: s.pid, core: LEAVE_TO_USER.test(name), exe: exeGone ? s.exe : null, libs: libs.slice(0, 6) });
+    }
+    return out;
 }
 
 // nginx server blocks that speak HTTP/2 (several nginx advisories only apply with it on).
@@ -720,7 +740,7 @@ async function runBox(r) {
     saveRun(r);
     const prompt = `Fix the box-level findings PlatOpypus's self-check found (system packages, nginx, certbot and certificates, Node.js, agent CLIs, MCP servers). ${FINDINGS_HELP}\n` +
         `You are the agent user. Run anything that needs root with \`elevate -- <command>\`. ${r.grantRoot ? 'You hold an elevation grant for this run, so it runs without asking; every command is in the audit log.' : 'Each one asks the user on their phone first and waits up to 10 minutes: batch what you can into few commands (one apt-get install for all packages), give each a clear --reason, and if one is refused or times out, report it instead of retrying.'}\n` +
-        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; updating global npm packages (npm install -g <pkg>@<fixed version>), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
+        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; updating global npm packages (npm install -g <pkg>@<fixed version>; npm itself may move to a newer major version if that release supports the installed Node.js major, since that is how npm ships fixes to what it bundles; a finding marked "bundled; update X" is fixed by updating X, and if X is already at its latest release, report it as waiting on X upstream), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
         `When a finding says there is no fixed package yet, apply the workaround its advisory documents if it is a configuration change (for example turning HTTP/2 off in nginx listen lines for an nginx HTTP/2 flaw): copy the file to <file>.selfcheck-${r.id} first, change only what the workaround needs, run the service's config test (nginx -t), reload, check the service still answers (curl -sI https://127.0.0.1 -k for nginx), and say in the report exactly what to undo once the fixed package arrives. A finding inside a Java jar or another app's bundle: report which app ships it; do not edit the app.\n` +
         `Never: start a service that is stopped, stop or break one PlatOpypus needs (nginx, its own service, docker, tmux, ssh/ssm), reboot, change the firewall, SSH, users, sudoers or PlatOpypus itself (/opt/platopypus), remove packages, or upgrade Node.js across a major version. Always run nginx -t before any nginx reload and stop if it fails. If a reboot is needed, say so in the report instead.\n` +
         `End with selfcheck_report (what you upgraded with before → after versions, what you left and why).`;
@@ -753,7 +773,7 @@ kit.registerApp('selfcheck', {
             run: c => c.run.findings.map(x => `${x.id} [${x.severity}${x.malicious ? ', MALICIOUS' : ''}${x.dev ? ', dev only' : ''}] ${x.area}: ${x.ecosystem ? `${x.ecosystem} ` : ''}${x.name}${x.version ? ` ${x.version}` : ''}${x.fixed ? ` → fixed in ${x.fixed}` : ''}${x.apt ? ` (apt: ${x.apt})` : ''}${x.file ? ` · ${String(x.file).replace(c.run.path, '.')}` : ''}${x.note ? `\n    ${x.note}` : ''}${(x.advisories || []).map(a => `\n    ${a.id}${a.aliases?.length ? ` (${a.aliases.join(', ')})` : ''}: ${a.summary}`).join('')}`).join('\n') },
         { name: 'selfcheck_log', description: 'Add a line to the run\'s log, which the user reads (what you are doing, what you found).', inputSchema: kit.obj({ line: kit.str('One line') }, ['line']), run: (c, a) => { addLog(c.run, a.line, 'agent'); return 'ok'; } },
         { name: 'selfcheck_report', description: 'Finish: the outcome of this run.', inputSchema: kit.obj({ status: kit.str('fixed | partial | failed | nothing-to-do'), summary: kit.str('Two or three sentences'), fixed: kit.arr('What you fixed, e.g. "ws 8.17.0 → 8.17.1 (GHSA-…)"'), remaining: kit.arr('What is left, and why'), tests: kit.str('What you ran to check, and the result'), notes_for_developers: kit.str('PlatOpypus runs: every code change (file, what, why) for the developers') }, ['status', 'summary']),
-            run: (c, a) => { const r = c.run; r.report = { status: ['fixed', 'partial', 'failed', 'nothing-to-do'].includes(a.status) ? a.status : 'partial', summary: String(a.summary || '').slice(0, 2000), fixed: (a.fixed || []).map(x => String(x).slice(0, 300)).slice(0, 60), remaining: (a.remaining || []).map(x => String(x).slice(0, 300)).slice(0, 60), tests: String(a.tests || '').slice(0, 2000), notes_for_developers: String(a.notes_for_developers || '').slice(0, 6000), at: Date.now() }; addLog(r, `Report: ${r.report.status}. ${r.report.summary}`, 'agent'); return 'Recorded. You can stop now.'; } },
+            run: (c, a) => { const r = c.run; r.report = { status: ['fixed', 'partial', 'failed', 'nothing-to-do'].includes(a.status) ? a.status : 'partial', summary: String(a.summary || '').slice(0, 4000), fixed: (a.fixed || []).map(x => String(x).slice(0, 800)).slice(0, 80), remaining: (a.remaining || []).map(x => String(x).slice(0, 800)).slice(0, 80), tests: String(a.tests || '').slice(0, 4000), notes_for_developers: String(a.notes_for_developers || '').slice(0, 6000), at: Date.now() }; addLog(r, `Report: ${r.report.status}. ${r.report.summary}`, 'agent'); return 'Recorded. You can stop now.'; } },
     ],
 });
 export const TOOLS_FOR_AGENT = ['selfcheck_findings', 'selfcheck_log', 'selfcheck_report'];
