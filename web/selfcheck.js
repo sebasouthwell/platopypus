@@ -1,7 +1,7 @@
 // More → Self-check: what is live and what it is built from, known problems in it, agents that fix the targets you
 // tick, and a log of every fix ("Self-remediation complete"). Server side: server/lib/selfcheck.js.
 let C = null;
-const S = { sel: new Set(), open: new Set(), poll: null, seeded: false };
+const S = { sel: new Set(), open: new Set(), poll: null, seeded: false, view: 'attention', cleanOpen: false };
 export function setup(ctx) { C = ctx; }
 const SEV = ['critical', 'high', 'moderate', 'low', 'info'];
 const SEV_TXT = { critical: 'Critical', high: 'High', moderate: 'Moderate', low: 'Low', info: 'Info' };
@@ -23,9 +23,17 @@ export async function load() {
         ${sc?.errors?.length ? `<p class="sc-err">${sc.errors.map(esc).join('<br>')}</p>` : ''}</div>`;
     if (active.length) html += `<h2 class="section">Fixing now</h2><div class="sc-runs">${active.map(r => runCard(r, true)).join('')}</div>`;
     if (ts.length) {
-        html += `<h2 class="section">What is live, and what is wrong with it</h2><p class="note">Tick what you want fixed. Each one gets its own agent, one after another. Projects are fixed on a new branch and their running services restarted on it; you merge when you are happy. PlatOpypus itself is fixed in place with a snapshot and automatic rollback.</p><div class="sc-targets">`;
-        html += ts.map(t => targetCard(t, d)).join('');
-        html += `</div>${S.sel.size ? `<div class="sc-fixbar"><span>${S.sel.size} selected</span><button class="btn pri" data-fix>${icon('claude')}Fix selected</button></div>` : ''}`;
+        const base = ts.filter(t => t.kind !== 'project'); const projs = ts.filter(t => t.kind === 'project').sort(projectOrder);
+        const need = projs.filter(t => attention(t, d)); const liveP = projs.filter(isLive);
+        const shown = S.view === 'attention' ? need : S.view === 'live' ? liveP : projs;
+        const clean = S.view === 'all' ? [] : projs.filter(t => !shown.includes(t));
+        html += `<h2 class="section">What is live, and what is wrong with it</h2><p class="note">Tick what you want fixed: each gets its own agent, one after another. Projects are fixed on a new branch and their running services restarted on it (you merge when happy); PlatOpypus is fixed in place with a snapshot and automatic rollback.</p>
+            <div class="sc-group"><h3>PlatOpypus and the box</h3><div class="sc-targets">${base.map(t => targetCard(t, d)).join('')}</div></div>
+            <div class="sc-group"><div class="sc-ghead"><h3>Projects <span class="muted">${need.length ? `${need.length} of ${projs.length} need attention` : `${projs.length}, nothing needs attention`}</span></h3>
+            <div class="sc-view" role="tablist">${[['attention', 'Needs attention', need.length], ['live', 'Live', liveP.length], ['all', 'All', projs.length]].map(([k, l, n]) => `<button role="tab" aria-selected="${S.view === k}" class="${S.view === k ? 'on' : ''}" data-view="${k}">${l} <em>${n}</em></button>`).join('')}</div></div>
+            ${shown.length ? `<div class="sc-targets sc-projs">${shown.map(t => targetCard(t, d)).join('')}</div>` : `<p class="note">${S.view === 'live' ? 'No project has a service running.' : 'No project has anything to fix.'}</p>`}
+            ${clean.length ? `<details class="sc-clean" ${S.cleanOpen ? 'open' : ''} data-cleand><summary>${clean.length} other project${clean.length === 1 ? '' : 's'}${S.view === 'attention' ? ' with nothing to fix' : ''}</summary><div class="sc-cleanlist">${clean.map(t => `<button class="sc-cchip" data-jump="${esc(t.id)}">${isLive(t) ? '<i class="on"></i>' : '<i></i>'}${esc(t.name)}${t.findings.length ? `<em>${t.findings.length}</em>` : ''}</button>`).join('')}</div></details>` : ''}</div>`;
+        html += `${S.sel.size ? `<div class="sc-fixbar"><span>${S.sel.size} selected</span><button class="btn pri" data-fix>${icon('claude')}Fix selected</button></div>` : ''}`;
     }
     const res = d.resolved || [];
     if (res.length) html += `<details class="sc-resolved" ${S.resOpen ? 'open' : ''} data-resd><summary><h2 class="section">Resolved in the last 30 days <span class="muted">(${res.length})</span></h2></summary><div class="sc-finds">${res.map(x => `<div class="sc-find done"><span class="sc-pill ${esc(x.severity)} sm">${SEV_TXT[x.severity] || esc(x.severity)}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''} <span class="sc-ok-t">resolved</span></div><div class="n">${esc(x.targetName)} · ${esc(when(x.at))} · ${x.by ? `fixed by the self-check run on ${esc(x.by.name)}` : 'resolved outside self-check (an update or a change of your own)'}${x.advisories?.length ? ` · ${esc(x.advisories.join(', '))}` : ''}</div></div></div>`).join('')}</div></details>`;
@@ -42,10 +50,10 @@ function targetCard(t, d) {
     const svc = (t.running || []).map(s => `<span class="sc-svc ${s.running ? 'on' : ''}">${s.running ? '●' : '○'} ${esc(s.title || s.slug)}</span>`).join('');
     const warn = t.kind === 'plato' ? '<p class="sc-warn">Fixed in place on this box: dependency upgrades and small patches only. Every code change is logged as a patch for the PlatOpypus developers; the next update replaces it.</p>' : t.kind === 'box' ? '<p class="sc-warn">The agent gets root through elevate for its run only (every command is in the audit log). It never starts a stopped service or reboots.</p>' : t.git === false ? '<p class="sc-warn">Not a git repository, so it is skipped: fixes need a branch to land on and a way back.</p>' : '';
     const open = S.open.has(t.id);
-    return `<div class="sc-target ${top || 'clean'}"><div class="sc-th">
+    return `<div class="sc-target ${top || 'clean'}" id="sct-${esc(t.id.replace(/[^\w-]/g, '_'))}"><div class="sc-th">
         <label class="sc-tick"><input type="checkbox" data-sel="${esc(t.id)}" ${S.sel.has(t.id) ? 'checked' : ''} ${!fixable || busy ? 'disabled' : ''} aria-label="Fix ${esc(t.name)}"></label>
         <button class="sc-tmain" data-open="${esc(t.id)}" aria-expanded="${open}"><div class="title">${esc(t.name)}${t.version ? ` <span class="muted">${esc(t.version)}</span>` : ''}${busy ? ' <span class="sc-busy">fixing</span>' : ''}</div>
-        <div class="sub">${svc}${t.kind === 'project' ? `<span class="muted">${t.packages || 0} packages${t.lockfiles?.length ? ` · ${esc(t.lockfiles.slice(0, 3).join(', '))}` : ''}</span>` : t.kind === 'plato' ? `<span class="muted">${t.packages || 0} installed packages</span>` : ''}</div></button>
+        <div class="sub">${t.kind === 'project' ? `${liveTxt(t)}<span class="muted">${t.packages || 0} packages${t.lockfiles?.length ? ` · ${esc(t.lockfiles.slice(0, 2).map(f => f.split('/').pop()).join(', '))}` : ''}${t.waiting ? ` · ${t.waiting} waiting upstream` : ''}</span>` : t.kind === 'plato' ? `${svc}<span class="muted">${t.packages || 0} installed packages</span>` : `<span class="muted">${(t.services || []).length} running · ${t.installed?.counts ? Object.values(t.installed.counts).reduce((a2, b2) => a2 + b2, 0) : 0} installed${t.waiting ? ` · ${t.waiting} waiting upstream` : ''}</span>`}</div></button>
         <div class="sc-counts">${n ? SEV.filter(k => t.counts[k]).map(k => `<span class="sc-pill ${k} sm"><b>${t.counts[k]}</b></span>`).join('') : `<span class="sc-ok">${icon('check')}</span>`}</div></div>
         ${open ? `${warn}${t.kind === 'box' ? boxInventory(t) : ''}${t.kind === 'box' && t.tools?.length ? `<div class="sc-tools">${t.tools.map(x => `<span><b>${esc(x.name)}</b> ${esc(x.version)}${x.latest && x.latest !== x.version ? ` <i>→ ${esc(x.latest)}</i>` : ''}</span>`).join('')}</div>` : ''}${n ? `<div class="sc-finds">${t.findings.map(findRow).join('')}</div>` : '<p class="note">Nothing known to be wrong.</p>'}` : ''}</div>`;
 }
@@ -66,6 +74,9 @@ function runCard(r, live) {
 function wire(body, d) {
     const { $, $$, esc, icon } = C;
     $('[data-resd]', body)?.addEventListener('toggle', e => { S.resOpen = e.target.open; });
+    $('[data-cleand]', body)?.addEventListener('toggle', e => { S.cleanOpen = e.target.open; });
+    $$('[data-view]', body).forEach(x => x.onclick = () => { S.view = x.dataset.view; load(); });
+    $$('[data-jump]', body).forEach(x => x.onclick = () => { S.view = 'all'; S.open.add(x.dataset.jump); load().then(() => C.$(`#sct-${x.dataset.jump.replace(/[^\w-]/g, '_')}`)?.scrollIntoView({ block: 'center' })); });
     $('[data-scan]', body)?.addEventListener('click', async () => { try { await C.api('/api/selfcheck/scan', { method: 'POST' }); C.toast('Scanning: this takes a minute or two'); } catch (e) { C.toast(e.message, true); } load(); });
     $('[data-settings]', body)?.addEventListener('click', () => settingsDialog(d));
     $$('[data-sel]', body).forEach(x => x.onchange = () => { x.checked ? S.sel.add(x.dataset.sel) : S.sel.delete(x.dataset.sel); load(); });
@@ -104,22 +115,33 @@ function settingsDialog(d) {
     const { $, $$, esc, icon } = C; const s = d.settings; const ts = d.scan?.targets || [];
     const presets = [['0 6 * * *', 'Every day at 06:00'], ['0 */6 * * *', 'Every 6 hours'], ['0 6 * * 1', 'Mondays at 06:00']];
     const sevOpt = v => ['critical', 'high', 'moderate', 'low'].map(k => `<option value="${k}" ${v === k ? 'selected' : ''}>${SEV_TXT[k]} and above</option>`).join('').replace('Critical and above', 'Critical only');
-    const { panel, close } = C.openDialog(`<h2>${icon('settings')}Self-check settings</h2>
+    const all = ts.length ? ts : [{ id: 'plato', kind: 'plato', name: 'PlatOpypus itself', findings: [] }, { id: 'box', kind: 'box', name: 'The box: tooling and system packages', findings: [] }];
+    const autoBase = all.filter(t => t.kind !== 'project'); const autoProj = all.filter(t => t.kind === 'project').sort(projectOrder);
+    const { panel, close } = C.openDialog(`<div class="sc-textdlg sc-settings"><h2>${icon('settings')}Self-check settings</h2>
         <label class="sc-check"><input type="checkbox" id="sc-en" ${s.enabled ? 'checked' : ''}>Scan on a schedule</label>
         <div class="field"><label for="sc-cron">When (cron, box time)</label><input id="sc-cron" value="${esc(s.cron)}"><div class="sc-presets">${presets.map(([c, l]) => `<button class="chip" data-cron="${c}">${l}</button>`).join('')}</div></div>
         <label class="sc-check"><input type="checkbox" id="sc-al" ${s.alert ? 'checked' : ''}>Alert me about new findings</label>
         <div class="field"><label for="sc-als">Alert for</label><select id="sc-als">${sevOpt(s.alertSeverity)}</select></div>
-        <h3 class="sc-h3">Fix on its own after a scheduled scan</h3><p class="muted">Ticked targets are fixed without asking when a scheduled scan finds something at or above the level below. Same rules as fixing by hand: branches for projects, snapshot and rollback for PlatOpypus, elevate for the box.</p>
-        <div class="sc-autolist">${(ts.length ? ts : [{ id: 'plato', name: 'PlatOpypus itself' }, { id: 'box', name: 'The box: tooling and system packages' }]).map(t => `<label class="sc-check"><input type="checkbox" data-auto="${esc(t.id)}" ${s.autoTargets.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')}</div>
+        <h3 class="sc-h3">Fix on its own after a scheduled scan</h3><p class="muted">Switched-on targets are fixed without asking when a scheduled scan finds something at or above the level below. Same rules as fixing by hand: branches for projects, snapshot and rollback for PlatOpypus, elevate for the box.</p>
         <div class="field"><label for="sc-aus">Fix on its own for</label><select id="sc-aus">${sevOpt(s.autoSeverity)}</select></div>
+        <div class="sc-autobase">${autoBase.map(t => autoRow(t, s, true)).join('')}</div>
+        ${autoProj.length ? `<div class="sc-autohead"><b>Projects</b><span class="muted" data-acount></span></div>
+        <div class="sc-autotools"><div class="sc-seg"><button data-aset="all">All</button><button data-aset="live">Live ones</button><button data-aset="none">None</button></div>${autoProj.length > 8 ? '<input type="search" placeholder="Find a project" data-afind aria-label="Find a project">' : ''}</div>
+        <div class="sc-autoproj">${autoProj.map(t => autoRow(t, s, false)).join('')}</div>` : ''}
         <h3 class="sc-h3">Root without asking</h3><p class="muted">Fixes to the box and to PlatOpypus itself need root. These choose whether they get it without asking you: scheduled fixes use them as set, and when you press Fix they are where the choices start (you can still change them for that run).</p>
         <label class="sc-check"><input type="checkbox" id="sc-ar" ${s.autoRoot ? 'checked' : ''}>Box fixes may run root commands without asking (bypass elevate approval)</label><p class="muted sc-hint">Off: each root command waits for your approval on the phone (you get a root-request alert); one left unanswered for 10 minutes is skipped.</p>
         <label class="sc-check"><input type="checkbox" id="sc-aa2" ${s.autoApply ? 'checked' : ''}>PlatOpypus fixes may be applied without asking (root change to PlatOpypus)</label><p class="muted sc-hint">Off: each waits under "Fixing now" for you to read what changed and tap Apply. Snapshot, health check and rollback apply either way.</p>
         <div class="field"><label for="sc-ag">Agent</label><select id="sc-ag">${[['claude', 'Claude Code'], ['codex', 'Codex CLI'], ['antigravity', 'Antigravity CLI']].map(([k, l]) => `<option value="${k}" ${s.agent === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
+        <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div></div>`, { size: 'sheet' });
     $$('[data-cron]', panel).forEach(b => b.onclick = () => { $('#sc-cron', panel).value = b.dataset.cron; });
+    const sw = x => x.getAttribute('aria-checked') === 'true';
+    const count = () => { const on = $$('.sc-autoproj [data-auto]', panel).filter(sw).length; const el = $('[data-acount]', panel); if (el) el.textContent = `${on} of ${autoProj.length} on`; };
+    $$('[data-auto]', panel).forEach(x => x.onclick = () => { x.setAttribute('aria-checked', String(!sw(x))); count(); });
+    $$('[data-aset]', panel).forEach(b => b.onclick = () => { for (const x of $$('.sc-autoproj [data-auto]', panel)) { const t = autoProj.find(y => y.id === x.dataset.auto); x.setAttribute('aria-checked', String(b.dataset.aset === 'all' || (b.dataset.aset === 'live' && isLive(t)))); } count(); });
+    const fd = $('[data-afind]', panel); if (fd) fd.oninput = () => { const q = fd.value.trim().toLowerCase(); for (const r of $$('.sc-autoproj .sc-arow', panel)) r.hidden = !!q && !r.dataset.name.includes(q); };
+    count();
     $('[data-ok]', panel).onclick = async () => {
-        try { await C.api('/api/selfcheck/settings', { method: 'POST', body: { enabled: $('#sc-en', panel).checked, cron: $('#sc-cron', panel).value, alert: $('#sc-al', panel).checked, alertSeverity: $('#sc-als', panel).value, autoTargets: $$('[data-auto]', panel).filter(x => x.checked).map(x => x.dataset.auto), autoSeverity: $('#sc-aus', panel).value, autoRoot: $('#sc-ar', panel).checked, autoApply: $('#sc-aa2', panel).checked, agent: $('#sc-ag', panel).value } }); close(); C.toast('Saved'); load(); }
+        try { await C.api('/api/selfcheck/settings', { method: 'POST', body: { enabled: $('#sc-en', panel).checked, cron: $('#sc-cron', panel).value, alert: $('#sc-al', panel).checked, alertSeverity: $('#sc-als', panel).value, autoTargets: $$('[data-auto]', panel).filter(sw).map(x => x.dataset.auto), autoSeverity: $('#sc-aus', panel).value, autoRoot: $('#sc-ar', panel).checked, autoApply: $('#sc-aa2', panel).checked, agent: $('#sc-ag', panel).value } }); close(); C.toast('Saved'); load(); }
         catch (e) { C.toast(e.message, true); }
     };
 }
@@ -132,4 +154,23 @@ function boxInventory(t) {
     return `<details class="sc-inv"><summary>Running now: ${svc.length} service${svc.length === 1 ? '' : 's'} and processes, ${svc.filter(x => x.listening.length).length} listening</summary><div class="sc-svcs">${svc.map(x => `<div><b>${esc(x.units[0] || x.name)}</b> <span class="muted">${esc(x.source ? `${x.source} ${x.version || ''}` : x.exe)}</span>${x.listening.length ? `<i>${esc(x.listening.slice(0, 3).join(', '))}</i>` : ''}</div>`).join('')}</div></details>
         ${(t.patched || []).length ? `<details class="sc-inv" open><summary>Recent serious CVEs already patched here (${t.patched.length})</summary><div class="sc-svcs">${t.patched.map(x => `<div><b>${esc(x.cve)}</b> <span class="muted">${esc(x.package)} · ${esc(x.severity)} · fixed in ${esc(x.fixedIn)}, installed ${esc(x.installed)}</span><i>${esc(x.summary)}</i></div>`).join('')}</div></details>` : ''}
         <details class="sc-inv"><summary>Installed: ${counts ? '' : 'nothing counted'}</summary><div class="sc-tools">${counts}</div>${bins.length ? `<div class="sc-svcs">${bins.map(x => `<div><b>${esc(x.name)}</b> <span class="muted">${esc(x.version)}${x.latest && x.latest !== x.version ? ` → ${esc(x.latest)}` : ''}</span> <i>${esc(x.path)}</i></div>`).join('')}</div>` : ''}</details>`;
+}
+
+// Ordering and wording shared by the list and the settings.
+const fixableN = t => t.findings.filter(x => !x.waiting && x.severity !== 'info' && x.area !== 'container').length;
+const isLive = t => (t.running || []).some(r => r.running);
+function attention(t, d) { return fixableN(t) > 0 || d.runs.some(r => r.target === t.id && ACTIVE.includes(r.status)); }
+function projectOrder(a, b) { const w = t => SEV.findIndex(k => t.findings.some(x => !x.waiting && x.severity === k)); const wa = w(a), wb = w(b); return (wa < 0 ? 9 : wa) - (wb < 0 ? 9 : wb) || isLive(b) - isLive(a) || String(a.name).localeCompare(String(b.name)); }
+function liveTxt(t) {
+    const { esc } = C; const on = (t.running || []).filter(r => r.running);
+    if (!(t.running || []).length) return '<span class="sc-svc">no service</span>';
+    return on.length ? `<span class="sc-svc on" title="${esc(on.map(r => r.title || r.slug).join(', '))}">● ${on.length === 1 ? esc(on[0].title || on[0].slug) : `${on.length} live`}</span>` : '<span class="sc-svc">○ not running</span>';
+}
+function autoRow(t, s, big) {
+    const { esc } = C; const on = s.autoTargets.includes(t.id); const n = fixableN(t);
+    const top = SEV.find(k => t.findings.some(x => !x.waiting && x.severity === k && k !== 'info'));
+    const sub = t.kind === 'plato' ? 'Dependencies and small patches, snapshot and rollback' : t.kind === 'box' ? 'System packages, services, tools; root through elevate' : '';
+    return `<div class="sc-arow ${big ? 'big' : ''}" data-name="${esc(String(t.name).toLowerCase())}"><button class="switch ${big ? '' : 'sm'}" role="switch" aria-checked="${on}" data-auto="${esc(t.id)}" aria-label="Fix ${esc(t.name)} on its own"><span></span></button>
+        <div class="main"><b>${t.kind === 'project' && isLive(t) ? '<i class="live"></i>' : ''}${esc(t.name)}</b>${sub ? `<span class="muted">${sub}</span>` : ''}</div>
+        ${n ? `<span class="sc-pill ${top || 'low'} sm"><b>${n}</b></span>` : '<span class="sc-zero">✓</span>'}</div>`;
 }

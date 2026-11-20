@@ -1629,3 +1629,27 @@ input[type=month] { color-scheme: dark; }
 .sc-core { font-size: 11px; color: var(--dock, #6FB1F0); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; }
 .sc-find.waiting { opacity: .6; } .sc-wait { font-size: 11px; color: var(--mist); border: 1px dashed var(--rail); border-radius: 6px; padding: 0 5px; }
 .sc-resolved > summary { list-style: none; cursor: pointer; } .sc-resolved > summary::-webkit-details-marker { display: none; } .sc-resolved > summary h2 { display: inline; } .sc-resolved .sc-finds { border-top: 0; } .sc-find.done .t { color: var(--mist); } .sc-ok-t { font-size: 11px; color: var(--kelp); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; }
+
+/* Self-check: grouped list and the auto-fix chooser */
+.sc-group { margin-bottom: 14px; } .sc-group h3 { font-size: 13.5px; font-weight: 600; color: var(--mist); margin: 6px 2px 8px; } .sc-group h3 .muted { font-weight: 400; margin-left: 6px; font-size: 12.5px !important; }
+.sc-ghead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; margin-bottom: 8px; } .sc-ghead h3 { margin: 0 2px; }
+.sc-view { display: flex; gap: 3px; padding: 3px; background: var(--hull); border: 1px solid var(--rail); border-radius: 11px; }
+.sc-view button { min-height: 34px; padding: 0 11px; border-radius: 8px; font-size: 13px; color: var(--mist); white-space: nowrap; } .sc-view button.on { background: var(--hull-2); color: var(--foam); box-shadow: inset 0 0 0 1px var(--rail); }
+.sc-view em { font-style: normal; font-family: var(--mono); font-size: 11.5px; color: var(--dim); margin-left: 2px; }
+.sc-clean { margin-top: 8px; } .sc-clean summary { cursor: pointer; font-size: 13.5px; color: var(--mist); padding: 8px 2px; }
+.sc-cleanlist { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
+.sc-cchip { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 11px; border-radius: 999px; background: var(--hull); border: 1px solid var(--rail); font-size: 13px; color: var(--foam); }
+.sc-cchip i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); opacity: .6; } .sc-cchip i.on { background: var(--kelp); opacity: 1; } .sc-cchip em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.switch.sm { width: 40px; height: 24px; border-radius: 12px; } .switch.sm span { width: 18px; height: 18px; } .switch.sm[aria-checked="true"] span { transform: translateX(16px); }
+.sc-autobase { display: grid; gap: 6px; margin: 10px 0 14px; }
+.sc-arow { display: flex; align-items: center; gap: 12px; padding: 9px 10px; background: var(--hull); border: 1px solid var(--rail); border-radius: 12px; }
+.sc-arow.big { padding: 12px; } .sc-arow .main { flex: 1; min-width: 0; display: grid; gap: 2px; } .sc-arow .main b { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sc-arow .main .muted { font-size: 12px !important; margin: 0 !important; }
+.sc-arow i.live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--kelp); }
+.sc-zero { color: var(--kelp); font-size: 13px; width: 28px; text-align: center; }
+.sc-autohead { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 2px 6px; } .sc-autohead .muted { font-size: 12.5px !important; margin: 0 !important; }
+.sc-autotools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; } .sc-autotools input { flex: 1; min-width: 140px; min-height: 36px; }
+.sc-seg { display: flex; gap: 3px; padding: 3px; background: var(--hull); border: 1px solid var(--rail); border-radius: 10px; } .sc-seg button { min-height: 30px; padding: 0 10px; border-radius: 7px; font-size: 13px; color: var(--mist); } .sc-seg button:hover { color: var(--foam); background: var(--hull-2); }
+.sc-autoproj { display: grid; gap: 6px; max-height: 46vh; overflow: auto; padding-right: 2px; }
+@media (min-width: 720px) { .sc-autoproj { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sc-arow.big .main b { white-space: normal; } .sc-settings { padding-bottom: 8px; }
+@media (min-width: 1200px) { .sc-projs { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }

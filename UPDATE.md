@@ -1085,6 +1085,10 @@ phone's Update button. Mechanism:
   with what resolved them: the fix run that had them, or "outside self-check" (an update, your own change). Targets
   that failed to scan are not counted. State adds `<state>/selfcheck/resolved.json`.
 
+- **2.26.6**: From the third live box fix. Agent CLIs (Claude Code, Codex, Antigravity) are checked per copy: root's
+  and the agent user's native installs are separate, and the scan only saw the one on root's PATH. Each copy found is
+  its own finding, named "(root)", "(agent user)" or "(system)", and the box agent updates the copy named.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

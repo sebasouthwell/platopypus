@@ -209,6 +209,23 @@ const TOOLS = [
     { name: 'Codex CLI', cmd: ['codex', ['--version']], npm: '@openai/codex', osv: true, agent: true },
     { name: 'Antigravity CLI', cmd: ['agy', ['--version']], agent: true },
 ];
+// Agent CLIs are installed per user (root's and the agent user's native installs are separate copies), so each copy
+// found is checked on its own and named "(root)", "(agent user)" or "(system)".
+async function toolVariants() {
+    const out = []; const a = agentUser.info();
+    for (const t of TOOLS) {
+        if (!t.agent) { out.push(t); continue; }
+        const bin = t.cmd[0]; const cands = [];
+        const w = await sh('which', [bin]); if (w.ok && w.out.trim()) cands.push(w.out.trim().split('\n')[0]);
+        for (const d of [path.join(config.home, '.local', 'bin'), '/usr/local/bin', '/usr/bin', ...(a ? [path.join(a.home, '.local', 'bin'), path.join(a.home, '.npm-global', 'bin')] : [])]) cands.push(path.join(d, bin));
+        const seen = new Set(); const found = [];
+        for (const c of cands) { let real; try { real = fs.realpathSync(c); if (!fs.statSync(real).isFile()) continue; } catch { continue; } if (seen.has(real)) continue; seen.add(real); found.push(c); }
+        const label = c => (a && c.startsWith(a.home + path.sep) ? 'agent user' : c.startsWith(config.home + path.sep) ? 'root' : 'system');
+        for (const c of found) out.push({ ...t, name: found.length > 1 ? `${t.name} (${label(c)})` : t.name, cmd: [c, t.cmd[1]], where: c });
+        if (!found.length) out.push(t);
+    }
+    return out;
+}
 async function aptState() {
     const st = readJ(f('apt.json'), {});
     if (!st.updatedAt || Date.now() - st.updatedAt > 12 * 3600_000) { const r = await sh('apt-get', ['update', '-qq'], { timeout: 180_000 }); st.updatedAt = Date.now(); st.updateOk = r.ok; writeJ(f('apt.json'), st); }
@@ -222,7 +239,7 @@ async function boxFindings() {
     const out = []; const T = 'box'; const tools = [];
     const apt = await aptState().catch(() => ({ list: [], map: new Map(), reboot: false, updateOk: false }));
     let nodeIndex = null;
-    for (const t of TOOLS) {
+    for (const t of await toolVariants()) {
         const r = await sh(t.cmd[0], t.cmd[1], { timeout: 10_000 }); if (!r.ok && !r.out) continue;
         const version = t.cmd[0] === 'dpkg-query' ? r.out.trim() : firstVer(r.out); if (!version) continue;
         const row = { name: t.name, version, latest: null, agent: !!t.agent }; tools.push(row);
@@ -767,7 +784,7 @@ async function runBox(r) {
     saveRun(r);
     const prompt = `Fix the box-level findings PlatOpypus's self-check found (system packages, nginx, certbot and certificates, Node.js, agent CLIs, MCP servers). ${FINDINGS_HELP}\n` +
         `You are the agent user. Run anything that needs root with \`elevate -- <command>\`. ${r.grantRoot ? 'You hold an elevation grant for this run, so it runs without asking; every command is in the audit log.' : 'Each one asks the user on their phone first and waits up to 10 minutes: batch what you can into few commands (one apt-get install for all packages), give each a clear --reason, and if one is refused or times out, report it instead of retrying.'}\n` +
-        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; restarting services named in a "restart needed" finding (systemctl restart <unit>), except PlatOpypus, docker, containerd, dbus, systemd-logind and other systemd-* units, ssh/sshd and the SSM agent: those stay for the user; updating global npm packages (npm install -g <pkg>@<fixed version>; npm itself may move to a newer major version if that release supports the installed Node.js major, since that is how npm ships fixes to what it bundles; a finding marked "bundled; update X" is fixed by updating X, and if X is already at its latest release, report it as waiting on X upstream), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
+        `Allowed: apt-get install -y --only-upgrade <the packages named in the findings> (after elevate -- apt-get update); certbot renew; nginx -t then systemctl reload nginx; restarting a service that is running now and was just upgraded; restarting services named in a "restart needed" finding (systemctl restart <unit>), except PlatOpypus, docker, containerd, dbus, systemd-logind and other systemd-* units, ssh/sshd and the SSM agent: those stay for the user; updating global npm packages (npm install -g <pkg>@<fixed version>; npm itself may move to a newer major version if that release supports the installed Node.js major, since that is how npm ships fixes to what it bundles; a finding marked "bundled; update X" is fixed by updating X, and if X is already at its latest release, report it as waiting on X upstream), pip packages outside apt (pip install --upgrade in the same prefix it was installed in, or pipx upgrade), gems (gem update <gem>) and cargo installs named in the findings; updating the agent CLIs named (npm install -g <pkg>@latest, claude update); agent CLIs exist per user, so update the copy the finding names: "(root)" with elevate -- <path> update (or elevate -- npm install -g), "(agent user)" as yourself; replacing a standalone binary named in the findings with the vendor's official release for this architecture, only after checking the vendor's published SHA-256 checksum (keep the old one as <path>.selfcheck-old); pinning an MCP server's package to a checked version.\n` +
         `When a finding says there is no fixed package yet, apply the workaround its advisory documents if it is a configuration change (for example turning HTTP/2 off in nginx listen lines for an nginx HTTP/2 flaw): copy the file to <file>.selfcheck-${r.id} first, change only what the workaround needs, run the service's config test (nginx -t), reload, check the service still answers (curl -sI https://127.0.0.1 -k for nginx), and say in the report exactly what to undo once the fixed package arrives. A finding inside a Java jar or another app's bundle: report which app ships it; do not edit the app.\n` +
         `Never: start a service that is stopped, stop or break one PlatOpypus needs (nginx, its own service, docker, tmux, ssh/ssm), reboot, change the firewall, SSH, users, sudoers or PlatOpypus itself (/opt/platopypus), remove packages, or upgrade Node.js across a major version. Always run nginx -t before any nginx reload and stop if it fails. If a reboot is needed, say so in the report instead.\n` +
         `End with selfcheck_report (what you upgraded with before → after versions, what you left and why).`;
