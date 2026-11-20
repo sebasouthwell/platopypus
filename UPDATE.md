@@ -1041,6 +1041,10 @@ phone's Update button. Mechanism:
   PlatOpypus fix stops at "Waiting for your approval" (Apply / Discard, after "What changed") unless "apply without
   asking" is ticked. Scheduled auto-fixes follow `autoRoot` and `autoApply` in settings (both off by default).
 
+- **2.25.1**: Self-check settings has a "Root without asking" section: box fixes may bypass elevate approval
+  (`autoRoot`) and PlatOpypus fixes may be applied without asking (`autoApply`). Both off by default; scheduled
+  fixes use them, and the Fix dialog starts with its checkboxes set from them.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

@@ -351,6 +351,7 @@ export function runs(limit = 40) {
 function addLog(r, line, by = 'plato') { r.log = [...(r.log || []), { at: Date.now(), by, line: String(line).slice(0, 1000) }].slice(-400); saveRun(r); }
 const queue = []; let draining = false; let runner = null;
 export function setRunner(fn) { runner = fn; }
+// Defaults for both come from settings (autoRoot, autoApply): scheduled runs use them, the Fix dialog starts from them.
 // grantRoot: the box agent's root commands run without asking (an elevation grant for its run); otherwise each waits
 // for approval on the phone. autoApply: a PlatOpypus fix is applied once it passes the drift limit; otherwise it waits.
 export function fix(targetIds, { trigger = 'manual', minSeverity = 'low', grantRoot = false, autoApply = false } = {}) {

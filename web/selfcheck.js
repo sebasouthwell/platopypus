@@ -19,7 +19,7 @@ export async function load() {
     const active = d.runs.filter(r => ACTIVE.includes(r.status)); const done = d.runs.filter(r => !ACTIVE.includes(r.status));
     let html = `<div class="card sc-head"><div class="sc-sum">${sc ? SEV.slice(0, 4).map(k => `<span class="sc-pill ${k}"><b>${tot(k)}</b>${SEV_TXT[k].toLowerCase()}</span>`).join('') : '<span class="muted">Not scanned yet.</span>'}</div>
         <div class="sc-meta muted">${d.status.running ? `${icon('refresh')}${esc(d.status.step || 'Scanning')}…` : sc ? `Last scan ${when(sc.at)} (${Math.round(sc.took / 1000)} s, ${sc.trigger})` : ''}${s.enabled && d.next ? ` · next ${when(d.next)}` : ' · schedule off'}</div>
-        <div class="r-actions"><button class="btn pri" data-scan ${d.status.running ? 'disabled' : ''}>${icon('search')}${d.status.running ? 'Scanning…' : 'Scan now'}</button><button class="btn" data-settings>${icon('clock')}Schedule and auto-fix</button></div>
+        <div class="r-actions"><button class="btn pri" data-scan ${d.status.running ? 'disabled' : ''}>${icon('search')}${d.status.running ? 'Scanning…' : 'Scan now'}</button><button class="btn" data-settings>${icon('settings')}Settings</button></div>
         ${sc?.errors?.length ? `<p class="sc-err">${sc.errors.map(esc).join('<br>')}</p>` : ''}</div>`;
     if (active.length) html += `<h2 class="section">Fixing now</h2><div class="sc-runs">${active.map(r => runCard(r, true)).join('')}</div>`;
     if (ts.length) {
@@ -73,8 +73,8 @@ function wire(body, d) {
         // Root without asking is opt-in, per run: unticked, the box agent's root commands wait for approval one by one,
         // and a PlatOpypus fix waits for Apply after you have seen the diff.
         const { panel, close } = C.openDialog(`<h2>${icon('claude')}Fix ${ids.length} target${ids.length === 1 ? '' : 's'}?</h2><p class="muted">${esc(names.join(', '))}. An agent fixes each in turn.</p>
-            ${box ? `<label class="sc-check"><input type="checkbox" id="sc-gr">Let the box agent run root commands without asking me (an elevation grant for this run only; every command is still in the audit log)</label><p class="muted sc-hint">Unticked: each root command waits for your approval on the phone.</p>` : ''}
-            ${plato ? `<label class="sc-check"><input type="checkbox" id="sc-aa">Apply the PlatOpypus fix without asking me once it passes the checks (snapshot, health check and automatic rollback still apply)</label><p class="muted sc-hint">Unticked: it waits for you to read what changed and tap Apply.</p>` : ''}
+            ${box ? `<label class="sc-check"><input type="checkbox" id="sc-gr" ${d.settings.autoRoot ? 'checked' : ''}>Let the box agent run root commands without asking me (an elevation grant for this run only; every command is still in the audit log)</label><p class="muted sc-hint">Unticked: each root command waits for your approval on the phone.</p>` : ''}
+            ${plato ? `<label class="sc-check"><input type="checkbox" id="sc-aa" ${d.settings.autoApply ? 'checked' : ''}>Apply the PlatOpypus fix without asking me once it passes the checks (snapshot, health check and automatic rollback still apply)</label><p class="muted sc-hint">Unticked: it waits for you to read what changed and tap Apply.</p>` : ''}
             <div class="buttons"><button data-close>Cancel</button><button class="primary" data-go>Fix</button></div>`, { size: 'small' });
         $('[data-go]', panel).onclick = async () => {
             const grantRoot = !!$('#sc-gr', panel)?.checked, autoApply = !!$('#sc-aa', panel)?.checked; close();
@@ -101,7 +101,7 @@ function settingsDialog(d) {
     const { $, $$, esc, icon } = C; const s = d.settings; const ts = d.scan?.targets || [];
     const presets = [['0 6 * * *', 'Every day at 06:00'], ['0 */6 * * *', 'Every 6 hours'], ['0 6 * * 1', 'Mondays at 06:00']];
     const sevOpt = v => ['critical', 'high', 'moderate', 'low'].map(k => `<option value="${k}" ${v === k ? 'selected' : ''}>${SEV_TXT[k]} and above</option>`).join('').replace('Critical and above', 'Critical only');
-    const { panel, close } = C.openDialog(`<h2>${icon('clock')}Schedule and auto-fix</h2>
+    const { panel, close } = C.openDialog(`<h2>${icon('settings')}Self-check settings</h2>
         <label class="sc-check"><input type="checkbox" id="sc-en" ${s.enabled ? 'checked' : ''}>Scan on a schedule</label>
         <div class="field"><label for="sc-cron">When (cron, box time)</label><input id="sc-cron" value="${esc(s.cron)}"><div class="sc-presets">${presets.map(([c, l]) => `<button class="chip" data-cron="${c}">${l}</button>`).join('')}</div></div>
         <label class="sc-check"><input type="checkbox" id="sc-al" ${s.alert ? 'checked' : ''}>Alert me about new findings</label>
@@ -109,8 +109,9 @@ function settingsDialog(d) {
         <h3 class="sc-h3">Fix on its own after a scheduled scan</h3><p class="muted">Ticked targets are fixed without asking when a scheduled scan finds something at or above the level below. Same rules as fixing by hand: branches for projects, snapshot and rollback for PlatOpypus, elevate for the box.</p>
         <div class="sc-autolist">${(ts.length ? ts : [{ id: 'plato', name: 'PlatOpypus itself' }, { id: 'box', name: 'The box: tooling and system packages' }]).map(t => `<label class="sc-check"><input type="checkbox" data-auto="${esc(t.id)}" ${s.autoTargets.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')}</div>
         <div class="field"><label for="sc-aus">Fix on its own for</label><select id="sc-aus">${sevOpt(s.autoSeverity)}</select></div>
-        <label class="sc-check"><input type="checkbox" id="sc-ar" ${s.autoRoot ? 'checked' : ''}>Scheduled box fixes may run root commands without asking</label><p class="muted sc-hint">Off: each root command waits for your approval (you get a root-request alert), and one left unanswered for 10 minutes is skipped.</p>
-        <label class="sc-check"><input type="checkbox" id="sc-aa2" ${s.autoApply ? 'checked' : ''}>Scheduled PlatOpypus fixes may be applied without asking</label><p class="muted sc-hint">Off: they wait under "Fixing now" for you to Apply.</p>
+        <h3 class="sc-h3">Root without asking</h3><p class="muted">Fixes to the box and to PlatOpypus itself need root. These choose whether they get it without asking you: scheduled fixes use them as set, and when you press Fix they are where the choices start (you can still change them for that run).</p>
+        <label class="sc-check"><input type="checkbox" id="sc-ar" ${s.autoRoot ? 'checked' : ''}>Box fixes may run root commands without asking (bypass elevate approval)</label><p class="muted sc-hint">Off: each root command waits for your approval on the phone (you get a root-request alert); one left unanswered for 10 minutes is skipped.</p>
+        <label class="sc-check"><input type="checkbox" id="sc-aa2" ${s.autoApply ? 'checked' : ''}>PlatOpypus fixes may be applied without asking (root change to PlatOpypus)</label><p class="muted sc-hint">Off: each waits under "Fixing now" for you to read what changed and tap Apply. Snapshot, health check and rollback apply either way.</p>
         <div class="field"><label for="sc-ag">Agent</label><select id="sc-ag">${[['claude', 'Claude Code'], ['codex', 'Codex CLI'], ['antigravity', 'Antigravity CLI']].map(([k, l]) => `<option value="${k}" ${s.agent === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="buttons"><button data-close>Cancel</button><button class="primary" data-ok>Save</button></div>`);
     $$('[data-cron]', panel).forEach(b => b.onclick = () => { $('#sc-cron', panel).value = b.dataset.cron; });
