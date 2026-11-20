@@ -27,6 +27,8 @@ export async function load() {
         html += ts.map(t => targetCard(t, d)).join('');
         html += `</div>${S.sel.size ? `<div class="sc-fixbar"><span>${S.sel.size} selected</span><button class="btn pri" data-fix>${icon('claude')}Fix selected</button></div>` : ''}`;
     }
+    const res = d.resolved || [];
+    if (res.length) html += `<details class="sc-resolved" ${S.resOpen ? 'open' : ''} data-resd><summary><h2 class="section">Resolved in the last 30 days <span class="muted">(${res.length})</span></h2></summary><div class="sc-finds">${res.map(x => `<div class="sc-find done"><span class="sc-pill ${esc(x.severity)} sm">${SEV_TXT[x.severity] || esc(x.severity)}</span><div class="main"><div class="t">${esc(x.name)}${x.version ? ` <span class="mono">${esc(x.version)}</span>` : ''} <span class="sc-ok-t">resolved</span></div><div class="n">${esc(x.targetName)} · ${esc(when(x.at))} · ${x.by ? `fixed by the self-check run on ${esc(x.by.name)}` : 'resolved outside self-check (an update or a change of your own)'}${x.advisories?.length ? ` · ${esc(x.advisories.join(', '))}` : ''}</div></div></div>`).join('')}</div></details>`;
     html += `<h2 class="section">Self-remediation complete</h2>${done.length ? `<div class="sc-runs">${done.map(r => runCard(r, false)).join('')}</div>` : '<p class="note">No fixes yet. Finished runs land here with their log, what changed and a way back.</p>'}`;
     const dr = d.drift.filter(x => x.state === 'applied');
     if (dr.length) html += `<h2 class="section">Local fixes on PlatOpypus</h2><p class="note">These change PlatOpypus's code on this box only. The next update replaces them; send the patch from each run to the developers so the release includes it.</p>${dr.map(x => `<div class="row"><div class="main"><div class="title">${esc(x.files.join(', '))}</div><div class="sub muted">On ${esc(x.version)} · ${when(x.at)}</div></div><button class="text-btn" data-dev="${x.run}">Patch</button></div>`).join('')}`;
@@ -63,6 +65,7 @@ function runCard(r, live) {
 }
 function wire(body, d) {
     const { $, $$, esc, icon } = C;
+    $('[data-resd]', body)?.addEventListener('toggle', e => { S.resOpen = e.target.open; });
     $('[data-scan]', body)?.addEventListener('click', async () => { try { await C.api('/api/selfcheck/scan', { method: 'POST' }); C.toast('Scanning: this takes a minute or two'); } catch (e) { C.toast(e.message, true); } load(); });
     $('[data-settings]', body)?.addEventListener('click', () => settingsDialog(d));
     $$('[data-sel]', body).forEach(x => x.onchange = () => { x.checked ? S.sel.add(x.dataset.sel) : S.sel.delete(x.dataset.sel); load(); });

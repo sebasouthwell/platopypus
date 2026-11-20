@@ -1080,6 +1080,11 @@ phone's Update button. Mechanism:
   Projects' own copies of agent CLIs (Claude Agent SDK, Claude Code, Codex, Gemini CLI in their lockfiles) are
   version-checked like the box's. State adds `<state>/selfcheck/upstream.json`.
 
+- **2.26.5**: Self-check scans again 15 s after a fix run finishes (once no other run is queued), so what it fixed
+  leaves the list at once. "Resolved in the last 30 days" lists findings that were in one scan and gone from the next,
+  with what resolved them: the fix run that had them, or "outside self-check" (an update, your own change). Targets
+  that failed to scan are not counted. State adds `<state>/selfcheck/resolved.json`.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

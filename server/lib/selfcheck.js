@@ -539,11 +539,12 @@ export async function scan(trigger = 'manual') {
         scanning.step = 'Checking what waits on upstream releases'; await markWaiting(ts);
         const sc = { at: Date.now(), took: Date.now() - scanning.started, trigger, targets: ts, errors, drift: drift().filter(d => d.state === 'applied').length };
         writeJ(f('scan.json'), sc);
+        recordResolved(prev, sc);
         const total = ts.reduce((n, t) => n + t.findings.length, 0);
         log('selfcheck', `scan (${trigger}): ${total} findings across ${ts.length} targets${errors.length ? `, ${errors.length} errors` : ''}`);
         record('selfcheck', 'scan', { actor: trigger, what: `${total} findings: ${ts.reduce((n, t) => n + t.counts.critical, 0)} critical, ${ts.reduce((n, t) => n + t.counts.high, 0)} high` });
         return sc;
-    } finally { scanning = null; }
+    } finally { scanning = null; if (rescanWanted) { rescanWanted = false; rescanSoon(); } }
 }
 export function lastScan() { return readJ(f('scan.json'), null); }
 
@@ -784,10 +785,36 @@ async function runBox(r) {
     else r.status = r.report?.status === 'failed' ? 'failed' : 'done';
     r.finished = Date.now(); saveRun(r); afterRun(r);
 }
+// After a fix run: scan again so what it fixed leaves the list straight away (once the queue is empty; if a scan is
+// running, straight after it).
+let rescanTimer = null, rescanWanted = false;
+function rescanSoon() {
+    clearTimeout(rescanTimer);
+    rescanTimer = setTimeout(() => { if (queue.length || draining) return; if (scanning) { rescanWanted = true; return; } scan('after-fix').catch(e => log('selfcheck', `scan after fix failed: ${e.message}`)); }, 15_000);
+}
+// Findings that were in the previous scan and are not in this one: kept 30 days with what resolved them (the fix run
+// that had them, or "outside self-check": an apt upgrade, someone's own change). Targets missing from either scan, or
+// that failed to scan, are left out (absence there is not a fix).
+function recordResolved(prev, sc) {
+    if (!prev) return;
+    const list = readJ(f('resolved.json'), []).filter(x => Date.now() - x.at < 30 * 86400_000);
+    const done = runs(100).filter(r => (r.finished || 0) >= prev.at && r.status === 'done');
+    for (const pt of prev.targets || []) {
+        const ct = sc.targets.find(t => t.id === pt.id); if (!ct || ct.error || pt.error) continue;
+        const now = new Set(ct.findings.map(x => x.id));
+        for (const x of pt.findings || []) {
+            if (now.has(x.id) || x.severity === 'info' || list.some(y => y.id === x.id && y.at >= prev.at)) continue;
+            const by = done.find(r => r.target === pt.id && (r.findings || []).some(y => y.id === x.id));
+            list.unshift({ id: x.id, target: pt.id, targetName: pt.name, name: x.name, version: x.version || null, fixed: x.fixed || null, severity: x.severity, area: x.area, advisories: (x.advisories || []).slice(0, 4).map(a => a.aliases?.[0] || a.id), at: Date.now(), by: by ? { run: by.id, name: by.name } : null });
+        }
+    }
+    writeJ(f('resolved.json'), list.slice(0, 400));
+}
 function afterRun(r) {
     const txt = `${r.name}: ${r.status === 'done' ? 'fixed' : r.status}${r.report?.summary ? ` — ${String(r.report.summary).slice(0, 160)}` : ''}`;
     try { alerts.notify('selfcheck', `Self-check fix · ${txt}`, { key: `sc-${r.id}`, quietMs: 0 }); } catch { /* alerts off */ }
     log('selfcheck', `run ${r.id} (${r.target}) ${r.status}`);
+    if (['done', 'rolled-back', 'failed'].includes(r.status)) rescanSoon();
 }
 
 // ---------- agent tools (kit) ----------
@@ -830,5 +857,5 @@ export function start(runnerFn) {
 }
 export function overview() {
     const sc = lastScan();
-    return { settings: settings(), next: nextAt(), scan: sc ? { ...sc, targets: sc.targets.map(t => ({ ...t, findings: t.findings })) } : null, status: scanStatus(), runs: runs(), drift: drift() };
+    return { resolved: readJ(f('resolved.json'), []), settings: settings(), next: nextAt(), scan: sc ? { ...sc, targets: sc.targets.map(t => ({ ...t, findings: t.findings })) } : null, status: scanStatus(), runs: runs(), drift: drift() };
 }
