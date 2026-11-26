@@ -498,7 +498,7 @@
     }
 
     // ----- the reference record: what this source's entry in refs.bib is made from, and where each detail came from -----
-    const FROM = { bib: 'from refs.bib', doi: 'from the DOI', pdf: 'from the PDF', page: 'from the web page', video: 'from YouTube', agent: 'by the agent', you: 'by you' };
+    const FROM = { bib: 'from refs.bib', catalog: 'from the paper catalogue', doi: 'from the DOI', pdf: 'from the PDF', page: 'from the web page', video: 'from YouTube', agent: 'by the agent', you: 'by you' };
     const FIELD_LABEL = { title: 'Title', author: 'Authors', year: 'Year', journal: 'Journal', booktitle: 'Book or proceedings', volume: 'Volume', number: 'Issue', pages: 'Pages', publisher: 'Publisher', doi: 'DOI', url: 'Link' };
     function recordHtml(r) {
         if (!r) return '';

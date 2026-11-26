@@ -1106,6 +1106,16 @@ phone's Update button. Mechanism:
   each app's own output (Research's built paper as paper.pdf, Conspiracy's notes, Security Lab's findings), copied
   into `<project>/.platopypus/handoffs/<id>/` (8 files, 20 MB), listed in the summary, in `handoff status` and on the card.
 
+- **2.28.0**: Research fetches real papers. `research papers "<words>"` searches arXiv, OpenAlex, Semantic Scholar and
+  Europe PMC at once (CORE and IEEE Xplore too with keys), merges one paper's records and marks those with an open copy.
+  `research get` takes r-numbers, arXiv ids, DOIs, PMCIDs, paper links or titles, tries every open copy until one is a
+  real PDF (publisher, repository, PubMed Central open data, bioRxiv, arXiv), else the full text, else the abstract,
+  and fills in the record (the publisher's BibTeX when there is a DOI). `research refs` follows what a paper cites and
+  what cites it; `research requests` logs every fetch; `research add` and the app's Add source treat arXiv and DOI links
+  as papers. Optional Vault keys (`research keys`): Semantic Scholar, OpenAlex, CORE, Unpaywall, Springer Nature,
+  Elsevier (with an institution token), Wiley TDM, IEEE. Agents get search_papers, get_paper, paper_refs and
+  paper_requests.
+
 ## Release checklist
 
 1. Bump `server/package.json` version; add the changelog entry here; add a migration if anything on disk changes.

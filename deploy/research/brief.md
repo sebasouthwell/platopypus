@@ -11,6 +11,13 @@ a PDF, with every factual claim tied to a source through a citation. The user re
   You search them and read small excerpts.
 - Start with `research status`. Add sources with `research add <url|file>` (web pages, PDFs, YouTube links). It prints an
   id and a five-line summary; that is usually enough to decide if the source matters.
+- **Papers:** find them with `research papers "<words>"` (arXiv, OpenAlex, Semantic Scholar and Europe PMC at once;
+  `--since 2020`, `--open` for ones with a free copy). Fetch the real paper with `research get r1 r4` (or an arXiv id,
+  a DOI, a link or an exact title): it downloads the PDF, fills in authors, year, venue and DOI, and says when it could
+  only get the abstract. Do not add arXiv or DOI landing pages as web pages, and do not cite a paper you only have
+  the abstract of for anything beyond what the abstract says. Follow the trail with `research refs s03` (what it
+  cites) and `research refs s03 --cited-by` (newer work building on it). `research requests` shows what was fetched;
+  ask the user for papers that had no open copy. `research keys` shows optional services the user can switch on.
 - Find things with `research find "<words>"`. Read only what you need with `research read <id> --at 14:32 --for 2m`
   (video), `--page 3` (PDF) or `--chunk 5`. Excerpts are capped at about 3000 characters.
 - **Videos:** `research transcript <id>`. It uses the video's captions if they exist (free). If not, it asks the user to

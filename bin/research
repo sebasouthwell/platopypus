@@ -3,7 +3,16 @@
 // (captions, Whisper, OCR, PDF text) and give you small, searchable text, so you never paste a whole source into the chat.
 //
 //   research status                         the topic: sources, what was read, what is waiting on the user
-//   research add <url|file> [--note "why"]  fetch a web page, PDF or video into sources/<id>/ (prints id + short summary)
+//   research papers "<words>" [--limit 10] [--since 2020] [--open] [--abstracts] [--from arxiv,openalex,s2,europepmc,core,ieee]
+//                                           search the paper catalogues at once; results are numbered r1, r2…
+//   research get <r3|arXiv id|DOI|PMCID|paper link|"title"> [more…] [--note "why"]
+//                                           fetch the actual paper (PDF, else full text, else the abstract) as a source,
+//                                           with its record filled in; several at once is fine; never fetched twice
+//   research refs <id|r3|DOI> [--cited-by] [--limit 20]   what a paper cites (or what cites it), numbered like papers
+//   research requests                       every get: what came of it and where the copy came from
+//   research keys                           which optional paper-service keys are set (Vault) and what each adds
+//   research add <url|file> [--note "why"]  fetch a web page, PDF or video into sources/<id>/ (prints id + short summary);
+//                                           a paper link or id (arXiv, DOI…) is fetched like research get
 //   research transcript <id>                captions if the video has them; otherwise asks the user to allow the audio
 //                                           download, then Whisper (--engine local|openai, --model small)
 //   research frames <id> [--every 30]       frames from a video, read with OCR first (asks the user once)
@@ -24,6 +33,14 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const R = await import(path.join(here, '..', 'server', 'lib', 'researchtools.js'));
+const P = await import(path.join(here, '..', 'server', 'lib', 'papers.js'));
+const getOne = async (t, input, note) => {
+    const r = await P.get(t, input, { note });
+    if (r.status === 'exists') return `${r.id}  already in this topic: "${r.title}"`;
+    if (r.status === 'failed') return `NOT FOUND  ${input}${r.paper?.title ? ` ("${r.paper.title}")` : ''}: no open copy, full text or abstract.${r.tried.length ? `\n  tried: ${r.tried.join('; ')}` : ''}\n  Ask the user for the PDF: research ask "Can you upload <title>?" --later`;
+    const what = r.status === 'added' ? `the paper, ${r.pages} pages` : r.status === 'fulltext' ? 'the full text (no PDF)' : 'THE ABSTRACT ONLY (no open copy: ask the user for the PDF)';
+    return `${r.summary}\n  got ${what}, from ${r.from}`;
+};
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -49,8 +66,40 @@ try {
             if (pend.length) console.log(`waiting on the user: ${pend.map(a => `${a.id} (${a.title})`).join('; ')}`);
             break;
         }
+        case 'papers': {
+            if (!pos[0]) die('usage: research papers "<words>" [--limit 10] [--since 2020] [--open] [--abstracts] [--from arxiv,openalex,s2,europepmc,core,ieee]');
+            const r = await P.search(topicDir(), pos.join(' '), { limit: Number(flags.limit || 10), year: flags.since && flags.since !== true ? Number(flags.since) : null, oa: !!flags.open, ...(typeof flags.from === 'string' ? { engines: flags.from.split(',').map(s => s.trim()) } : {}) });
+            console.log(r.items.length ? P.printResults(r.items, { abstracts: !!flags.abstracts }) : 'No papers found. Try fewer or different words.');
+            console.log(`\n(searched ${r.used.join(', ')}${r.failed.length ? `; not answering: ${r.failed.join(', ')}` : ''})\n[PDF] = an open copy was found. Fetch: research get r1 r3 …   Trail: research refs r1`);
+            break;
+        }
+        case 'get': {
+            if (!pos.length) die('usage: research get <r3|arXiv id|DOI|PMCID|paper link|"title"> [more…] [--note "why"]');
+            const t = topicDir(); let bad = 0;
+            for (const input of pos) { try { const out = await getOne(t, input, typeof flags.note === 'string' ? flags.note : ''); if (out.startsWith('NOT FOUND')) bad++; console.log(out + '\n'); } catch (e) { bad++; console.log(`FAILED  ${input}: ${e.message}\n`); } }
+            process.exit(bad === pos.length ? 1 : 0);
+        }
+        case 'refs': {
+            if (!pos[0]) die('usage: research refs <source id|r3|DOI|arXiv id> [--cited-by] [--limit 20]');
+            const r = await P.related(topicDir(), pos[0], { citedBy: !!flags['cited-by'], limit: Number(flags.limit || 20) });
+            console.log(`${flags['cited-by'] ? 'Papers citing' : 'Papers cited by'} "${r.of}" (${r.items.length}${flags['cited-by'] ? ', most cited first' : ', most cited first'}):\n`);
+            console.log(P.printResults(r.items, { abstracts: !!flags.abstracts }) || '(none known)');
+            console.log('\nFetch: research get r2 r5 …');
+            break;
+        }
+        case 'requests': {
+            const all = P.requests(topicDir()); if (!all.length) { console.log('No papers requested yet.'); break; }
+            for (const q of all.slice(-Number(flags.limit || 40))) console.log(`${new Date(q.at).toISOString().slice(0, 16).replace('T', ' ')}  ${String(q.status).padEnd(8)} ${q.id || '   '}  ${String(q.title || q.input).slice(0, 70)}${q.from ? `  [${q.from.split(':')[0]}]` : ''}`);
+            break;
+        }
+        case 'keys': {
+            for (const k of await P.keyStatus()) console.log(`${k.set ? 'set    ' : 'not set'} ${k.name.padEnd(25)} ${k.what}: ${k.adds}\n${' '.repeat(34)}${k.set ? '' : `get it: ${k.get}`}`);
+            console.log('\nAdd keys in PlatOpypus, Vault, general scope, under these names. None is needed: without them, arXiv, OpenAlex, Semantic Scholar and Europe PMC still work.');
+            break;
+        }
         case 'add': {
             if (!pos[0]) die('usage: research add <url|file> [--note "why this source"]');
+            if (P.isPaper(pos[0])) { console.log(await getOne(topicDir(), pos[0], flags.note || '')); break; }
             const r = await R.addSource(topicDir(), pos[0], { note: flags.note || '' });
             console.log(r.summary);
             if (r.meta.kind === 'video') console.log(`\nNext: research transcript ${r.meta.id}`);

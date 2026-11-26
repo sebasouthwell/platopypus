@@ -72,7 +72,10 @@ export function citeSource(slug, id, opts = {}) {
 }
 export async function addSource(slug, url, note) {
     const dir = topicPath(slug); const u = String(url || '').trim();
-    if (!/^https?:\/\//i.test(u)) throw httpError(400, 'Give a web or YouTube address.');
+    const P = await import('./papers.js');
+    // A paper (an arXiv or DOI link, or an id): fetch the paper itself, not its landing page.
+    if (P.isPaper(u)) { const r = await P.get(dir, u, { note: String(note || '').slice(0, 200) }); if (r.status === 'failed') throw httpError(404, `No open copy of that paper was found${r.paper?.title ? ` ("${r.paper.title}")` : ''}. Upload the PDF instead.`); const meta = T.sourceMeta(dir, r.id); return { meta, summary: r.summary || '', paper: { status: r.status, from: r.from } }; }
+    if (!/^https?:\/\//i.test(u)) throw httpError(400, 'Give a web or YouTube address, an arXiv id or a DOI.');
     return T.addSource(dir, u, { note: String(note || '').slice(0, 200) });
 }
 // A page of a source PDF as an image (made when first asked for, then kept).

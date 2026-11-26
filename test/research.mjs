@@ -23,6 +23,18 @@ check('a topic title needs some length', await R.create({ title: 'x' }).then(() 
 check('a bad slug is refused', (() => { try { R.topicPath('../etc'); return false; } catch (e) { return e.status === 400; } })());
 check('a folder inside the topic maps back to it', R.topicOf(path.join(dir, 'paper', 'sections')) === slug && R.topicOf('/Projects/x') === null);
 
+// ---- papers: what a link or id is (no network) ----
+const P = await import('/opt/platopypus/server/lib/papers.js');
+const id = x => JSON.stringify(P.identify(x));
+check('arXiv ids and links of every shape are one paper', ['2401.01234', 'arXiv:2401.01234v3', 'https://arxiv.org/abs/2401.01234v2', 'https://arxiv.org/pdf/2401.01234', 'https://arxiv.org/html/2401.01234v1', '10.48550/arXiv.2401.01234'].every(x => P.identify(x).arxiv === '2401.01234'), id('https://arxiv.org/pdf/2401.01234'));
+check('old-style arXiv ids are understood', P.identify('hep-th/9901001').arxiv === 'hep-th/9901001');
+check('DOIs and doi.org links give the DOI', P.identify('https://doi.org/10.1038/S41586-021-03819-2').doi === '10.1038/s41586-021-03819-2' && P.identify('doi:10.1145/3442188.3445922').doi === '10.1145/3442188.3445922');
+check('a publisher link with a DOI in it gives the DOI', P.identify('https://dl.acm.org/doi/pdf/10.1145/3442188.3445922').doi === '10.1145/3442188.3445922');
+check('PMC, OpenReview and ACL Anthology links are papers', P.identify('PMC8371605').pmcid === 'PMC8371605' && /openreview\.net\/pdf\?id=abc/.test(P.identify('https://openreview.net/forum?id=abc').pdf) && P.identify('https://aclanthology.org/2024.naacl-industry.19/').pdf === 'https://aclanthology.org/2024.naacl-industry.19.pdf');
+check('research add sends papers to get, and plain pages to add', P.isPaper('https://arxiv.org/abs/1706.03762') && P.isPaper('10.1038/s41586-021-03819-2') && !P.isPaper('https://example.com/blog/post') && !P.isPaper('https://example.com/report.pdf'));
+check('r-numbers and titles are recognised', P.identify('r3').ref === 'r3' && P.identify('Attention Is All You Need').title === 'Attention Is All You Need');
+check('every optional key says what it adds and where to get it', Object.values(P.KEYS).every(k => k.what && k.adds && k.get));
+
 // ---- captions ----
 const VTT = `WEBVTT
 
